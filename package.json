@@ -1,0 +1,73 @@
+{
+  "name": "bronom",
+  "version": "1.0.0",
+  "description": "A persistent, visible Electron browser controlled through MCP",
+  "desktopName": "Bronom",
+  "author": "Netroforge",
+  "homepage": "https://github.com/Netroforge/bronom",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Netroforge/bronom.git"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "type": "module",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "start": "electron-vite preview",
+    "build": "npm run typecheck && electron-vite build",
+    "build:website": "vite build --config vite.website.config.ts",
+    "preview:website": "vite preview --config vite.website.config.ts",
+    "postinstall": "node node_modules/electron/install.js && electron-builder install-app-deps",
+    "build:unpack": "npm run build && electron-builder --dir --config.electronDist=node_modules/electron/dist",
+    "build:linux": "npm run build && electron-builder --linux --publish never",
+    "build:mac": "npm run build && electron-builder --mac --publish never",
+    "build:win": "npm run build && electron-builder --win --publish never",
+    "publish:linux": "npm run build && electron-builder --linux --publish always",
+    "publish:mac": "npm run build && electron-builder --mac --publish always",
+    "publish:win": "npm run build && electron-builder --win --publish always",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.website.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "npm run build && playwright test",
+    "test:integration:run": "playwright test",
+    "test:integration:headless": "npm run build && npm run test:integration:headless:run",
+    "test:integration:headless:run": "xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' npm run test:integration:run",
+    "test:integration:dialogs": "node scripts/dialog-integration.ts",
+    "test:integration:dialogs:headless": "xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' npm run test:integration:dialogs",
+    "test:integration:docker": "docker compose --file compose.test.ci.yaml run --build --rm integration",
+    "test:package:smoke": "node scripts/packaged-mcp-smoke.ts",
+    "smoke:mcp": "node scripts/mcp-smoke.ts",
+    "smoke:profile:write": "node scripts/profile-smoke.ts write",
+    "smoke:profile:read": "node scripts/profile-smoke.ts read",
+    "smoke:profile:cleanup": "node scripts/profile-smoke.ts cleanup"
+  },
+  "dependencies": {
+    "@foleyjs/core": "^2.7.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "axe-core": "4.12.1",
+    "electron-updater": "^6.8.9",
+    "express": "^5.2.1",
+    "vue": "^3.5.41",
+    "web-vitals": "6.1.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@iconify-json/material-symbols": "^1.2.88",
+    "@playwright/test": "^1.62.1",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.2.0",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "electron": "42.9.1",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "typescript": "^6.0.3",
+    "unplugin-icons": "^23.0.1",
+    "vite": "^7.3.6",
+    "vitest": "^4.1.10",
+    "vue-tsc": "^3.3.9"
+  }
+}

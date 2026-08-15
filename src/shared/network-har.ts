@@ -1,0 +1,234 @@
+import type {
+  BrowserNetworkHar,
+  BrowserNetworkHarEntry,
+  BrowserNetworkHarHeader,
+  BrowserNetworkHarOptions,
+  BrowserNetworkRequest,
+  BrowserNetworkRequestDetails
+} from './types.js'
+import {
+  networkResponseSourceLabel,
+  serviceWorkerResponseSourceLabel
+} from './network-response-source.js'
+
+export const DEFAULT_NETWORK_HAR_REQUESTS = 100
+export const MAX_NETWORK_HAR_REQUESTS = 200
+export const DEFAULT_NETWORK_HAR_BODY_CHARS = 5_000
+export const MAX_NETWORK_HAR_BODY_CHARS = 20_000
+
+export interface NormalizedNetworkHarOptions {
+  query: string
+  resourceType?: string
+  errorsOnly: boolean
+  includeBodies: boolean
+  maxRequests: number
+  maxBodyChars: number
+}
+
+export function normalizeNetworkHarOptions(options: BrowserNetworkHarOptions = {}): NormalizedNetworkHarOptions {
+  const query = options.query?.trim().slice(0, 500) ?? ''
+  const resourceType = options.resourceType?.trim().toLowerCase().slice(0, 64) || undefined
+  const maxRequests = Math.min(Math.max(Math.round(options.maxRequests ?? DEFAULT_NETWORK_HAR_REQUESTS), 1), MAX_NETWORK_HAR_REQUESTS)
+  const maxBodyChars = Math.min(Math.max(Math.round(options.maxBodyChars ?? DEFAULT_NETWORK_HAR_BODY_CHARS), 1_000), MAX_NETWORK_HAR_BODY_CHARS)
+  return {
+    query,
+    ...(resourceType ? { resourceType } : {}),
+    errorsOnly: options.errorsOnly === true,
+    includeBodies: options.includeBodies === true,
+    maxRequests,
+    maxBodyChars
+  }
+}
+
+export function isNetworkRequestFailure(request: BrowserNetworkRequest): boolean {
+  return Boolean(request.error) || (request.status !== undefined && request.status >= 400)
+}
+
+export function networkResourceCategory(resourceType: string): string {
+  const normalized = resourceType.toLowerCase()
+  if (normalized === 'xhr' || normalized === 'fetch') return 'fetch/xhr'
+  if (normalized === 'document') return 'document'
+  if (normalized === 'script') return 'script'
+  if (normalized === 'stylesheet') return 'stylesheet'
+  if (normalized === 'image') return 'image'
+  if (normalized === 'websocket') return 'websocket'
+  return 'other'
+}
+
+export function filterNetworkRequests(
+  requests: BrowserNetworkRequest[],
+  options: NormalizedNetworkHarOptions
+): BrowserNetworkRequest[] {
+  const query = options.query.toLowerCase()
+  return requests.filter((request) => {
+    if (options.errorsOnly && !isNetworkRequestFailure(request)) return false
+    if (options.resourceType
+      && request.resourceType.toLowerCase() !== options.resourceType
+      && networkResourceCategory(request.resourceType) !== options.resourceType) return false
+    if (!query) return true
+    return [
+      request.method,
+      request.url,
+      request.resourceType,
+      request.status,
+      request.error,
+      request.responseSource,
+      request.responseSource ? networkResponseSourceLabel(request.responseSource) : undefined,
+      request.serviceWorkerResponseSource,
+      request.serviceWorkerResponseSource
+        ? serviceWorkerResponseSourceLabel(request.serviceWorkerResponseSource)
+        : undefined,
+      request.cacheStorageCacheName
+    ]
+      .some((value) => String(value ?? '').toLowerCase().includes(query))
+  })
+}
+
+function headerEntries(headers: Record<string, string | string[]>): BrowserNetworkHarHeader[] {
+  return Object.entries(headers).flatMap(([name, value]) => {
+    const values = Array.isArray(value) ? value : [value]
+    return values
+      .filter((item) => item !== '[REDACTED]')
+      .map((item) => ({ name, value: item }))
+  })
+}
+
+function headerValue(headers: Record<string, string | string[]>, target: string): string {
+  const match = Object.entries(headers).find(([name]) => name.toLowerCase() === target)
+  if (!match) return ''
+  return Array.isArray(match[1]) ? match[1][0] ?? '' : match[1]
+}
+
+function queryEntries(input: string): BrowserNetworkHarHeader[] {
+  try {
+    const url = new URL(input)
+    return [...url.searchParams.entries()].map(([name, value]) => ({ name, value }))
+  } catch {
+    return []
+  }
+}
+
+function requestDuration(request: BrowserNetworkRequest): number {
+  if (!request.completedAt) return 0
+  const duration = Date.parse(request.completedAt) - Date.parse(request.startedAt)
+  return Number.isFinite(duration) ? Math.max(0, duration) : 0
+}
+
+function harEntry(details: BrowserNetworkRequestDetails, includeBodies: boolean): BrowserNetworkHarEntry {
+  const duration = details.timing?.totalMs ?? requestDuration(details)
+  const requestText = includeBodies ? details.request.body?.text : undefined
+  const responseText = includeBodies && details.response.body.available ? details.response.body.text : undefined
+  const requestMimeType = headerValue(details.request.headers, 'content-type')
+  const responseMimeType = details.response.mimeType || headerValue(details.response.headers, 'content-type')
+  const timing = details.timing
+  const blocked = timing?.queuedAndConnectingMs !== undefined
+    ? Math.max(0, timing.queuedAndConnectingMs - (timing.dnsMs ?? 0) - (timing.connectionMs ?? 0))
+    : undefined
+  const receive = timing
+    ? (timing.responseHeadersMs ?? 0) + (timing.contentDownloadMs ?? 0)
+    : 0
+  return {
+    startedDateTime: details.startedAt,
+    time: duration,
+    request: {
+      method: details.method,
+      url: details.url,
+      httpVersion: details.response.protocol ?? '',
+      headers: headerEntries(details.request.headers),
+      queryString: queryEntries(details.url),
+      cookies: [],
+      headersSize: -1,
+      bodySize: details.request.body?.originalChars ?? -1,
+      ...(requestText !== undefined ? { postData: { mimeType: requestMimeType, text: requestText } } : {})
+    },
+    response: {
+      status: details.status ?? 0,
+      statusText: details.error ?? '',
+      httpVersion: details.response.protocol ?? '',
+      headers: headerEntries(details.response.headers),
+      cookies: [],
+      content: {
+        size: details.responseSizeBytes ?? details.response.body.originalChars ?? -1,
+        mimeType: responseMimeType,
+        ...(responseText !== undefined ? { text: responseText } : {})
+      },
+      redirectURL: headerValue(details.response.headers, 'location'),
+      headersSize: -1,
+      bodySize: details.responseSizeBytes ?? -1
+    },
+    cache: {},
+    timings: {
+      ...(blocked !== undefined ? { blocked } : {}),
+      ...(timing?.dnsMs !== undefined ? { dns: timing.dnsMs } : {}),
+      ...(timing?.connectionMs !== undefined ? { connect: timing.connectionMs } : {}),
+      ...(timing?.tlsMs !== undefined ? { ssl: timing.tlsMs } : {}),
+      send: timing?.requestSentMs ?? 0,
+      wait: timing?.waitingForResponseMs ?? duration,
+      receive
+    },
+    pageref: 'page_0',
+    _bronom: {
+      id: details.id,
+      resourceType: details.resourceType,
+      detailsAvailable: details.detailsAvailable,
+      ...(details.fromCache !== undefined ? { fromCache: details.fromCache } : {}),
+      ...(details.responseSource ? { responseSource: details.responseSource } : {}),
+      ...(details.serviceWorkerResponseSource
+        ? { serviceWorkerResponseSource: details.serviceWorkerResponseSource }
+        : {}),
+      ...(details.cacheStorageCacheName ? { cacheStorageCacheName: details.cacheStorageCacheName } : {}),
+      ...(details.error ? { error: details.error } : {}),
+      ...(details.initiator ? { initiator: details.initiator } : {}),
+      ...(details.response.serverTiming?.length ? { serverTiming: details.response.serverTiming } : {}),
+      ...(details.webSocket ? {
+        webSocket: {
+          open: details.webSocket.open,
+          messageCount: details.webSocket.messages.length,
+          droppedMessages: details.webSocket.droppedMessages
+        }
+      } : {})
+    }
+  }
+}
+
+export function buildSanitizedNetworkHar(input: {
+  appVersion: string
+  generatedAt?: string
+  tabId: string
+  title: string
+  url: string
+  availableRequestCount: number
+  details: BrowserNetworkRequestDetails[]
+  includeBodies: boolean
+  truncated: boolean
+}): BrowserNetworkHar {
+  const generatedAt = input.generatedAt ?? new Date().toISOString()
+  const firstStartedAt = input.details[0]?.startedAt ?? generatedAt
+  return {
+    log: {
+      version: '1.2',
+      creator: { name: 'Bronom', version: input.appVersion },
+      comment: 'Sanitized by Bronom: security headers, credential fields, URL fragments, and cookie collections are omitted or redacted.',
+      pages: [{ startedDateTime: firstStartedAt, id: 'page_0', title: input.title, pageTimings: {} }],
+      entries: input.details.map((details) => harEntry(details, input.includeBodies))
+    },
+    _bronom: {
+      generatedAt,
+      tabId: input.tabId,
+      url: input.url,
+      sanitized: true,
+      includesBodies: input.includeBodies,
+      requestCount: input.details.length,
+      availableRequestCount: input.availableRequestCount,
+      truncated: input.truncated,
+      caveats: [
+        'Review this export before sharing it outside your project.',
+        'Sensitive header values and structured credential fields are removed or replaced with [REDACTED].',
+        input.includeBodies
+          ? 'Text bodies are bounded and sanitized; binary and multipart bodies are omitted.'
+          : 'Request and response bodies are omitted. Inspect one request explicitly when body context is needed.',
+        'Initiator source locations and function names are bounded and sanitized but remain page-authored; review them before sharing.'
+      ]
+    }
+  }
+}

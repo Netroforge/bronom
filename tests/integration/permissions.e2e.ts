@@ -1,0 +1,45 @@
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { closeBronom, expect, launchBronom, test } from './fixtures.js'
+
+test('manages and persists per-website permission decisions', async ({
+  appWindow,
+  electronApp,
+  mcpPort,
+  profileDirectory
+}) => {
+  await appWindow.getByRole('button', { name: 'Settings' }).click()
+  await appWindow.getByRole('button', { name: 'Site permissions' }).click()
+  await expect(appWindow.getByText('No saved decisions')).toBeVisible()
+
+  await appWindow.evaluate(
+    "window.bronomPermissions.set('https://example.com/path', 'geolocation', 'allow')"
+  )
+  const locationPermission = appWindow.getByRole('combobox', {
+    name: 'Location permission for https://example.com'
+  })
+  await expect(locationPermission).toHaveValue('allow')
+  await locationPermission.selectOption('deny')
+
+  const permissionsPath = join(profileDirectory, 'site-permissions.json')
+  await expect
+    .poll(async () => JSON.parse(await readFile(permissionsPath, 'utf8')).permissions[0]?.decision)
+    .toBe('deny')
+  await closeBronom(electronApp)
+
+  const restarted = await launchBronom(profileDirectory, mcpPort + 1)
+  try {
+    await restarted.window.getByRole('button', { name: 'Settings' }).click()
+    await restarted.window.getByRole('button', { name: 'Site permissions' }).click()
+    const restoredPermission = restarted.window.getByRole('combobox', {
+      name: 'Location permission for https://example.com'
+    })
+    await expect(restoredPermission).toHaveValue('deny')
+    await restarted.window.getByRole('button', {
+      name: 'Forget Location permission for https://example.com'
+    }).click()
+    await expect(restarted.window.getByText('No saved decisions')).toBeVisible()
+  } finally {
+    await closeBronom(restarted.app)
+  }
+})

@@ -1,0 +1,11 @@
+node_modules/
+out/
+dist/
+docs/
+playwright-report/
+test-results/
+*.log
+*.tsbuildinfo
+.DS_Store
+.idea/
+.vscode/

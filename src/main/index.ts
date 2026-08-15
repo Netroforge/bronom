@@ -1,0 +1,2607 @@
+import { mkdir, readFile } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { pathToFileURL } from 'node:url'
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  Menu,
+  nativeImage,
+  nativeTheme,
+  protocol,
+  safeStorage,
+  screen,
+  session,
+  shell,
+  Tray,
+  type MessageBoxOptions,
+  type NativeImage,
+  type Session
+} from 'electron'
+import electronUpdater from 'electron-updater'
+import { updateErrorMessage, type UpdateOperation } from '../shared/update-errors.js'
+import { replacedPackageVersion } from '../shared/update-runtime.js'
+import { sanitizeConsoleMessages } from '../shared/debug-report.js'
+import trayIconPath from '../../build/icons/24x24.png?asset'
+import trayAttentionIconPath from '../../build/icons/tray-attention.png?asset'
+import { BrowserTabsManager } from './browser/tabs-manager.js'
+import type { BrowserCredentialCandidate } from './browser/tabs-manager.js'
+import { BookmarkStore } from './bookmark-store.js'
+import { HistoryStore } from './history-store.js'
+import { CredentialStore } from './credential-store.js'
+import { buildBrowsingDataWebsiteInventory } from './browsing-data-websites.js'
+import { renderHomePage } from './home-page.js'
+import {
+  BROWSER_TOOL_CATALOG,
+  McpHttpServer,
+  type McpDashboardState,
+  type SiteDataType,
+  type UserAttentionInput,
+  type UserAttentionRequest
+} from './mcp/server.js'
+import { loadMcpToken, type McpTokenConfiguration } from './mcp-token-store.js'
+import { DEFAULT_SETTINGS, isThemeName, SettingsStore } from './settings-store.js'
+import { isMemorySaverTimeoutMinutes } from '../shared/memory-saver.js'
+import { isInterfaceScale, scaleShellMetric } from '../shared/interface-scale.js'
+import {
+  isSitePermissionDecision,
+  normalizeSitePermissionOrigin,
+  SitePermissionStore
+} from './site-permission-store.js'
+import { restoreWindowBounds, WindowStateStore } from './window-state.js'
+import {
+  linuxUpdateExecutable,
+  scheduleLinuxUpdateRelaunch,
+  updaterShouldAutoRunAfterInstall
+} from './linux-update-relaunch.js'
+import {
+  DETACHABLE_PANEL_IDS,
+  PANEL_DOCKS,
+  BROWSER_NETWORK_ABORT_REASONS,
+  isAttentionSoundCue,
+  type AppSettings,
+  type AppUpdateState,
+  type BrowserAccessibilityAuditOptions,
+  type BrowserElementInspectionOptions,
+  type BrowserPageCaptureOptions,
+  type BrowserPerformanceOptions,
+  type BrowserDesignOverviewReport,
+  type BrowserPageMetadataReport,
+  type BrowserSecurityReport,
+  type BrowserCodeCoverageOptions,
+  type BrowserMemoryOptions,
+  type BrowserDebugReportOptions,
+  type BrowserReproAction,
+  type BrowserDomChangesAction,
+  type BrowserVisualCompareOptions,
+  type BrowserNetworkHarOptions,
+  type BrowserNetworkSearchOptions,
+  type BrowserNetworkRouteInput,
+  type BrowserBookmark,
+  type BrowserHistoryEntry,
+  type BrowserTabGroupUpdate,
+  type BrowserEnvironmentSettings,
+  type BrowserViewportEmulation,
+  type BrowsingDataClearOptions,
+  type BrowsingDataSiteSummary,
+  type BrowsingDataSummary,
+  type BrowsingDataWebsiteSummary,
+  type CredentialStorageStatus,
+  type CredentialSummary,
+  type DetachablePanelId,
+  type HelpMenuAction,
+  type McpControlState,
+  type McpServerStatus,
+  type PanelDock,
+  type SitePermissionDecision,
+  type ThemeName
+} from '../shared/types.js'
+import { isBrowserTabGroupColor } from '../shared/tab-groups.js'
+import { isBrowserViewportEmulation } from '../shared/viewport-presets.js'
+import { isBrowserEnvironmentSettings } from '../shared/browser-environment.js'
+import { DEFAULT_MCP_PORT, isValidMcpPort } from '../shared/mcp-port.js'
+import { isSearchEngineName } from '../shared/search-engine.js'
+
+const MCP_HOST = process.env.BRONOM_MCP_HOST || '127.0.0.1'
+const MCP_AUTH_DISABLED = process.env.BRONOM_DISABLE_MCP_AUTH === '1'
+const PARTITION = 'persist:bronom'
+const { autoUpdater } = electronUpdater
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'bronom',
+    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true }
+  }
+])
+
+if (process.env.BRONOM_USER_DATA_DIR) {
+  app.setPath('userData', process.env.BRONOM_USER_DATA_DIR)
+} else if (!app.isPackaged) {
+  app.setPath('userData', join(app.getPath('appData'), 'bronom-dev'))
+}
+
+let mainWindow: BrowserWindow | null = null
+let panelWindow: BrowserWindow | null = null
+let panelWindowUrl: string | null = null
+let panelWindowRedocking = false
+let tabsManager: BrowserTabsManager | null = null
+let mcpServer: McpHttpServer | null = null
+let mcpPort = DEFAULT_MCP_PORT
+let mcpUrl = `http://${MCP_HOST}:${mcpPort}/mcp`
+let mcpPaused = false
+let mcpRuntimeStatus: Exclude<McpServerStatus, 'paused'> = 'starting'
+let mcpStartupError: string | undefined
+let tray: Tray | null = null
+let quitting = false
+let windowStateStore: WindowStateStore | null = null
+let windowStateTimer: NodeJS.Timeout | null = null
+let lastWindowState: import('./window-state.js').SavedWindowState | null = null
+let panelWindowStateStore: WindowStateStore | null = null
+let panelWindowStateTimer: NodeJS.Timeout | null = null
+let lastPanelWindowState: import('./window-state.js').SavedWindowState | null = null
+let persistentSession: Session | null = null
+let settingsStore: SettingsStore | null = null
+let sitePermissionStore: SitePermissionStore | null = null
+let credentialStore: CredentialStore | null = null
+let bookmarkStore: BookmarkStore | null = null
+let historyStore: HistoryStore | null = null
+let credentialStorageStatus: CredentialStorageStatus = { available: false, reason: 'Secure storage is initializing.' }
+let settings: AppSettings = { ...DEFAULT_SETTINGS }
+let updateState: AppUpdateState = { status: 'idle', currentVersion: app.getVersion() }
+let updaterConfigured = false
+let updateCheckInProgress = false
+let updateInstallationInProgress = false
+let updateOperation: UpdateOperation | null = null
+let runtimeShutdown: Promise<void> | null = null
+let shutdownExitScheduled = false
+let mcpTokenConfiguration: McpTokenConfiguration | null = null
+let userAttention: UserAttentionRequest | null = null
+let attentionPulseTimer: NodeJS.Timeout | null = null
+let attentionPulseOn = false
+let trayIcon: NativeImage | null = null
+let trayAttentionIcon: NativeImage | null = null
+// Keep the current clipboard image alive while Bronom owns the X11 clipboard.
+// This is harmless on Windows/macOS and avoids relying on a temporary NativeImage
+// wrapper being retained by the Linux clipboard backend.
+let lastScreenshotClipboardImage: NativeImage | null = null
+let lastCopiedText = ''
+
+async function copyTextToClipboard(text: string): Promise<void> {
+  lastCopiedText = text
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    clipboard.clear()
+    clipboard.writeText(lastCopiedText)
+    await new Promise<void>((resolve) => setTimeout(resolve, 30 * (attempt + 1)))
+    if (clipboard.readText() === lastCopiedText) return
+  }
+  throw new Error('The selection was prepared, but the system clipboard did not accept the text')
+}
+
+async function copyPngToClipboard(data: Buffer): Promise<{ width: number; height: number }> {
+  const image = nativeImage.createFromBuffer(data)
+  if (image.isEmpty()) throw new Error('Could not create the selected screenshot')
+  const expectedSize = image.getSize()
+  lastScreenshotClipboardImage = image
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    // Do not let a previous image with the same dimensions masquerade as a
+    // successful write when the platform clipboard silently rejects this one.
+    clipboard.clear()
+    clipboard.writeImage(image)
+    await new Promise<void>((resolve) => setTimeout(resolve, 40 * (attempt + 1)))
+    const copied = clipboard.readImage()
+    const copiedSize = copied.getSize()
+    if (
+      !copied.isEmpty()
+      && copied.toPNG().byteLength > 0
+      && copiedSize.width === expectedSize.width
+      && copiedSize.height === expectedSize.height
+    ) {
+      return copiedSize
+    }
+  }
+
+  throw new Error('The screenshot was captured, but the system clipboard did not accept the image')
+}
+
+function defaultDownloadDirectory(): string {
+  return resolve(process.env.BRONOM_DOWNLOAD_DIR || app.getPath('downloads'))
+}
+
+function effectiveDownloadDirectory(value: AppSettings = settings): string {
+  return resolve(value.downloadDirectory || defaultDownloadDirectory())
+}
+
+async function applyDownloadSettings(next: AppSettings): Promise<AppSettings> {
+  const directory = effectiveDownloadDirectory(next)
+  await mkdir(directory, { recursive: true })
+  await settingsStore!.save(next)
+  settings = next
+  persistentSession?.setDownloadPath(directory)
+  tabsManager?.setDownloadPreferences(directory, next.askWhereToSaveDownloads)
+  publishSettings()
+  return { ...settings }
+}
+const activeMcpActivities = new Set<string>()
+let browsingDataClearInProgress = false
+
+function isLoopbackHost(host: string): boolean {
+  return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]'
+}
+
+if (!isLoopbackHost(MCP_HOST)) {
+  throw new Error('BRONOM_MCP_HOST must be a loopback host. Use an authenticated TLS proxy for remote access.')
+}
+
+const THEME_BACKGROUND: Record<Exclude<ThemeName, 'system'>, string> = {
+  light: '#f7f7fb',
+  dark: '#171821',
+  cyberpunk: '#10071c'
+}
+
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) app.quit()
+
+function showWindow(): void {
+  if (!mainWindow) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+  if (panelWindow && !panelWindow.isDestroyed() && !panelWindow.isVisible()) panelWindow.show()
+}
+
+function sendToShellWindows(channel: string, ...args: unknown[]): void {
+  for (const window of [mainWindow, panelWindow]) {
+    if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) {
+      window.webContents.send(channel, ...args)
+    }
+  }
+}
+
+function sendToPanelWindow(channel: string, ...args: unknown[]): void {
+  if (panelWindow && !panelWindow.isDestroyed() && !panelWindow.webContents.isDestroyed()) {
+    panelWindow.webContents.send(channel, ...args)
+  }
+}
+
+function publishSettings(): void {
+  sendToShellWindows('settings:changed', settings)
+}
+
+function publishUpdateState(next: Partial<AppUpdateState>): AppUpdateState {
+  updateState = { ...updateState, ...next, currentVersion: app.getVersion() }
+  sendToShellWindows('updates:changed', updateState)
+  return { ...updateState }
+}
+
+function publishCredentials(): void {
+  sendToShellWindows('credentials:changed', credentialStore?.list() ?? [])
+}
+
+function publishBookmarks(): BrowserBookmark[] {
+  const bookmarks = bookmarkStore?.list() ?? []
+  sendToShellWindows('bookmarks:changed', bookmarks)
+  return bookmarks
+}
+
+function publishVisitHistory(): BrowserHistoryEntry[] {
+  const entries = historyStore?.list() ?? []
+  sendToShellWindows('visit-history:changed', entries)
+  return entries
+}
+
+function currentMcpControlState(): McpControlState {
+  return {
+    status: mcpRuntimeStatus === 'ready' && mcpPaused ? 'paused' : mcpRuntimeStatus,
+    paused: mcpPaused,
+    ...(mcpStartupError ? { error: mcpStartupError } : {})
+  }
+}
+
+function publishMcpControlState(): McpControlState {
+  const state = currentMcpControlState()
+  sendToShellWindows('mcp:changed', state)
+  void tabsManager?.reloadHome()
+  return state
+}
+
+function setMcpPaused(paused: boolean): McpControlState {
+  mcpPaused = paused
+  mcpServer?.setPaused(paused)
+  return publishMcpControlState()
+}
+
+async function currentBrowsingDataSummary(): Promise<BrowsingDataSummary> {
+  if (!persistentSession) throw new Error('Persistent browser storage is unavailable')
+  const history = historyStore?.list() ?? []
+  const [cookies, cacheBytes] = await Promise.all([
+    persistentSession.cookies.get({}),
+    persistentSession.getCacheSize()
+  ])
+  return {
+    cookieCount: cookies.length,
+    cacheBytes,
+    historyEntries: history.length,
+    historyVisits: history.reduce((total, entry) => total + entry.visitCount, 0),
+    bookmarkCount: bookmarkStore?.list().length ?? 0,
+    savedPasswordCount: credentialStore?.list().length ?? 0,
+    permissionDecisionCount: sitePermissionStore?.list().length ?? 0
+  }
+}
+
+async function currentBrowsingDataSiteSummary(value: string): Promise<BrowsingDataSiteSummary> {
+  if (!persistentSession) throw new Error('Persistent browser storage is unavailable')
+  let url: URL
+  try {
+    url = new URL(value)
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !url.hostname) throw new Error()
+  } catch {
+    throw new TypeError('Website must be a valid HTTP or HTTPS address')
+  }
+  const history = (historyStore?.list() ?? []).filter((entry) => new URL(entry.url).origin === url.origin)
+  const cookies = await persistentSession.cookies.get({ url: url.href })
+  return {
+    origin: url.origin,
+    cookieCount: cookies.length,
+    historyEntries: history.length,
+    historyVisits: history.reduce((total, entry) => total + entry.visitCount, 0)
+  }
+}
+
+async function currentBrowsingDataWebsites(): Promise<BrowsingDataWebsiteSummary[]> {
+  if (!persistentSession) throw new Error('Persistent browser storage is unavailable')
+  return buildBrowsingDataWebsiteInventory({
+    history: historyStore?.list() ?? [],
+    cookies: await persistentSession.cookies.get({}),
+    bookmarks: bookmarkStore?.list() ?? [],
+    credentials: credentialStore?.list() ?? [],
+    permissions: sitePermissionStore?.list() ?? [],
+    tabs: tabsManager?.getState().tabs ?? []
+  })
+}
+
+function normalizeBrowsingDataOrigin(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined
+  try {
+    const url = new URL(value)
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !url.hostname) throw new Error()
+    return url.origin
+  } catch {
+    throw new TypeError('Browsing data website must be a valid HTTP or HTTPS origin')
+  }
+}
+
+async function clearBrowsingData(
+  options: BrowsingDataClearOptions,
+  activeMcpRequestAllowance = 0
+): Promise<BrowsingDataSummary> {
+  if (!persistentSession || !historyStore) throw new Error('Persistent browser storage is unavailable')
+  if (!options.history && !options.cookiesAndSiteData && !options.cache) {
+    throw new Error('Select at least one type of browsing data to clear')
+  }
+  if (browsingDataClearInProgress) throw new Error('Browsing data is already being cleared')
+  const origin = normalizeBrowsingDataOrigin(options.origin)
+  const originScope = origin
+    ? { origins: [origin], originMatchingMode: 'origin-in-all-contexts' as const }
+    : {}
+  browsingDataClearInProgress = true
+  const resumeMcp = !mcpPaused
+  if (resumeMcp) setMcpPaused(true)
+  try {
+    const deadline = Date.now() + 5_000
+    while ((mcpServer?.getActiveRequestCount() ?? 0) > activeMcpRequestAllowance && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    if ((mcpServer?.getActiveRequestCount() ?? 0) > activeMcpRequestAllowance) {
+      throw new Error('Could not clear browsing data while an MCP command was still active')
+    }
+    if (options.history) {
+      if (origin) await historyStore.clearOrigin(origin)
+      else await historyStore.clear()
+      publishVisitHistory()
+    }
+    if (options.cookiesAndSiteData && options.cache) {
+      await persistentSession.clearData({
+        dataTypes: ['backgroundFetch', 'cache', 'cookies', 'fileSystems', 'indexedDB', 'localStorage', 'serviceWorkers', 'webSQL'],
+        ...originScope
+      })
+    } else if (options.cookiesAndSiteData) {
+      await persistentSession.clearData({
+        dataTypes: ['backgroundFetch', 'cookies', 'fileSystems', 'indexedDB', 'localStorage', 'serviceWorkers', 'webSQL'],
+        ...originScope
+      })
+      await persistentSession.clearStorageData({
+        storages: ['cachestorage'],
+        ...(origin ? { origin } : {})
+      })
+    } else if (options.cache) {
+      await persistentSession.clearData({ dataTypes: ['cache'], ...originScope })
+    }
+    return currentBrowsingDataSummary()
+  } finally {
+    if (resumeMcp) setMcpPaused(false)
+    browsingDataClearInProgress = false
+  }
+}
+
+async function handleCredentialCandidate(candidate: BrowserCredentialCandidate): Promise<void> {
+  if (!credentialStorageStatus.available || !credentialStore || !mainWindow || mainWindow.isDestroyed()) return
+  if (candidate.username.length > 512 || !candidate.password || candidate.password.length > 16_384) return
+  try {
+    if (new URL(candidate.origin).origin !== candidate.origin) return
+  } catch {
+    return
+  }
+  const updating = credentialStore.has(candidate.origin, candidate.username)
+  const account = candidate.username || 'an unnamed account'
+  const { response } = await showMessageBox({
+    type: 'question',
+    title: updating ? 'Update saved password?' : 'Save password?',
+    message: `${updating ? 'Update' : 'Save'} the password for ${account}?`,
+    detail: `${candidate.origin}\n\nPasswords are encrypted with the operating system's secure storage. The vault itself is never exposed through MCP.`,
+    buttons: ['Not now', updating ? 'Update password' : 'Save password'],
+    defaultId: 1,
+    cancelId: 0,
+    noLink: true
+  })
+  if (response !== 1) return
+  await credentialStore.save(candidate.origin, candidate.username, candidate.password)
+  publishCredentials()
+}
+
+async function configureCredentialStore(): Promise<void> {
+  const available = await safeStorage.isAsyncEncryptionAvailable()
+  const backend = process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : process.platform === 'darwin' ? 'macOS Keychain' : 'Windows DPAPI'
+  if (!available || backend === 'basic_text') {
+    credentialStorageStatus = {
+      available: false,
+      backend,
+      reason: backend === 'basic_text'
+        ? 'No protected Linux secret store is available. Bronom will not save passwords with basic-text encryption.'
+        : 'The operating system secure storage is unavailable.'
+    }
+    return
+  }
+  credentialStorageStatus = { available: true, backend }
+  credentialStore = new CredentialStore(join(app.getPath('userData'), 'credentials.json'), {
+    encrypt: (value) => safeStorage.encryptStringAsync(value),
+    decrypt: (value) => safeStorage.decryptStringAsync(value)
+  })
+  await credentialStore.load()
+}
+
+function publishSitePermissions(): void {
+  sendToShellWindows('permissions:changed', sitePermissionStore?.list() ?? [])
+}
+
+function releaseNotesText(value: unknown): string | undefined {
+  if (typeof value === 'string') return value
+  if (!Array.isArray(value)) return undefined
+  const notes = value
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return ''
+      const version = 'version' in entry && typeof entry.version === 'string' ? entry.version : ''
+      const note = 'note' in entry && typeof entry.note === 'string' ? entry.note : ''
+      return [version && `Version ${version}`, note].filter(Boolean).join('\n')
+    })
+    .filter(Boolean)
+  return notes.length ? notes.join('\n\n') : undefined
+}
+
+function configureAutoUpdater(): void {
+  if (updaterConfigured) return
+  updaterConfigured = true
+  autoUpdater.autoDownload = false
+  // BaseUpdater ignores quitAndInstall's force-run argument for an interactive
+  // install and reads this property instead. A direct Linux relaunch races the
+  // old single-instance owner and loses the graphical login-session context
+  // needed by PolicyKit on the next .deb update. Our post-exit helper reopens
+  // the installed desktop application after the lock is released.
+  autoUpdater.autoRunAppAfterInstall = updaterShouldAutoRunAfterInstall(process.platform)
+  // Installation is always an explicit user action. In particular, a failed
+  // privilege prompt must not be retried unexpectedly on the next normal quit.
+  autoUpdater.autoInstallOnAppQuit = false
+
+  autoUpdater.on('checking-for-update', () => {
+    publishUpdateState({ status: 'checking', percent: undefined, message: undefined })
+  })
+  autoUpdater.on('update-available', (info) => {
+    publishUpdateState({
+      status: 'available',
+      availableVersion: info.version,
+      releaseNotes: releaseNotesText(info.releaseNotes),
+      percent: undefined,
+      message: undefined
+    })
+  })
+  autoUpdater.on('update-not-available', () => {
+    publishUpdateState({
+      status: 'up-to-date',
+      availableVersion: undefined,
+      releaseNotes: undefined,
+      percent: undefined,
+      message: undefined
+    })
+  })
+  autoUpdater.on('download-progress', (progress) => {
+    publishUpdateState({ status: 'downloading', percent: progress.percent, message: undefined })
+  })
+  autoUpdater.on('update-downloaded', (info) => {
+    publishUpdateState({
+      status: 'downloaded',
+      availableVersion: info.version,
+      releaseNotes: releaseNotesText(info.releaseNotes),
+      percent: 100,
+      message: undefined
+    })
+  })
+  autoUpdater.on('error', (error) => {
+    console.error('[updates] Auto-updater error:', error)
+    publishUpdateState({
+      status: updateOperation === 'install' ? 'install-error' : 'error',
+      percent: undefined,
+      message: updateErrorMessage(error, updateOperation, process.platform)
+    })
+  })
+}
+
+function updatesUnavailableInThisBuild(): AppUpdateState | null {
+  if (app.isPackaged && process.env.BRONOM_DISABLE_AUTO_UPDATE !== '1') return null
+  return publishUpdateState({
+    status: 'disabled',
+    percent: undefined,
+    message:
+      process.env.BRONOM_DISABLE_AUTO_UPDATE === '1'
+        ? 'Update checks are disabled for this launch.'
+        : 'Update checks are available in packaged builds.'
+  })
+}
+
+async function checkForUpdates(): Promise<AppUpdateState> {
+  const unavailable = updatesUnavailableInThisBuild()
+  if (unavailable) return unavailable
+  if (updateInstallationInProgress) return { ...updateState }
+  if (await restartAfterPackageReplacement()) return { ...updateState }
+  if (updateCheckInProgress) return { ...updateState }
+  updateCheckInProgress = true
+  updateOperation = 'check'
+  publishUpdateState({ status: 'checking', percent: undefined, message: undefined })
+  try {
+    await autoUpdater.checkForUpdates()
+  } catch (error) {
+    console.error('[updates] Check failed:', error)
+    publishUpdateState({ status: 'error', percent: undefined, message: updateErrorMessage(error, updateOperation, process.platform) })
+  } finally {
+    updateOperation = null
+    updateCheckInProgress = false
+  }
+  return { ...updateState }
+}
+
+async function downloadUpdate(): Promise<AppUpdateState> {
+  const unavailable = updatesUnavailableInThisBuild()
+  if (unavailable) return unavailable
+  if (updateInstallationInProgress) return { ...updateState }
+  if (updateState.status !== 'available' && updateState.status !== 'error') return { ...updateState }
+  updateOperation = 'download'
+  publishUpdateState({ status: 'downloading', percent: 0, message: undefined })
+  try {
+    await autoUpdater.downloadUpdate()
+  } catch (error) {
+    console.error('[updates] Download failed:', error)
+    publishUpdateState({ status: 'error', percent: undefined, message: updateErrorMessage(error, updateOperation, process.platform) })
+  } finally {
+    updateOperation = null
+  }
+  return { ...updateState }
+}
+
+async function restartAfterPackageReplacement(): Promise<boolean> {
+  if (!app.isPackaged || process.platform !== 'linux' || updateInstallationInProgress) return false
+  try {
+    const manifest = await readFile(join(app.getAppPath(), 'package.json'), 'utf8')
+    const replacementVersion = replacedPackageVersion(app.getVersion(), manifest)
+    if (!replacementVersion) return false
+    updateInstallationInProgress = true
+    console.warn(
+      `[updates] Package ${replacementVersion} replaced the running ${app.getVersion()} process; restarting before another updater operation.`
+    )
+    publishUpdateState({
+      status: 'installing',
+      availableVersion: replacementVersion,
+      percent: undefined,
+      message: 'The new package is installed. Restarting Bronom to finish the update.'
+    })
+    scheduleLinuxUpdateRelaunch(process.pid, linuxUpdateExecutable(process.env, process.execPath))
+    mainWindow?.hide()
+    panelWindow?.hide()
+    app.quit()
+    return true
+  } catch (error) {
+    console.warn('[updates] Could not compare the running and installed package versions:', error)
+    return false
+  }
+}
+
+function showMessageBox(options: MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> {
+  return mainWindow ? dialog.showMessageBox(mainWindow, options) : dialog.showMessageBox(options)
+}
+
+function resolvedTheme(theme: ThemeName): Exclude<ThemeName, 'system'> {
+  return theme === 'system' ? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light') : theme
+}
+
+function applyTheme(theme: ThemeName): void {
+  nativeTheme.themeSource = theme === 'system' ? 'system' : theme === 'light' ? 'light' : 'dark'
+  mainWindow?.setBackgroundColor(THEME_BACKGROUND[resolvedTheme(theme)])
+  panelWindow?.setBackgroundColor(THEME_BACKGROUND[resolvedTheme(theme)])
+}
+
+function applyInterfaceScale(scale: AppSettings['interfaceScale']): void {
+  for (const window of [mainWindow, panelWindow]) {
+    if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) {
+      window.webContents.setZoomFactor(scale)
+    }
+  }
+}
+
+function homeDashboardState(): McpDashboardState {
+  const serverState = mcpServer?.getDashboardState()
+  return {
+    ...(serverState ?? {
+      name: 'bronom',
+      version: app.getVersion(),
+      endpoint: mcpUrl,
+      startedAt: null,
+      activeRequests: 0,
+      totalRequests: 0,
+      paused: mcpPaused,
+      status: 'starting',
+      completedToolCalls: 0,
+      clients: [],
+      recentActivity: [],
+      toolMetrics: [],
+      tools: BROWSER_TOOL_CATALOG.map((tool) => ({ ...tool }))
+    }),
+    status: currentMcpControlState().status,
+    ...(mcpStartupError ? { error: mcpStartupError } : {})
+  }
+}
+
+function registerHomeProtocol(): void {
+  if (!persistentSession) throw new Error('Persistent session must be configured before registering Bronom Home')
+  persistentSession.protocol.handle('bronom', (request) => {
+    const url = new URL(request.url)
+    if (url.hostname !== 'home') return new Response('Not found', { status: 404 })
+    if (url.pathname === '/api/status') {
+      return new Response(JSON.stringify(homeDashboardState()), {
+        headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }
+      })
+    }
+    if (url.pathname !== '/' && url.pathname !== '') return new Response('Not found', { status: 404 })
+    return new Response(
+      renderHomePage({
+        endpoint: mcpUrl,
+        tokenPath: mcpTokenConfiguration?.tokenPath,
+        authenticationDisabled: !settings.mcpAuthentication,
+        initialState: homeDashboardState()
+      }),
+      {
+        headers: {
+          'content-type': 'text/html; charset=utf-8',
+          'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src bronom://home; img-src data:",
+          'cache-control': 'no-store'
+        }
+      }
+    )
+  })
+}
+
+function currentWindowState(): import('./window-state.js').SavedWindowState | null {
+  if (!mainWindow || mainWindow.isDestroyed()) return null
+  const bounds = mainWindow.getNormalBounds()
+  return {
+    bounds,
+    displayId: screen.getDisplayMatching(bounds).id,
+    maximized: mainWindow.isMaximized(),
+    fullScreen: mainWindow.isFullScreen()
+  }
+}
+
+function scheduleWindowStateSave(): void {
+  if (!windowStateStore) return
+  lastWindowState = currentWindowState() ?? lastWindowState
+  if (windowStateTimer) clearTimeout(windowStateTimer)
+  windowStateTimer = setTimeout(() => {
+    windowStateTimer = null
+    const state = currentWindowState() ?? lastWindowState
+    if (state) void windowStateStore?.save(state).catch((error) => console.error('[window] Failed to persist state:', error))
+  }, 300)
+}
+
+async function flushWindowState(): Promise<void> {
+  if (windowStateTimer) {
+    clearTimeout(windowStateTimer)
+    windowStateTimer = null
+  }
+  const state = currentWindowState() ?? lastWindowState
+  if (state) await windowStateStore?.save(state)
+}
+
+function currentPanelWindowState(): import('./window-state.js').SavedWindowState | null {
+  if (!panelWindow || panelWindow.isDestroyed()) return null
+  const bounds = panelWindow.getNormalBounds()
+  return {
+    bounds,
+    displayId: screen.getDisplayMatching(bounds).id,
+    maximized: panelWindow.isMaximized(),
+    fullScreen: panelWindow.isFullScreen()
+  }
+}
+
+function schedulePanelWindowStateSave(): void {
+  if (!panelWindowStateStore) return
+  lastPanelWindowState = currentPanelWindowState() ?? lastPanelWindowState
+  if (panelWindowStateTimer) clearTimeout(panelWindowStateTimer)
+  panelWindowStateTimer = setTimeout(() => {
+    panelWindowStateTimer = null
+    const state = currentPanelWindowState() ?? lastPanelWindowState
+    if (state) void panelWindowStateStore?.save(state).catch((error) => console.error('[panel-window] Failed to persist state:', error))
+  }, 300)
+}
+
+async function flushPanelWindowState(): Promise<void> {
+  if (panelWindowStateTimer) {
+    clearTimeout(panelWindowStateTimer)
+    panelWindowStateTimer = null
+  }
+  const state = currentPanelWindowState() ?? lastPanelWindowState
+  if (state) await panelWindowStateStore?.save(state)
+}
+
+async function flushBrowserProfile(): Promise<void> {
+  if (!persistentSession) return
+  persistentSession.flushStorageData()
+  await persistentSession.cookies.flushStore()
+}
+
+function loadTrayIcon(path: string): NativeImage {
+  const icon = nativeImage.createFromPath(path)
+  if (icon.isEmpty()) throw new Error(`Tray icon could not be loaded: ${path}`)
+  return icon
+}
+
+function compactAttentionReason(reason: string): string {
+  const compact = reason.replace(/\s+/g, ' ').trim()
+  return compact.length > 72 ? `${compact.slice(0, 69)}…` : compact
+}
+
+function setTrayContextMenu(): void {
+  if (!tray || tray.isDestroyed()) return
+  const contextMenu = Menu.buildFromTemplate([
+    ...(userAttention
+      ? [
+          { label: `Attention needed: ${compactAttentionReason(userAttention.reason)}`, enabled: false },
+          {
+            label: 'Show requested browser tab',
+            click: () => {
+              if (userAttention?.tabId) tabsManager?.selectTab(userAttention.tabId)
+              showWindow()
+              clearUserAttention()
+            }
+          },
+          { label: 'Dismiss attention', click: clearUserAttention },
+          { type: 'separator' as const }
+        ]
+      : []),
+    { label: 'Show Bronom', click: showWindow },
+    {
+      label: 'Check for Updates…',
+      click: () => {
+        showWindow()
+        mainWindow?.webContents.send('updates:open')
+        void checkForUpdates()
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit',
+      click: () => {
+        quitting = true
+        app.quit()
+      }
+    }
+  ])
+  tray.setContextMenu(contextMenu)
+}
+
+function renderAttentionPulse(): void {
+  if (!tray || tray.isDestroyed() || !trayIcon || !trayAttentionIcon) return
+  attentionPulseOn = !attentionPulseOn
+  tray.setImage(attentionPulseOn ? trayAttentionIcon : trayIcon)
+}
+
+function clearUserAttention(): void {
+  if (!userAttention && !attentionPulseTimer) return
+  userAttention = null
+  if (attentionPulseTimer) clearInterval(attentionPulseTimer)
+  attentionPulseTimer = null
+  attentionPulseOn = false
+  mainWindow?.flashFrame(false)
+  if (tray && !tray.isDestroyed() && trayIcon) {
+    tray.setImage(trayIcon)
+    tray.setToolTip('Bronom')
+    setTrayContextMenu()
+  }
+}
+
+function acknowledgeUserAttention(): void {
+  if (activeMcpActivities.size === 0) clearUserAttention()
+}
+
+function requestUserAttention(input: UserAttentionInput): UserAttentionRequest {
+  const request: UserAttentionRequest = {
+    id: randomUUID(),
+    reason: input.reason.replace(/\s+/g, ' ').trim(),
+    requestedAt: new Date().toISOString(),
+    ...(input.tabId && { tabId: input.tabId })
+  }
+  userAttention = request
+  if (input.tabId) tabsManager?.selectTab(input.tabId)
+  if (attentionPulseTimer) clearInterval(attentionPulseTimer)
+  attentionPulseTimer = setInterval(renderAttentionPulse, 650)
+  attentionPulseTimer.unref()
+  attentionPulseOn = false
+  renderAttentionPulse()
+  mainWindow?.flashFrame(true)
+  if (tray && !tray.isDestroyed()) {
+    tray.setToolTip(`Bronom — Attention needed: ${compactAttentionReason(request.reason)}`)
+    setTrayContextMenu()
+  }
+  if (mainWindow && !mainWindow.webContents.isDestroyed()) {
+    mainWindow.webContents.send('attention:requested')
+  }
+  return { ...request }
+}
+
+function createTray(): void {
+  if (tray && !tray.isDestroyed()) return
+  try {
+    trayIcon = loadTrayIcon(trayIconPath)
+    trayAttentionIcon = loadTrayIcon(trayAttentionIconPath)
+    tray = new Tray(trayIcon)
+    tray.setToolTip('Bronom')
+    setTrayContextMenu()
+    tray.on('click', () => tray?.popUpContextMenu())
+    tray.on('right-click', () => tray?.popUpContextMenu())
+    if (process.platform !== 'linux') tray.on('double-click', showWindow)
+  } catch (error) {
+    if (tray && !tray.isDestroyed()) tray.destroy()
+    tray = null
+    console.error('[tray] Failed to create tray:', error)
+    if (settings.hideInTray) {
+      settings = { ...settings, hideInTray: false }
+      publishSettings()
+      void settingsStore?.save(settings).catch((saveError) =>
+        console.error('[tray] Failed to disable hide-in-tray after tray creation failed:', saveError)
+      )
+    }
+  }
+}
+
+function requestHelp(action: HelpMenuAction): void {
+  showWindow()
+  if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('help:open', action)
+}
+
+function openRepository(): void {
+  showWindow()
+  void tabsManager?.newTab({ url: 'https://github.com/Netroforge/bronom', active: true })
+    .catch((error) => console.error('[help] Failed to open the GitHub repository:', error))
+}
+
+function installApplicationMenu(): void {
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      {
+        label: 'Bronom',
+        submenu: [
+          { label: 'Show', accelerator: 'CmdOrCtrl+Shift+H', click: showWindow },
+          {
+            label: 'Check for Updates…',
+            click: () => {
+              showWindow()
+              mainWindow?.webContents.send('updates:open')
+              void checkForUpdates()
+            }
+          },
+          { type: 'separator' },
+          {
+            label: 'Quit',
+            accelerator: 'CmdOrCtrl+Q',
+            click: () => {
+              quitting = true
+              app.quit()
+            }
+          }
+        ]
+      },
+      {
+        label: 'Edit',
+        submenu: [
+          { role: 'undo' },
+          { role: 'redo' },
+          { type: 'separator' },
+          { role: 'cut' },
+          { role: 'copy' },
+          { role: 'paste' },
+          { role: 'selectAll' }
+        ]
+      },
+      {
+        label: 'View',
+        submenu: [
+          {
+            label: 'Command Palette…',
+            accelerator: 'CmdOrCtrl+Shift+P',
+            click: () => {
+              showWindow()
+              mainWindow?.webContents.send('browser:shortcut-requested', 'command-palette')
+            }
+          },
+          {
+            label: 'Pick Element for Agent',
+            accelerator: process.platform === 'darwin' ? 'Cmd+Alt+C' : 'Ctrl+Shift+C',
+            click: () => {
+              showWindow()
+              mainWindow?.webContents.send('browser:shortcut-requested', 'pick-element')
+            }
+          },
+          { type: 'separator' },
+          {
+            label: 'Reload Tab',
+            accelerator: 'CmdOrCtrl+R',
+            click: () => { void tabsManager?.reload() }
+          },
+          {
+            label: 'Reload Tab Without Cache',
+            accelerator: 'CmdOrCtrl+Shift+R',
+            click: () => { void tabsManager?.reloadIgnoringCache() }
+          },
+          {
+            label: 'Developer Tools',
+            click: () => { void tabsManager?.toggleDevTools() }
+          },
+          { type: 'separator' },
+          { label: 'Actual Size', accelerator: 'CmdOrCtrl+0', click: () => tabsManager?.setZoom({ action: 'reset' }) },
+          { label: 'Zoom In', accelerator: 'CmdOrCtrl+Plus', click: () => tabsManager?.setZoom({ action: 'in' }) },
+          { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: () => tabsManager?.setZoom({ action: 'out' }) },
+          { role: 'togglefullscreen' }
+        ]
+      },
+      {
+        label: 'Help',
+        submenu: [
+          {
+            label: 'Keyboard Shortcuts',
+            accelerator: 'CmdOrCtrl+Shift+/',
+            click: () => requestHelp('shortcuts')
+          },
+          { label: 'About Bronom', click: () => requestHelp('about') },
+          { label: 'Commercial Licensing', click: () => requestHelp('support') },
+          { type: 'separator' },
+          { label: 'GitHub Repository', click: openRepository },
+          {
+            label: 'Check for Updates',
+            click: () => {
+              showWindow()
+              mainWindow?.webContents.send('updates:open')
+              void checkForUpdates()
+            }
+          }
+        ]
+      }
+    ])
+  )
+}
+
+function trustedShellUrl(): string {
+  if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) {
+    const url = new URL(process.env.ELECTRON_RENDERER_URL)
+    if (url.protocol !== 'http:' || !isLoopbackHost(url.hostname)) {
+      throw new Error('ELECTRON_RENDERER_URL must use HTTP on a loopback host')
+    }
+    return url.href
+  }
+  return pathToFileURL(join(__dirname, '../renderer/index.html')).href
+}
+
+function isDetachablePanelId(value: unknown): value is DetachablePanelId {
+  return typeof value === 'string' && (DETACHABLE_PANEL_IDS as readonly string[]).includes(value)
+}
+
+function isPanelDock(value: unknown): value is PanelDock {
+  return typeof value === 'string' && (PANEL_DOCKS as readonly string[]).includes(value)
+}
+
+function detachedPanelTitle(panel: DetachablePanelId): string {
+  const labels: Record<DetachablePanelId, string> = {
+    'site-controls': 'Site controls',
+    'site-storage': 'Site storage',
+    'page-tools': 'Page tools',
+    'responsive-preview': 'Responsive preview',
+    environment: 'Environment',
+    accessibility: 'Accessibility',
+    performance: 'Performance',
+    'design-overview': 'Design overview',
+    'page-metadata': 'Page metadata',
+    security: 'Security',
+    coverage: 'Code coverage',
+    memory: 'Memory',
+    console: 'Console',
+    network: 'Network monitor',
+    'debug-report': 'Debug report',
+    'repro-recorder': 'Repro recorder',
+    'dom-changes': 'DOM changes',
+    'visual-compare': 'Visual compare',
+    issues: 'Issues',
+    bookmarks: 'Bookmarks'
+  }
+  return `${labels[panel]} — Bronom`
+}
+
+function trustedPanelShellUrl(panel: DetachablePanelId): string {
+  const url = new URL(trustedShellUrl())
+  url.searchParams.set('bronomPanel', panel)
+  return url.href
+}
+
+function trustedUrlMatches(actual: string | undefined, expected: string): boolean {
+  return Boolean(actual && (actual === expected || actual.startsWith(`${expected}#`)))
+}
+
+function assertTrustedShellSender(event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): void {
+  const actual = event.senderFrame?.url
+  const fromMain = Boolean(mainWindow && event.sender === mainWindow.webContents && trustedUrlMatches(actual, trustedShellUrl()))
+  const fromPanel = Boolean(panelWindow
+    && panelWindowUrl
+    && event.sender === panelWindow.webContents
+    && trustedUrlMatches(actual, panelWindowUrl))
+  if (!fromMain && !fromPanel) throw new Error('Rejected IPC from an untrusted renderer')
+}
+
+function assertMainShellSender(event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): void {
+  const actual = event.senderFrame?.url
+  if (!mainWindow || event.sender !== mainWindow.webContents || !trustedUrlMatches(actual, trustedShellUrl())) {
+    throw new Error('Rejected IPC from a non-primary renderer')
+  }
+}
+
+function assertPanelShellSender(event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): void {
+  const actual = event.senderFrame?.url
+  if (!panelWindow || !panelWindowUrl || event.sender !== panelWindow.webContents || !trustedUrlMatches(actual, panelWindowUrl)) {
+    throw new Error('Rejected IPC from a non-panel renderer')
+  }
+}
+
+function sendPanelWindowSnapshot(target: BrowserWindow): void {
+  if (target.isDestroyed() || target.webContents.isDestroyed()) return
+  target.webContents.send('browser:state-changed', tabsManager?.getState())
+  target.webContents.send('browser:downloads-changed', tabsManager?.listDownloads() ?? [])
+  target.webContents.send('settings:changed', settings)
+  target.webContents.send('updates:changed', updateState)
+  target.webContents.send('mcp:changed', currentMcpControlState())
+  target.webContents.send('credentials:changed', credentialStore?.list() ?? [])
+  target.webContents.send('permissions:changed', sitePermissionStore?.list() ?? [])
+  target.webContents.send('bookmarks:changed', bookmarkStore?.list() ?? [])
+  target.webContents.send('visit-history:changed', historyStore?.list() ?? [])
+}
+
+async function openPanelWindow(panel: DetachablePanelId): Promise<void> {
+  if (!mainWindow || mainWindow.isDestroyed()) throw new Error('The Bronom window is not available')
+  if (panelWindow && !panelWindow.isDestroyed()) {
+    panelWindow.setTitle(detachedPanelTitle(panel))
+    sendToPanelWindow('panel-window:show-panel', panel)
+    if (panelWindow.isMinimized()) panelWindow.restore()
+    panelWindow.show()
+    panelWindow.focus()
+    return
+  }
+
+  const mainBounds = mainWindow.getBounds()
+  const width = Math.min(720, Math.max(480, Math.round(mainBounds.width * 0.42)))
+  const height = Math.min(900, Math.max(560, mainBounds.height))
+  const displays = screen.getAllDisplays()
+  const primaryDisplay = screen.getPrimaryDisplay()
+  const orderedDisplays = [primaryDisplay, ...displays.filter((display) => display.id !== primaryDisplay.id)]
+  const savedPanelState = lastPanelWindowState ?? await panelWindowStateStore?.load() ?? null
+  const panelBounds = savedPanelState
+    ? restoreWindowBounds(savedPanelState, orderedDisplays, { width, height })
+    : {
+        width,
+        height,
+        x: mainBounds.x + Math.max(0, mainBounds.width - width),
+        y: mainBounds.y
+      }
+  const expectedUrl = trustedPanelShellUrl(panel)
+  const created = new BrowserWindow({
+    ...panelBounds,
+    minWidth: 420,
+    minHeight: 440,
+    show: false,
+    title: detachedPanelTitle(panel),
+    autoHideMenuBar: true,
+    backgroundColor: THEME_BACKGROUND[resolvedTheme(settings.theme)],
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  })
+  created.webContents.setZoomFactor(settings.interfaceScale)
+  panelWindow = created
+  panelWindowUrl = expectedUrl
+  panelWindowRedocking = false
+  created.setMenuBarVisibility(false)
+  created.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  created.webContents.on('will-navigate', (event, url) => {
+    if (url !== expectedUrl) event.preventDefault()
+  })
+  created.webContents.once('did-finish-load', () => {
+    created.webContents.setZoomFactor(settings.interfaceScale)
+    created.setTitle(detachedPanelTitle(panel))
+    sendPanelWindowSnapshot(created)
+  })
+  created.once('ready-to-show', () => {
+    if (!created.isDestroyed()) created.show()
+  })
+  created.on('resize', schedulePanelWindowStateSave)
+  created.on('move', schedulePanelWindowStateSave)
+  created.on('maximize', schedulePanelWindowStateSave)
+  created.on('unmaximize', schedulePanelWindowStateSave)
+  created.on('enter-full-screen', schedulePanelWindowStateSave)
+  created.on('leave-full-screen', schedulePanelWindowStateSave)
+  created.on('close', () => {
+    lastPanelWindowState = currentPanelWindowState() ?? lastPanelWindowState
+  })
+  created.on('closed', () => {
+    if (panelWindow !== created) return
+    const redocking = panelWindowRedocking
+    panelWindow = null
+    panelWindowUrl = null
+    panelWindowRedocking = false
+    void flushPanelWindowState().catch((error) => console.error('[panel-window] Failed to flush state:', error))
+    if (!redocking && mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send('panel-window:closed')
+    }
+  })
+
+  await created.loadURL(expectedUrl)
+}
+
+function registerIpc(): void {
+  ipcMain.handle('panel-window:open', async (event, panel: unknown) => {
+    assertMainShellSender(event)
+    if (!isDetachablePanelId(panel)) throw new TypeError('Invalid detachable panel')
+    await openPanelWindow(panel)
+  })
+  ipcMain.handle('panel-window:close', (event) => {
+    assertTrustedShellSender(event)
+    panelWindow?.close()
+  })
+  ipcMain.handle('panel-window:set-active', (event, panel: unknown) => {
+    assertPanelShellSender(event)
+    if (!isDetachablePanelId(panel)) throw new TypeError('Invalid detachable panel')
+    panelWindow?.setTitle(detachedPanelTitle(panel))
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send('panel-window:active-panel', panel)
+    }
+  })
+  ipcMain.handle('panel-window:redock', (event, panel: unknown, dock: unknown) => {
+    assertPanelShellSender(event)
+    if (!isDetachablePanelId(panel) || !isPanelDock(dock) || dock === 'window') throw new TypeError('Invalid panel redock request')
+    panelWindowRedocking = true
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send('panel-window:redock-requested', { panel, dock })
+    }
+    panelWindow?.close()
+  })
+  ipcMain.handle('mcp:get-state', (event) => {
+    assertTrustedShellSender(event)
+    return currentMcpControlState()
+  })
+  ipcMain.handle('mcp:set-paused', (event, paused: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof paused !== 'boolean') throw new TypeError('MCP paused state must be a boolean')
+    const state = setMcpPaused(paused)
+    console.info(paused ? '[mcp] Paused by the user.' : '[mcp] Resumed by the user.')
+    return state
+  })
+  ipcMain.handle('browser:get-state', (event) => { assertTrustedShellSender(event); return tabsManager!.getState() })
+  ipcMain.handle('browser:open-home', (event) => { assertTrustedShellSender(event); return tabsManager!.openHome() })
+  ipcMain.handle('browser:new-tab', (event, options) => { assertTrustedShellSender(event); return tabsManager!.newTab(options) })
+  ipcMain.handle('browser:reopen-closed-tab', (event, closedTabId: unknown) => {
+    assertTrustedShellSender(event)
+    if (closedTabId !== undefined && typeof closedTabId !== 'string') throw new TypeError('Invalid closed tab ID')
+    return tabsManager!.reopenClosedTab(closedTabId)
+  })
+  ipcMain.handle('browser:select-tab', (event, tabId) => { assertTrustedShellSender(event); return tabsManager!.selectTab(tabId) })
+  ipcMain.handle('browser:close-tab', (event, tabId) => { assertTrustedShellSender(event); return tabsManager!.closeTab(tabId) })
+  ipcMain.handle('browser:open-split-view', (event, tabId: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof tabId !== 'string') throw new TypeError('Invalid split-view tab ID')
+    return tabsManager!.openSplitView(tabId)
+  })
+  ipcMain.handle('browser:update-split-view', (event, updates: unknown) => {
+    assertTrustedShellSender(event)
+    if (!updates || typeof updates !== 'object' || Array.isArray(updates)) throw new TypeError('Invalid split-view update')
+    const candidate = updates as Record<string, unknown>
+    if (candidate.orientation !== undefined && candidate.orientation !== 'vertical' && candidate.orientation !== 'horizontal') {
+      throw new TypeError('Invalid split-view orientation')
+    }
+    if (candidate.ratio !== undefined && (typeof candidate.ratio !== 'number' || !Number.isFinite(candidate.ratio))) {
+      throw new TypeError('Invalid split-view ratio')
+    }
+    if (candidate.swap !== undefined && typeof candidate.swap !== 'boolean') throw new TypeError('Invalid split-view swap flag')
+    return tabsManager!.updateSplitView({
+      ...(candidate.orientation === 'vertical' || candidate.orientation === 'horizontal' ? { orientation: candidate.orientation } : {}),
+      ...(typeof candidate.ratio === 'number' ? { ratio: candidate.ratio } : {}),
+      ...(candidate.swap === true ? { swap: true } : {})
+    })
+  })
+  ipcMain.handle('browser:close-split-view', (event) => {
+    assertTrustedShellSender(event)
+    return tabsManager!.closeSplitView()
+  })
+  ipcMain.handle('browser:set-tab-pinned', (event, tabId: unknown, pinned: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof tabId !== 'string' || typeof pinned !== 'boolean') throw new TypeError('Invalid pinned tab state')
+    return tabsManager!.setTabPinned(tabId, pinned)
+  })
+  ipcMain.handle('browser:set-tab-sleeping', (event, tabId: unknown, sleeping: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof tabId !== 'string' || typeof sleeping !== 'boolean') throw new TypeError('Invalid tab sleeping state')
+    return tabsManager!.setTabSleeping(tabId, sleeping)
+  })
+  ipcMain.handle('browser:sleep-inactive-tabs', (event) => {
+    assertTrustedShellSender(event)
+    return tabsManager!.sleepInactiveTabs()
+  })
+  ipcMain.handle('browser:reorder-tab', (event, tabId: unknown, targetTabId: unknown, placement: unknown) => {
+    assertTrustedShellSender(event)
+    if (
+      typeof tabId !== 'string'
+      || typeof targetTabId !== 'string'
+      || (placement !== 'before' && placement !== 'after')
+    ) throw new TypeError('Invalid tab reorder request')
+    return tabsManager!.reorderTab(tabId, targetTabId, placement)
+  })
+  ipcMain.handle('browser:rename-tab-group', (event, groupId: unknown, name: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof groupId !== 'string' || typeof name !== 'string') throw new TypeError('Invalid tab group rename request')
+    tabsManager!.renameMcpTabGroup(groupId, name)
+    return tabsManager!.getState()
+  })
+  ipcMain.handle('browser:update-tab-group', (event, groupId: unknown, updates: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof groupId !== 'string' || !updates || typeof updates !== 'object' || Array.isArray(updates)) {
+      throw new TypeError('Invalid tab group update request')
+    }
+    const candidate = updates as Record<string, unknown>
+    if (candidate.name !== undefined && typeof candidate.name !== 'string') throw new TypeError('Invalid tab group name')
+    if (candidate.color !== undefined && !isBrowserTabGroupColor(candidate.color)) throw new TypeError('Invalid tab group color')
+    tabsManager!.updateMcpTabGroup(groupId, {
+      ...(typeof candidate.name === 'string' ? { name: candidate.name } : {}),
+      ...(isBrowserTabGroupColor(candidate.color) ? { color: candidate.color } : {})
+    } satisfies BrowserTabGroupUpdate)
+    return tabsManager!.getState()
+  })
+  ipcMain.handle('browser:move-tab-to-group', (event, tabId: unknown, groupId: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof tabId !== 'string' || (groupId !== undefined && typeof groupId !== 'string')) throw new TypeError('Invalid tab group move request')
+    return tabsManager!.moveTabToMcpGroup(tabId, groupId)
+  })
+  ipcMain.handle('browser:save-and-close-tab-group', async (event, groupId: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof groupId !== 'string') throw new TypeError('Invalid tab group ID')
+    await tabsManager!.saveAndCloseTabGroup(groupId)
+    return tabsManager!.getState()
+  })
+  ipcMain.handle('browser:restore-saved-tab-group', async (event, savedGroupId: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof savedGroupId !== 'string') throw new TypeError('Invalid saved tab group ID')
+    await tabsManager!.restoreSavedTabGroup(savedGroupId)
+    return tabsManager!.getState()
+  })
+  ipcMain.handle('browser:delete-saved-tab-group', (event, savedGroupId: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof savedGroupId !== 'string') throw new TypeError('Invalid saved tab group ID')
+    tabsManager!.deleteSavedTabGroup(savedGroupId)
+    return tabsManager!.getState()
+  })
+  ipcMain.handle('browser:show-tab-context-menu', (event, tabId: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof tabId !== 'string') throw new TypeError('Invalid tab ID')
+    tabsManager!.showTabContextMenu(tabId)
+  })
+  ipcMain.handle('browser:toggle-devtools', (event, tabId: unknown) => {
+    assertTrustedShellSender(event)
+    if (tabId !== undefined && typeof tabId !== 'string') throw new TypeError('Invalid tab ID')
+    return tabsManager!.toggleDevTools(tabId)
+  })
+  ipcMain.handle('browser:set-tab-viewport', async (event, tabId: unknown, viewport: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof tabId !== 'string') throw new TypeError('Invalid tab ID')
+    if (viewport !== null && !isBrowserViewportEmulation(viewport)) throw new TypeError('Invalid viewport emulation')
+    const normalizedViewport: BrowserViewportEmulation | null = viewport === null ? null : {
+      width: viewport.width,
+      height: viewport.height,
+      deviceScaleFactor: viewport.deviceScaleFactor,
+      mobile: viewport.mobile,
+      touch: viewport.touch,
+      orientation: viewport.orientation
+    }
+    await tabsManager!.emulate({ tabId, viewport: normalizedViewport })
+    return tabsManager!.getState()
+  })
+  ipcMain.handle('browser:set-tab-environment', async (event, tabId: unknown, environment: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof tabId !== 'string' || !isBrowserEnvironmentSettings(environment)) {
+      throw new TypeError('Invalid browser environment')
+    }
+    await tabsManager!.emulate({ tabId, ...(environment as BrowserEnvironmentSettings) })
+    return tabsManager!.getState()
+  })
+  ipcMain.handle('browser:reset-tab-emulation', async (event, tabId: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof tabId !== 'string') throw new TypeError('Invalid tab ID')
+    await tabsManager!.emulate({ tabId, reset: true })
+    return tabsManager!.getState()
+  })
+  ipcMain.handle('browser:list-network-routes', (event, tabId: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof tabId !== 'string') throw new TypeError('Invalid tab ID')
+    return tabsManager!.networkRoutes(tabId)
+  })
+  ipcMain.handle('browser:add-network-route', async (event, tabId: unknown, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof tabId !== 'string' || typeof value !== 'object' || value === null) {
+      throw new TypeError('Invalid network route')
+    }
+    const { urlPattern, method, times, response, abort, throttle } = value as Record<string, unknown>
+    const responseRecord = typeof response === 'object' && response !== null && !Array.isArray(response)
+      ? response as Record<string, unknown>
+      : undefined
+    const headersRecord = responseRecord && typeof responseRecord.headers === 'object' && responseRecord.headers !== null && !Array.isArray(responseRecord.headers)
+      ? responseRecord.headers as Record<string, unknown>
+      : undefined
+    if (
+      typeof urlPattern !== 'string'
+      || (method !== undefined && typeof method !== 'string')
+      || (times !== undefined && (typeof times !== 'number' || !Number.isInteger(times) || times < 1 || times > 100))
+      || [response, abort, throttle].filter((behavior) => behavior !== undefined).length !== 1
+      || (abort !== undefined && !(BROWSER_NETWORK_ABORT_REASONS as readonly unknown[]).includes(abort))
+      || (throttle !== undefined && throttle !== 'fast-4g' && throttle !== 'slow-4g' && throttle !== 'slow-3g')
+      || (throttle !== undefined && method !== undefined)
+      || (throttle !== undefined && times !== undefined)
+      || (response !== undefined && !responseRecord)
+      || (responseRecord?.status !== undefined && (typeof responseRecord.status !== 'number' || !Number.isInteger(responseRecord.status)))
+      || (responseRecord?.body !== undefined && typeof responseRecord.body !== 'string')
+      || (responseRecord?.headers !== undefined && !headersRecord)
+      || (headersRecord && Object.values(headersRecord).some((headerValue) => typeof headerValue !== 'string'))
+    ) throw new TypeError('Invalid network route')
+    return tabsManager!.addNetworkRoute(tabId, value as BrowserNetworkRouteInput)
+  })
+  ipcMain.handle('browser:remove-network-route', async (event, tabId: unknown, routeId: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof tabId !== 'string' || typeof routeId !== 'string') throw new TypeError('Invalid network route')
+    return tabsManager!.removeNetworkRoute(tabId, routeId)
+  })
+  ipcMain.handle('browser:move-network-route', (event, tabId: unknown, routeId: unknown, direction: unknown) => {
+    assertTrustedShellSender(event)
+    if (
+      typeof tabId !== 'string'
+      || typeof routeId !== 'string'
+      || (direction !== 'up' && direction !== 'down')
+    ) throw new TypeError('Invalid network route move')
+    return tabsManager!.moveNetworkRoute(tabId, routeId, direction)
+  })
+  ipcMain.handle('browser:clear-network-routes', async (event, tabId: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof tabId !== 'string') throw new TypeError('Invalid tab ID')
+    await tabsManager!.clearNetworkRoutes(tabId)
+    return tabsManager!.getState()
+  })
+  ipcMain.handle('browser:manage-storage', (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof value !== 'object' || value === null) throw new TypeError('Invalid site storage request')
+    const { tabId, kind, action, key, value: storageValue, includeValues } = value as Record<string, unknown>
+    if (
+      (tabId !== undefined && typeof tabId !== 'string')
+      || (kind !== 'local-storage' && kind !== 'session-storage' && kind !== 'cookies')
+      || (action !== undefined && action !== 'list' && action !== 'get' && action !== 'set' && action !== 'delete' && action !== 'clear')
+      || (key !== undefined && typeof key !== 'string')
+      || (storageValue !== undefined && typeof storageValue !== 'string')
+      || (includeValues !== undefined && typeof includeValues !== 'boolean')
+    ) throw new TypeError('Invalid site storage request')
+    return tabsManager!.manageStorage({ tabId, kind, action, key, value: storageValue, includeValues })
+  })
+  ipcMain.handle('browser:storage-usage', (event, tabId: unknown) => {
+    assertTrustedShellSender(event)
+    if (tabId !== undefined && typeof tabId !== 'string') throw new TypeError('Invalid storage usage request')
+    return tabsManager!.inspectStorageUsage(tabId as string | undefined)
+  })
+  ipcMain.handle('browser:storage-changes', (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError('Invalid storage changes request')
+    const { tabId, action, includeValues } = value as Record<string, unknown>
+    if (
+      (tabId !== undefined && typeof tabId !== 'string')
+      || (action !== undefined && action !== 'get' && action !== 'baseline' && action !== 'compare' && action !== 'clear')
+      || (includeValues !== undefined && typeof includeValues !== 'boolean')
+    ) throw new TypeError('Invalid storage changes request')
+    return tabsManager!.storageChanges(action, tabId as string | undefined, includeValues === true)
+  })
+  ipcMain.handle('browser:indexeddb', (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError('Invalid IndexedDB request')
+    const { tabId, database, objectStore, offset, limit, includeValues } = value as Record<string, unknown>
+    if (
+      (tabId !== undefined && typeof tabId !== 'string')
+      || (database !== undefined && typeof database !== 'string')
+      || (objectStore !== undefined && typeof objectStore !== 'string')
+      || (offset !== undefined && (typeof offset !== 'number' || !Number.isFinite(offset)))
+      || (limit !== undefined && (typeof limit !== 'number' || !Number.isFinite(limit)))
+      || (includeValues !== undefined && typeof includeValues !== 'boolean')
+    ) throw new TypeError('Invalid IndexedDB request')
+    return tabsManager!.inspectIndexedDb({
+      tabId: tabId as string | undefined,
+      database: database as string | undefined,
+      objectStore: objectStore as string | undefined,
+      offset: offset as number | undefined,
+      limit: limit as number | undefined,
+      includeValues: includeValues === true
+    })
+  })
+  ipcMain.handle('browser:pwa', (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError('Invalid offline app request')
+    const { tabId, cacheName, query, offset, limit, includeHeaders } = value as Record<string, unknown>
+    if (
+      (tabId !== undefined && typeof tabId !== 'string')
+      || (cacheName !== undefined && typeof cacheName !== 'string')
+      || (query !== undefined && typeof query !== 'string')
+      || (offset !== undefined && (typeof offset !== 'number' || !Number.isFinite(offset)))
+      || (limit !== undefined && (typeof limit !== 'number' || !Number.isFinite(limit)))
+      || (includeHeaders !== undefined && typeof includeHeaders !== 'boolean')
+    ) throw new TypeError('Invalid offline app request')
+    return tabsManager!.inspectPwa({
+      tabId: tabId as string | undefined,
+      cacheName: cacheName as string | undefined,
+      query: query as string | undefined,
+      offset: offset as number | undefined,
+      limit: limit as number | undefined,
+      includeHeaders: includeHeaders === true
+    })
+  })
+  ipcMain.handle('browser:navigate', (event, options) => { assertTrustedShellSender(event); return tabsManager!.navigate(options.url, options.tabId) })
+  ipcMain.handle('browser:back', (event, tabId) => { assertTrustedShellSender(event); return tabsManager!.back(tabId) })
+  ipcMain.handle('browser:forward', (event, tabId) => { assertTrustedShellSender(event); return tabsManager!.forward(tabId) })
+  ipcMain.handle('browser:reload', (event, tabId) => { assertTrustedShellSender(event); return tabsManager!.reload(tabId) })
+  ipcMain.handle('browser:reload-ignoring-cache', (event, tabId) => { assertTrustedShellSender(event); return tabsManager!.reloadIgnoringCache(tabId) })
+  ipcMain.handle('browser:stop', (event, tabId) => { assertTrustedShellSender(event); return tabsManager!.stop(tabId) })
+  ipcMain.handle('browser:find-in-page', (event, options: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof options !== 'object' || options === null) throw new TypeError('Invalid find options')
+    const { query, tabId, forward, findNext } = options as Record<string, unknown>
+    if (
+      typeof query !== 'string'
+      || (tabId !== undefined && typeof tabId !== 'string')
+      || (forward !== undefined && typeof forward !== 'boolean')
+      || (findNext !== undefined && typeof findNext !== 'boolean')
+    ) throw new TypeError('Invalid find options')
+    return tabsManager!.findInPage(query, { tabId, forward, findNext })
+  })
+  ipcMain.handle('browser:stop-find-in-page', (event, tabId: unknown) => {
+    assertTrustedShellSender(event)
+    if (tabId !== undefined && typeof tabId !== 'string') throw new TypeError('Invalid find tab')
+    tabsManager!.stopFindInPage(tabId)
+  })
+  ipcMain.handle('browser:set-zoom', (event, options: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof options !== 'object' || options === null) throw new TypeError('Invalid page zoom options')
+    const { tabId, action, percent } = options as Record<string, unknown>
+    if (
+      (tabId !== undefined && typeof tabId !== 'string')
+      || (action !== 'in' && action !== 'out' && action !== 'reset' && action !== 'set')
+      || (percent !== undefined && typeof percent !== 'number')
+    ) throw new TypeError('Invalid page zoom options')
+    return tabsManager!.setZoom({ tabId, action, percent })
+  })
+  ipcMain.handle('browser:set-tab-muted', (event, tabId: unknown, muted: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof tabId !== 'string' || typeof muted !== 'boolean') throw new TypeError('Invalid tab audio state')
+    return tabsManager!.setTabMuted(tabId, muted)
+  })
+  ipcMain.handle('browser:save-pdf', (event, options: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof options !== 'object' || options === null) throw new TypeError('Invalid PDF options')
+    const { tabId, filename, landscape, pageSize } = options as Record<string, unknown>
+    if (
+      (tabId !== undefined && typeof tabId !== 'string')
+      || (filename !== undefined && typeof filename !== 'string')
+      || (landscape !== undefined && typeof landscape !== 'boolean')
+      || (pageSize !== undefined && pageSize !== 'A4' && pageSize !== 'Letter' && pageSize !== 'Legal')
+    ) throw new TypeError('Invalid PDF options')
+    return tabsManager!.savePdf({ tabId, filename, landscape, pageSize })
+  })
+  ipcMain.handle('downloads:list', (event) => {
+    assertTrustedShellSender(event)
+    return tabsManager!.listDownloads()
+  })
+  ipcMain.handle('downloads:cancel', (event, downloadId: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof downloadId !== 'string') throw new TypeError('Invalid download ID')
+    return tabsManager!.manageDownloads('cancel', downloadId)
+  })
+  ipcMain.handle('downloads:clear-finished', (event) => {
+    assertTrustedShellSender(event)
+    return tabsManager!.manageDownloads('clear')
+  })
+  ipcMain.handle('downloads:show-in-folder', (event, downloadId: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof downloadId !== 'string') throw new TypeError('Invalid download ID')
+    tabsManager!.showDownloadInFolder(downloadId)
+  })
+  ipcMain.handle('bookmarks:list', (event) => {
+    assertTrustedShellSender(event)
+    return bookmarkStore!.list()
+  })
+  ipcMain.handle('bookmarks:add', async (event, url: unknown, title: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof url !== 'string' || typeof title !== 'string') throw new TypeError('Invalid bookmark')
+    await bookmarkStore!.add({ url, title })
+    return publishBookmarks()
+  })
+  ipcMain.handle('bookmarks:rename', async (event, id: unknown, title: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof id !== 'string' || typeof title !== 'string') throw new TypeError('Invalid bookmark update')
+    await bookmarkStore!.rename(id, title)
+    return publishBookmarks()
+  })
+  ipcMain.handle('bookmarks:remove', async (event, id: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof id !== 'string') throw new TypeError('Invalid bookmark ID')
+    await bookmarkStore!.remove(id)
+    return publishBookmarks()
+  })
+  ipcMain.handle('visit-history:list', (event) => {
+    assertTrustedShellSender(event)
+    return historyStore!.list()
+  })
+  ipcMain.handle('visit-history:remove', async (event, id: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof id !== 'string') throw new TypeError('Invalid history entry ID')
+    await historyStore!.remove(id)
+    return publishVisitHistory()
+  })
+  ipcMain.handle('visit-history:clear', async (event) => {
+    assertTrustedShellSender(event)
+    await historyStore!.clear()
+    return publishVisitHistory()
+  })
+  ipcMain.handle('browsing-data:summary', (event) => {
+    assertTrustedShellSender(event)
+    return currentBrowsingDataSummary()
+  })
+  ipcMain.handle('browsing-data:site-summary', (event, url: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof url !== 'string') throw new TypeError('Invalid website')
+    return currentBrowsingDataSiteSummary(url)
+  })
+  ipcMain.handle('browsing-data:websites', (event) => {
+    assertTrustedShellSender(event)
+    return currentBrowsingDataWebsites()
+  })
+  ipcMain.handle('browsing-data:clear', (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (!value || typeof value !== 'object') throw new TypeError('Invalid browsing-data options')
+    const { history, cookiesAndSiteData, cache, origin } = value as Record<string, unknown>
+    if (
+      typeof history !== 'boolean'
+      || typeof cookiesAndSiteData !== 'boolean'
+      || typeof cache !== 'boolean'
+      || (origin !== undefined && typeof origin !== 'string')
+    ) {
+      throw new TypeError('Invalid browsing-data options')
+    }
+    return clearBrowsingData({ history, cookiesAndSiteData, cache, ...(origin ? { origin } : {}) })
+  })
+  ipcMain.handle('browser:set-tab-human-interaction-locked', (event, tabId: unknown, locked: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof tabId !== 'string' || typeof locked !== 'boolean') throw new TypeError('Invalid tab interaction lock')
+    return tabsManager!.setTabHumanInteractionLocked(tabId, locked)
+  })
+  ipcMain.handle('browser:set-all-human-interaction-locked', (event, locked: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof locked !== 'boolean') throw new TypeError('Invalid global interaction lock')
+    return tabsManager!.setAllHumanInteractionLocked(locked)
+  })
+  ipcMain.handle('browser:pick-element', async (event, tabId) => {
+    assertTrustedShellSender(event)
+    const result = await tabsManager!.pickElement(tabId)
+    if (result.canceled || !result.content) return { canceled: true, copied: false }
+    await copyTextToClipboard(result.content)
+    return { canceled: false, copied: true }
+  })
+  ipcMain.handle('browser:capture-element', async (event, tabId) => {
+    assertTrustedShellSender(event)
+    const screenshot = await tabsManager!.captureElementScreenshot(tabId)
+    if (screenshot.canceled || !screenshot.data) return { canceled: true, copied: false }
+    const size = await copyPngToClipboard(screenshot.data)
+    return { canceled: false, copied: true, width: size.width, height: size.height }
+  })
+  ipcMain.handle('browser:capture-page', async (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Invalid page capture options')
+    const { tabId, fullPage } = value as Record<string, unknown>
+    if (
+      (tabId !== undefined && typeof tabId !== 'string')
+      || (fullPage !== undefined && typeof fullPage !== 'boolean')
+    ) {
+      throw new TypeError('Invalid page capture options')
+    }
+    const options: BrowserPageCaptureOptions = {
+      ...(tabId !== undefined ? { tabId } : {}),
+      ...(fullPage !== undefined ? { fullPage } : {})
+    }
+    const screenshot = await tabsManager!.screenshot(options)
+    const size = await copyPngToClipboard(screenshot.data)
+    return { copied: true, width: size.width, height: size.height }
+  })
+  ipcMain.handle('browser:element-inspection', (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Invalid element inspection options')
+    const { tabId, ref, selector } = value as Record<string, unknown>
+    if (
+      (tabId !== undefined && typeof tabId !== 'string')
+      || (ref !== undefined && typeof ref !== 'string')
+      || (selector !== undefined && typeof selector !== 'string')
+    ) {
+      throw new TypeError('Invalid element inspection options')
+    }
+    return tabsManager!.elementInspection(value as BrowserElementInspectionOptions)
+  })
+  ipcMain.handle('browser:cancel-element-picker', (event, tabId) => {
+    assertTrustedShellSender(event)
+    return tabsManager!.cancelElementPicker(tabId)
+  })
+  ipcMain.handle('browser:accessibility-audit', (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Invalid accessibility audit options')
+    const { tabId, selector, standard, maxViolations, maxNodesPerViolation } = value as Record<string, unknown>
+    if (
+      (tabId !== undefined && typeof tabId !== 'string')
+      || (selector !== undefined && typeof selector !== 'string')
+      || (standard !== undefined && !['wcag-aa', 'wcag-aaa', 'best-practice', 'all'].includes(String(standard)))
+      || (maxViolations !== undefined && typeof maxViolations !== 'number')
+      || (maxNodesPerViolation !== undefined && typeof maxNodesPerViolation !== 'number')
+    ) {
+      throw new TypeError('Invalid accessibility audit options')
+    }
+    return tabsManager!.accessibilityAudit(value as BrowserAccessibilityAuditOptions)
+  })
+  ipcMain.handle('browser:performance', (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Invalid performance options')
+    const { tabId, settleMs } = value as Record<string, unknown>
+    if (
+      (tabId !== undefined && typeof tabId !== 'string')
+      || (settleMs !== undefined && typeof settleMs !== 'number')
+    ) {
+      throw new TypeError('Invalid performance options')
+    }
+    return tabsManager!.performanceReport(value as BrowserPerformanceOptions)
+  })
+  ipcMain.handle('browser:design-overview', (event, tabId: unknown): Promise<BrowserDesignOverviewReport> => {
+    assertTrustedShellSender(event)
+    if (tabId !== undefined && typeof tabId !== 'string') throw new TypeError('Invalid design overview tab')
+    return tabsManager!.designOverview(tabId)
+  })
+  ipcMain.handle('browser:page-metadata', (event, tabId: unknown): Promise<BrowserPageMetadataReport> => {
+    assertTrustedShellSender(event)
+    if (tabId !== undefined && typeof tabId !== 'string') throw new TypeError('Invalid page metadata tab')
+    return tabsManager!.pageMetadata(tabId)
+  })
+  ipcMain.handle('browser:security', (event, tabId: unknown): BrowserSecurityReport => {
+    assertTrustedShellSender(event)
+    if (tabId !== undefined && typeof tabId !== 'string') throw new TypeError('Invalid security report tab')
+    return tabsManager!.securityReport(tabId)
+  })
+  ipcMain.handle('browser:code-coverage', (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Invalid code coverage options')
+    const { tabId, action, mode, reload } = value as Record<string, unknown>
+    if (
+      (tabId !== undefined && typeof tabId !== 'string')
+      || (action !== undefined && !['get', 'start', 'stop', 'clear'].includes(String(action)))
+      || (mode !== undefined && !['function', 'block'].includes(String(mode)))
+      || (reload !== undefined && typeof reload !== 'boolean')
+    ) {
+      throw new TypeError('Invalid code coverage options')
+    }
+    return tabsManager!.codeCoverage(value as BrowserCodeCoverageOptions)
+  })
+  ipcMain.handle('browser:memory', (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Invalid memory options')
+    const { tabId, action, collectGarbage } = value as Record<string, unknown>
+    if (
+      (tabId !== undefined && typeof tabId !== 'string')
+      || (action !== undefined && !['measure', 'set-baseline', 'clear-baseline'].includes(String(action)))
+      || (collectGarbage !== undefined && typeof collectGarbage !== 'boolean')
+    ) {
+      throw new TypeError('Invalid memory options')
+    }
+    return tabsManager!.memoryReport(value as BrowserMemoryOptions)
+  })
+  ipcMain.handle('browser:debug-report', (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Invalid debug report options')
+    const { tabId, maxConsoleMessages, maxNetworkRequests, includeSuccessfulRequests } = value as Record<string, unknown>
+    if (
+      (tabId !== undefined && typeof tabId !== 'string')
+      || (maxConsoleMessages !== undefined && typeof maxConsoleMessages !== 'number')
+      || (maxNetworkRequests !== undefined && typeof maxNetworkRequests !== 'number')
+      || (includeSuccessfulRequests !== undefined && typeof includeSuccessfulRequests !== 'boolean')
+    ) {
+      throw new TypeError('Invalid debug report options')
+    }
+    return tabsManager!.debugReport(value as BrowserDebugReportOptions)
+  })
+  ipcMain.handle('browser:set-diagnostic-log-preservation', (event, tabId: unknown, preserve: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof tabId !== 'string' || typeof preserve !== 'boolean') throw new TypeError('Invalid diagnostic log preservation state')
+    tabsManager!.setDiagnosticLogPreservation(tabId, preserve)
+    return tabsManager!.getState()
+  })
+  ipcMain.handle('browser:repro-recording', (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Invalid repro recording options')
+    const { action, tabId } = value as Record<string, unknown>
+    if (
+      !['start', 'get', 'stop', 'clear'].includes(String(action))
+      || (tabId !== undefined && typeof tabId !== 'string')
+    ) throw new TypeError('Invalid repro recording options')
+    return tabsManager!.reproRecording(action as BrowserReproAction, tabId as string | undefined)
+  })
+  ipcMain.handle('browser:dom-changes', (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Invalid DOM changes options')
+    const { action, tabId } = value as Record<string, unknown>
+    if (
+      !['start', 'get', 'stop', 'clear'].includes(String(action))
+      || (tabId !== undefined && typeof tabId !== 'string')
+    ) throw new TypeError('Invalid DOM changes options')
+    return tabsManager!.domChanges(action as BrowserDomChangesAction, tabId as string | undefined)
+  })
+  ipcMain.handle('browser:visual-compare', async (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Invalid visual comparison options')
+    const { action, tabId, threshold, settleMs } = value as Record<string, unknown>
+    if (
+      !['get', 'set-baseline', 'compare', 'clear'].includes(String(action))
+      || (tabId !== undefined && typeof tabId !== 'string')
+      || (threshold !== undefined && typeof threshold !== 'number')
+      || (settleMs !== undefined && typeof settleMs !== 'number')
+    ) throw new TypeError('Invalid visual comparison options')
+    const result = await tabsManager!.visualCompare(value as BrowserVisualCompareOptions)
+    return {
+      ...result.report,
+      ...(result.diffPng ? { diffPngDataUrl: nativeImage.createFromBuffer(result.diffPng).toDataURL() } : {})
+    }
+  })
+  ipcMain.handle('browser:copy-visual-diff', async (event, tabId: unknown) => {
+    assertTrustedShellSender(event)
+    if (tabId !== undefined && typeof tabId !== 'string') throw new TypeError('Invalid visual comparison tab')
+    const size = await copyPngToClipboard(tabsManager!.visualDiff(tabId as string | undefined))
+    return { copied: true, width: size.width, height: size.height }
+  })
+  ipcMain.handle('browser:inspector-issues', (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Invalid inspector issue options')
+    const { tabId, clear } = value as Record<string, unknown>
+    if ((tabId !== undefined && typeof tabId !== 'string') || (clear !== undefined && typeof clear !== 'boolean')) {
+      throw new TypeError('Invalid inspector issue options')
+    }
+    return tabsManager!.inspectorIssues(tabId as string | undefined, clear === true)
+  })
+  ipcMain.handle('browser:console', (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Invalid console options')
+    const { tabId, clear } = value as Record<string, unknown>
+    if ((tabId !== undefined && typeof tabId !== 'string') || (clear !== undefined && typeof clear !== 'boolean')) {
+      throw new TypeError('Invalid console options')
+    }
+    return sanitizeConsoleMessages(tabsManager!.consoleMessages(tabId as string | undefined, clear === true))
+  })
+  ipcMain.handle('browser:network', (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Invalid network options')
+    const { tabId, clear } = value as Record<string, unknown>
+    if ((tabId !== undefined && typeof tabId !== 'string') || (clear !== undefined && typeof clear !== 'boolean')) {
+      throw new TypeError('Invalid network options')
+    }
+    return tabsManager!.networkRequests(tabId as string | undefined, clear === true)
+  })
+  ipcMain.handle('browser:network-request', (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Invalid network request options')
+    const { tabId, requestId, maxChars } = value as Record<string, unknown>
+    if (
+      typeof tabId !== 'string'
+      || typeof requestId !== 'string'
+      || !requestId
+      || (maxChars !== undefined && typeof maxChars !== 'number')
+    ) {
+      throw new TypeError('Invalid network request options')
+    }
+    return tabsManager!.networkRequestDetails(tabId, requestId, maxChars as number | undefined)
+  })
+  ipcMain.handle('browser:network-replay', (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Invalid network replay options')
+    const { tabId, requestId, confirmSideEffects } = value as Record<string, unknown>
+    if (
+      typeof tabId !== 'string'
+      || typeof requestId !== 'string'
+      || !requestId
+      || (confirmSideEffects !== undefined && typeof confirmSideEffects !== 'boolean')
+    ) {
+      throw new TypeError('Invalid network replay options')
+    }
+    return tabsManager!.replayNetworkRequest(tabId, requestId, confirmSideEffects === true)
+  })
+  ipcMain.handle('browser:network-search', (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Invalid network search options')
+    const { tabId, query, caseSensitive, maxResults, maxRequests, maxBodyChars } = value as Record<string, unknown>
+    if (
+      (tabId !== undefined && typeof tabId !== 'string')
+      || typeof query !== 'string'
+      || (caseSensitive !== undefined && typeof caseSensitive !== 'boolean')
+      || (maxResults !== undefined && typeof maxResults !== 'number')
+      || (maxRequests !== undefined && typeof maxRequests !== 'number')
+      || (maxBodyChars !== undefined && typeof maxBodyChars !== 'number')
+    ) {
+      throw new TypeError('Invalid network search options')
+    }
+    return tabsManager!.networkSearch(value as BrowserNetworkSearchOptions)
+  })
+  ipcMain.handle('browser:network-har', (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Invalid network HAR options')
+    const { tabId, query, resourceType, errorsOnly, includeBodies, maxRequests, maxBodyChars } = value as Record<string, unknown>
+    if (
+      (tabId !== undefined && typeof tabId !== 'string')
+      || (query !== undefined && typeof query !== 'string')
+      || (resourceType !== undefined && typeof resourceType !== 'string')
+      || (errorsOnly !== undefined && typeof errorsOnly !== 'boolean')
+      || (includeBodies !== undefined && typeof includeBodies !== 'boolean')
+      || (maxRequests !== undefined && typeof maxRequests !== 'number')
+      || (maxBodyChars !== undefined && typeof maxBodyChars !== 'number')
+    ) {
+      throw new TypeError('Invalid network HAR options')
+    }
+    return tabsManager!.networkHar(value as BrowserNetworkHarOptions)
+  })
+  ipcMain.handle('browser:capture-area', async (event, tabId) => {
+    assertTrustedShellSender(event)
+    const screenshot = await tabsManager!.captureScreenshotArea(tabId)
+    if (screenshot.canceled || !screenshot.data) return { canceled: true, copied: false }
+    const size = await copyPngToClipboard(screenshot.data)
+    return { canceled: false, copied: true, width: size.width, height: size.height }
+  })
+  ipcMain.handle('browser:cancel-area-capture', (event, tabId) => {
+    assertTrustedShellSender(event)
+    return tabsManager!.cancelScreenshotArea(tabId)
+  })
+  ipcMain.handle('browser:show', (event) => { assertTrustedShellSender(event); showWindow() })
+  ipcMain.handle('browser:quit', (event) => {
+    assertTrustedShellSender(event)
+    quitting = true
+    app.quit()
+  })
+  ipcMain.handle('settings:get', (event) => { assertTrustedShellSender(event); return { ...settings } })
+  ipcMain.handle('settings:get-system-theme', (event) => {
+    assertTrustedShellSender(event)
+    return nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
+  })
+  ipcMain.handle('settings:set-theme', async (event, theme: unknown) => {
+    assertTrustedShellSender(event)
+    if (!isThemeName(theme)) throw new TypeError('Unsupported theme')
+    settings = { ...settings, theme }
+    await settingsStore!.save(settings)
+    applyTheme(theme)
+    publishSettings()
+    return { ...settings }
+  })
+  ipcMain.handle('settings:set-interface-scale', async (event, scale: unknown) => {
+    assertTrustedShellSender(event)
+    if (!isInterfaceScale(scale)) throw new TypeError('Unsupported interface size')
+    settings = { ...settings, interfaceScale: scale }
+    await settingsStore!.save(settings)
+    applyInterfaceScale(scale)
+    publishSettings()
+    return { ...settings }
+  })
+  ipcMain.handle('settings:set-search-engine', async (event, searchEngine: unknown) => {
+    assertTrustedShellSender(event)
+    if (!isSearchEngineName(searchEngine)) throw new TypeError('Unsupported search engine')
+    settings = { ...settings, searchEngine }
+    await settingsStore!.save(settings)
+    publishSettings()
+    return { ...settings }
+  })
+  ipcMain.handle('settings:get-default-download-directory', (event) => {
+    assertTrustedShellSender(event)
+    return defaultDownloadDirectory()
+  })
+  ipcMain.handle('settings:choose-download-directory', async (event) => {
+    assertTrustedShellSender(event)
+    if (!mainWindow) throw new Error('The Bronom window is not available')
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Choose download folder',
+      defaultPath: effectiveDownloadDirectory(),
+      buttonLabel: 'Use this folder',
+      properties: ['openDirectory', 'createDirectory', 'promptToCreate']
+    })
+    const directory = result.filePaths[0]
+    if (result.canceled || !directory) return { settings: { ...settings }, canceled: true }
+    return {
+      settings: await applyDownloadSettings({ ...settings, downloadDirectory: resolve(directory) }),
+      canceled: false
+    }
+  })
+  ipcMain.handle('settings:set-ask-where-to-save-downloads', (event, enabled: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof enabled !== 'boolean') throw new TypeError('Ask-before-saving must be a boolean')
+    return applyDownloadSettings({ ...settings, askWhereToSaveDownloads: enabled })
+  })
+  ipcMain.handle('settings:reset-downloads', (event) => {
+    assertTrustedShellSender(event)
+    return applyDownloadSettings({ ...settings, downloadDirectory: null, askWhereToSaveDownloads: false })
+  })
+  ipcMain.handle('settings:open-download-directory', async (event) => {
+    assertTrustedShellSender(event)
+    const directory = effectiveDownloadDirectory()
+    await mkdir(directory, { recursive: true })
+    const error = await shell.openPath(directory)
+    if (error) throw new Error(error)
+  })
+  ipcMain.handle('settings:set-memory-saver-enabled', async (event, enabled: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof enabled !== 'boolean') throw new TypeError('Memory Saver state must be a boolean')
+    settings = { ...settings, memorySaverEnabled: enabled }
+    await settingsStore!.save(settings)
+    tabsManager?.setMemorySaverSettings(settings.memorySaverEnabled, settings.memorySaverTimeoutMinutes)
+    publishSettings()
+    return { ...settings }
+  })
+  ipcMain.handle('settings:set-memory-saver-timeout', async (event, timeoutMinutes: unknown) => {
+    assertTrustedShellSender(event)
+    if (!isMemorySaverTimeoutMinutes(timeoutMinutes)) throw new TypeError('Unsupported Memory Saver timeout')
+    settings = { ...settings, memorySaverTimeoutMinutes: timeoutMinutes }
+    await settingsStore!.save(settings)
+    tabsManager?.setMemorySaverSettings(settings.memorySaverEnabled, settings.memorySaverTimeoutMinutes)
+    publishSettings()
+    return { ...settings }
+  })
+  ipcMain.handle('settings:set-hide-in-tray', async (event, enabled: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof enabled !== 'boolean') throw new TypeError('Hide in tray must be a boolean')
+    settings = { ...settings, hideInTray: enabled }
+    await settingsStore!.save(settings)
+    publishSettings()
+    return { ...settings }
+  })
+  ipcMain.handle('settings:set-attention-sound', async (event, enabled: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof enabled !== 'boolean') throw new TypeError('Attention sound must be a boolean')
+    settings = { ...settings, attentionSound: enabled }
+    await settingsStore!.save(settings)
+    publishSettings()
+    return { ...settings }
+  })
+  ipcMain.handle('settings:set-attention-sound-cue', async (event, cue: unknown) => {
+    assertTrustedShellSender(event)
+    if (!isAttentionSoundCue(cue)) throw new TypeError('Unsupported attention sound')
+    settings = { ...settings, attentionSoundCue: cue }
+    await settingsStore!.save(settings)
+    publishSettings()
+    return { ...settings }
+  })
+  ipcMain.handle('settings:set-mcp-authentication', async (event, enabled: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof enabled !== 'boolean') throw new TypeError('MCP authentication must be a boolean')
+    settings = { ...settings, mcpAuthentication: enabled }
+    await settingsStore!.save(settings)
+    mcpServer?.setAuthenticationToken(enabled ? mcpTokenConfiguration?.token : undefined)
+    publishSettings()
+    await tabsManager?.reloadHome()
+    console.warn(enabled
+      ? '[mcp] Authentication enabled.'
+      : '[mcp] Authentication disabled in Settings. Any local process can control this profile.')
+    return { ...settings }
+  })
+  ipcMain.handle('settings:set-mcp-port', async (event, port: unknown) => {
+    assertTrustedShellSender(event)
+    return setMcpPort(port as number)
+  })
+  ipcMain.handle('settings:set-check-on-startup', async (event, enabled: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof enabled !== 'boolean') throw new TypeError('Startup update check must be a boolean')
+    settings = { ...settings, checkForUpdatesOnStartup: enabled }
+    await settingsStore!.save(settings)
+    publishSettings()
+    return { ...settings }
+  })
+  ipcMain.handle('permissions:list', (event) => { assertTrustedShellSender(event); return sitePermissionStore!.list() })
+  ipcMain.handle(
+    'permissions:set',
+    async (event, origin: unknown, permission: unknown, decision: unknown) => {
+      assertTrustedShellSender(event)
+      if (typeof origin !== 'string' || typeof permission !== 'string' || !isSitePermissionDecision(decision)) {
+        throw new TypeError('Invalid site permission')
+      }
+      const entry = await sitePermissionStore!.set(origin, permission, decision)
+      publishSitePermissions()
+      return entry
+    }
+  )
+  ipcMain.handle('permissions:remove', async (event, origin: unknown, permission: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof origin !== 'string' || typeof permission !== 'string') throw new TypeError('Invalid site permission')
+    const removed = await sitePermissionStore!.remove(origin, permission)
+    publishSitePermissions()
+    return removed
+  })
+  ipcMain.handle('permissions:clear', async (event) => {
+    assertTrustedShellSender(event)
+    await sitePermissionStore!.clear()
+    publishSitePermissions()
+  })
+  ipcMain.handle('credentials:status', (event) => {
+    assertTrustedShellSender(event)
+    return { ...credentialStorageStatus }
+  })
+  ipcMain.handle('credentials:list', (event) => {
+    assertTrustedShellSender(event)
+    return credentialStore?.list() ?? []
+  })
+  ipcMain.handle('credentials:fill', async (event, tabId: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof tabId !== 'string') throw new TypeError('Invalid tab ID')
+    if (!credentialStorageStatus.available || !credentialStore || !tabsManager) return false
+    const origin = tabsManager.credentialOrigin(tabId)
+    if (!origin) return false
+    const choices = credentialStore.list().filter((credential) => credential.origin === origin).slice(0, 8)
+    if (!choices.length) return false
+    let selected: CredentialSummary | undefined = choices[0]
+    if (choices.length > 1) {
+      const buttons = [...choices.map((credential) => credential.username || 'Unnamed account'), 'Cancel']
+      const { response } = await showMessageBox({
+        type: 'question',
+        title: 'Choose a saved account',
+        message: `Fill a saved password for ${origin}`,
+        detail: 'Bronom pauses new agent commands before decrypting and filling the password.',
+        buttons,
+        defaultId: 0,
+        cancelId: buttons.length - 1,
+        noLink: true
+      })
+      selected = choices[response]
+      if (!selected) return false
+    }
+    if (!selected) return false
+    setMcpPaused(true)
+    const waitStartedAt = Date.now()
+    while ((mcpServer?.getActiveRequestCount() ?? 0) > 0 && Date.now() - waitStartedAt < 5_000) {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    if ((mcpServer?.getActiveRequestCount() ?? 0) > 0) {
+      throw new Error('Could not fill the password while an MCP command was still active')
+    }
+    const password = await credentialStore.password(selected.id)
+    return tabsManager.fillCredential(tabId, origin, selected.username, password)
+  })
+  ipcMain.handle('credentials:remove', async (event, id: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof id !== 'string') throw new TypeError('Invalid credential ID')
+    const removed = await credentialStore?.remove(id) ?? false
+    if (removed) publishCredentials()
+    return removed
+  })
+  ipcMain.handle('credentials:clear', async (event) => {
+    assertTrustedShellSender(event)
+    await credentialStore?.clear()
+    publishCredentials()
+  })
+  ipcMain.handle('updates:get-state', (event) => { assertTrustedShellSender(event); return { ...updateState } })
+  ipcMain.handle('updates:check', (event) => { assertTrustedShellSender(event); return checkForUpdates() })
+  ipcMain.handle('updates:download', (event) => { assertTrustedShellSender(event); return downloadUpdate() })
+  ipcMain.handle('updates:install', (event) => { assertTrustedShellSender(event); return installDownloadedUpdate() })
+  ipcMain.on('browser:toolbar-height', (event, height: number) => {
+    assertMainShellSender(event)
+    tabsManager?.setToolbarHeight(scaleShellMetric(height, event.sender.getZoomFactor()))
+  })
+  ipcMain.on('browser:content-insets', (event, value: unknown) => {
+    assertMainShellSender(event)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Invalid browser content insets')
+    const { top, right, bottom, left } = value as Record<string, unknown>
+    if (![top, right, bottom, left].every((inset) => typeof inset === 'number' && Number.isFinite(inset))) {
+      throw new TypeError('Invalid browser content insets')
+    }
+    tabsManager?.setContentInsets({
+      top: scaleShellMetric(top as number, event.sender.getZoomFactor()),
+      right: scaleShellMetric(right as number, event.sender.getZoomFactor()),
+      bottom: scaleShellMetric(bottom as number, event.sender.getZoomFactor()),
+      left: scaleShellMetric(left as number, event.sender.getZoomFactor())
+    })
+  })
+}
+
+async function createWindow(): Promise<void> {
+  bookmarkStore = new BookmarkStore(join(app.getPath('userData'), 'bookmarks.json'))
+  await bookmarkStore.load()
+  historyStore = new HistoryStore(join(app.getPath('userData'), 'history.json'))
+  await historyStore.load()
+  settingsStore = new SettingsStore(join(app.getPath('userData'), 'settings.json'))
+  settings = await settingsStore.load()
+  if (process.env.BRONOM_MCP_PORT !== undefined) {
+    const overriddenPort = Number(process.env.BRONOM_MCP_PORT)
+    if (!isValidMcpPort(overriddenPort)) throw new Error('BRONOM_MCP_PORT must be an integer from 1024 through 65535')
+    settings = { ...settings, mcpPort: overriddenPort }
+  }
+  mcpPort = settings.mcpPort
+  persistentSession?.setDownloadPath(effectiveDownloadDirectory())
+  mcpUrl = `http://${MCP_HOST}:${mcpPort}/mcp`
+  await configureCredentialStore()
+  if (MCP_AUTH_DISABLED) settings = { ...settings, mcpAuthentication: false }
+  applyTheme(settings.theme)
+  windowStateStore = new WindowStateStore(join(app.getPath('userData'), 'window-state.json'))
+  panelWindowStateStore = new WindowStateStore(join(app.getPath('userData'), 'panel-window-state.json'))
+  const savedWindowState = await windowStateStore.load()
+  const displays = screen.getAllDisplays()
+  const primaryDisplay = screen.getPrimaryDisplay()
+  const orderedDisplays = [primaryDisplay, ...displays.filter((display) => display.id !== primaryDisplay.id)]
+  const bounds = restoreWindowBounds(savedWindowState, orderedDisplays, { width: 1320, height: 860 })
+  mainWindow = new BrowserWindow({
+    ...bounds,
+    minWidth: 760,
+    minHeight: 520,
+    show: false,
+    title: 'Bronom',
+    backgroundColor: THEME_BACKGROUND[resolvedTheme(settings.theme)],
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  })
+  mainWindow.webContents.setZoomFactor(settings.interfaceScale)
+
+  tabsManager = new BrowserTabsManager(mainWindow, {
+    partition: PARTITION,
+    storePath: join(app.getPath('userData'), 'tabs.json'),
+    mcpUrl,
+    profilePath: app.getPath('userData'),
+    downloadDirectory: effectiveDownloadDirectory(),
+    askWhereToSaveDownloads: settings.askWhereToSaveDownloads,
+    memorySaverEnabled: settings.memorySaverEnabled,
+    memorySaverTimeoutMinutes: settings.memorySaverTimeoutMinutes,
+    getSearchEngine: () => settings.searchEngine,
+    onUserInteraction: acknowledgeUserAttention,
+    onShortcutRequested: (action) => {
+      if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('browser:shortcut-requested', action)
+    },
+    onStateChanged: (state) => sendToPanelWindow('browser:state-changed', state),
+    onDownloadsChanged: (downloads) => sendToPanelWindow('browser:downloads-changed', downloads),
+    onPageVisited: ({ url, title }) => {
+      void historyStore?.record({ url, title })
+        .then(() => publishVisitHistory())
+        .catch((error) => console.error('[history] Failed to record visit:', error))
+    },
+    onCredentialSubmitted: (candidate) => { void handleCredentialCandidate(candidate).catch((error) => console.error('[credentials] Failed to save password:', error)) }
+  })
+  registerIpc()
+
+  mainWindow.on('resize', () => tabsManager?.layout())
+  mainWindow.on('resize', scheduleWindowStateSave)
+  mainWindow.on('move', scheduleWindowStateSave)
+  mainWindow.on('maximize', scheduleWindowStateSave)
+  mainWindow.on('unmaximize', scheduleWindowStateSave)
+  mainWindow.on('enter-full-screen', scheduleWindowStateSave)
+  mainWindow.on('leave-full-screen', scheduleWindowStateSave)
+  mainWindow.on('close', (event) => {
+    if (!quitting && settings.hideInTray) {
+      event.preventDefault()
+      panelWindow?.hide()
+      mainWindow?.hide()
+      return
+    }
+    if (!quitting) {
+      event.preventDefault()
+      quitting = true
+      setImmediate(() => app.quit())
+    }
+  })
+  mainWindow.on('closed', () => {
+    if (panelWindow && !panelWindow.isDestroyed()) panelWindow.close()
+    mainWindow = null
+  })
+  mainWindow.on('focus', acknowledgeUserAttention)
+  mainWindow.webContents.on('focus', acknowledgeUserAttention)
+  mainWindow.webContents.on('before-input-event', (_event, input) => {
+    if (input.type === 'keyDown' || input.type === 'rawKeyDown') acknowledgeUserAttention()
+  })
+  mainWindow.webContents.on('before-mouse-event', (_event, mouse) => {
+    if (mouse.type === 'mouseDown' || mouse.type === 'contextMenu') acknowledgeUserAttention()
+  })
+  mainWindow.webContents.on('did-finish-load', () => {
+    applyInterfaceScale(settings.interfaceScale)
+    if (tabsManager && mainWindow && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send('browser:state-changed', tabsManager.getState())
+      mainWindow.webContents.send('updates:changed', updateState)
+      mainWindow.webContents.send('mcp:changed', currentMcpControlState())
+      mainWindow.webContents.send('bookmarks:changed', bookmarkStore?.list() ?? [])
+      mainWindow.webContents.send('visit-history:changed', historyStore?.list() ?? [])
+    }
+  })
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url !== trustedShellUrl()) event.preventDefault()
+  })
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+
+  if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) {
+    await mainWindow.loadURL(trustedShellUrl())
+  } else {
+    await mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+  }
+  await tabsManager.initialize()
+  if (!mainWindow.webContents.isDestroyed()) {
+    mainWindow.webContents.send('browser:state-changed', tabsManager.getState())
+    mainWindow.webContents.send('settings:changed', settings)
+    mainWindow.webContents.send('updates:changed', updateState)
+    mainWindow.webContents.send('mcp:changed', currentMcpControlState())
+    mainWindow.webContents.send('credentials:changed', credentialStore?.list() ?? [])
+    mainWindow.webContents.send('bookmarks:changed', bookmarkStore?.list() ?? [])
+    mainWindow.webContents.send('visit-history:changed', historyStore?.list() ?? [])
+  }
+  if (savedWindowState?.maximized) mainWindow.maximize()
+  if (savedWindowState?.fullScreen) mainWindow.setFullScreen(true)
+  mainWindow.show()
+}
+
+async function configurePersistentSession(): Promise<void> {
+  sitePermissionStore = new SitePermissionStore(join(app.getPath('userData'), 'site-permissions.json'))
+  await sitePermissionStore.load()
+  persistentSession = session.fromPartition(PARTITION, { cache: true })
+  persistentSession.setDownloadPath(defaultDownloadDirectory())
+  persistentSession.setPermissionCheckHandler((_webContents, permission, requestingOrigin, details) => {
+    const requestingUrl = details.requestingUrl || details.securityOrigin || requestingOrigin
+    if (requestingUrl.startsWith('bronom://home') && permission === 'clipboard-sanitized-write') return true
+    const origin =
+      normalizeSitePermissionOrigin(requestingOrigin) ??
+      normalizeSitePermissionOrigin(details.securityOrigin || '') ??
+      normalizeSitePermissionOrigin(requestingUrl)
+    if (permission === 'media' || permission === 'fileSystem') return false
+    return Boolean(origin && sitePermissionStore?.get(origin, permission) === 'allow')
+  })
+  persistentSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    const requestingUrl = details.requestingUrl || webContents.getURL()
+    if (requestingUrl.startsWith('bronom://home')) {
+      callback(permission === 'clipboard-sanitized-write')
+      return
+    }
+    const origin = normalizeSitePermissionOrigin(requestingUrl)
+    if (!origin) {
+      callback(false)
+      return
+    }
+    const requiresFreshConsent = permission === 'media' || permission === 'fileSystem'
+    const remembered = requiresFreshConsent ? undefined : sitePermissionStore?.get(origin, permission)
+    if (remembered) {
+      callback(remembered === 'allow')
+      return
+    }
+    const permissionDetail = (() => {
+      if (permission === 'media' && 'mediaTypes' in details) {
+        const types = details.mediaTypes?.map((type) => (type === 'video' ? 'camera' : 'microphone')) ?? []
+        return types.length ? `Requested devices: ${types.join(' and ')}.` : 'Requested media devices were not specified.'
+      }
+      if (permission === 'fileSystem' && 'filePath' in details) {
+        const access = details.fileAccessType ?? 'unspecified access'
+        return `Requested ${access}: ${details.filePath || 'unspecified path'}. This decision will apply only once.`
+      }
+      return 'Bronom can remember this choice for the exact website origin.'
+    })()
+    void showMessageBox({
+      type: 'question',
+      title: 'Site permission',
+      message: `${origin} requests “${permission}” permission.`,
+      detail: requiresFreshConsent
+        ? `${permissionDetail} Bronom will ask again next time.`
+        : `${permissionDetail} You can change it later in Settings → Site permissions.`,
+      buttons: ['Deny', 'Allow'],
+      defaultId: 0,
+      cancelId: 0
+    })
+      .then(async ({ response }) => {
+        const decision: SitePermissionDecision = response === 1 ? 'allow' : 'deny'
+        try {
+          if (!requiresFreshConsent) {
+            await sitePermissionStore?.set(origin, permission, decision)
+            publishSitePermissions()
+          }
+        } catch (error) {
+          console.error('[permissions] Failed to persist site permission:', error)
+        }
+        callback(decision === 'allow')
+      })
+      .catch(() => callback(false))
+  })
+}
+
+async function releaseRuntimeResources(): Promise<void> {
+  if (runtimeShutdown) return runtimeShutdown
+  const manager = tabsManager
+  const server = mcpServer
+  tabsManager = null
+  mcpServer = null
+  runtimeShutdown = Promise.allSettled([
+    manager?.flushPersist(),
+    flushWindowState(),
+    flushPanelWindowState(),
+    flushBrowserProfile(),
+    server?.stop()
+  ]).then(() => {
+    manager?.destroy()
+  })
+  return runtimeShutdown
+}
+
+async function installDownloadedUpdate(): Promise<boolean> {
+  if (updateInstallationInProgress) return false
+  if ((updateState.status !== 'downloaded' && updateState.status !== 'install-error') || updatesUnavailableInThisBuild()) return false
+  updateInstallationInProgress = true
+  updateOperation = 'install'
+  publishUpdateState({
+    status: 'installing',
+    percent: undefined,
+    message: 'Installing the update. Bronom will restart automatically.'
+  })
+  try {
+    // electron-updater only asks Electron to quit after the installer has
+    // started successfully. Keep tabs and MCP alive when authorization fails;
+    // the normal before-quit/will-quit handlers perform the eventual shutdown.
+    // Linux package updaters call app.relaunch() before the current process has
+    // released Bronom's single-instance lock. Relaunch only after this PID has
+    // exited so the newly installed binary becomes the lock owner.
+    autoUpdater.quitAndInstall(false, false)
+    const installed = updateState.status !== 'install-error'
+    if (installed && process.platform === 'linux') {
+      scheduleLinuxUpdateRelaunch(process.pid, linuxUpdateExecutable(process.env, process.execPath))
+      mainWindow?.hide()
+      panelWindow?.hide()
+      // BaseUpdater defers this with setImmediate after the synchronous Linux
+      // package installer returns. Quit now so no timer or human action can
+      // ask the old process to load files from the newly replaced app.asar.
+      app.quit()
+    }
+    if (!installed) updateInstallationInProgress = false
+    return installed
+  } catch (error) {
+    updateInstallationInProgress = false
+    console.error('[updates] Install failed:', error)
+    publishUpdateState({
+      status: 'install-error',
+      percent: undefined,
+      message: updateErrorMessage(error, updateOperation, process.platform)
+    })
+    return false
+  } finally {
+    updateOperation = null
+  }
+}
+
+function createRuntimeMcpServer(port: number): McpHttpServer {
+  if (!tabsManager || !mcpTokenConfiguration) throw new Error('MCP runtime is not initialized')
+  return new McpHttpServer(tabsManager, {
+    host: MCP_HOST,
+    port,
+    token: settings.mcpAuthentication ? mcpTokenConfiguration.token : undefined,
+    version: app.getVersion(),
+    showWindow,
+    getUserAttention: () => (userAttention ? { ...userAttention } : null),
+    requestUserAttention,
+    bookmarks: {
+      list: () => bookmarkStore?.list() ?? [],
+      add: async (url, title) => {
+        if (!bookmarkStore) throw new Error('Bookmark storage is unavailable')
+        await bookmarkStore.add({ url, title })
+        return publishBookmarks()
+      },
+      rename: async (id, title) => {
+        if (!bookmarkStore) throw new Error('Bookmark storage is unavailable')
+        await bookmarkStore.rename(id, title)
+        return publishBookmarks()
+      },
+      remove: async (id) => {
+        if (!bookmarkStore) throw new Error('Bookmark storage is unavailable')
+        await bookmarkStore.remove(id)
+        return publishBookmarks()
+      }
+    },
+    history: {
+      list: () => historyStore?.list() ?? [],
+      remove: async (id) => {
+        if (!historyStore) throw new Error('Visit history is unavailable')
+        await historyStore.remove(id)
+        return publishVisitHistory()
+      },
+      clear: async () => {
+        if (!historyStore) throw new Error('Visit history is unavailable')
+        await historyStore.clear()
+        return publishVisitHistory()
+      }
+    },
+    siteData: {
+      inspect: (origin) => currentBrowsingDataSiteSummary(origin),
+      clear: async (origin, dataTypes: SiteDataType[]) => {
+        const site = await currentBrowsingDataSiteSummary(origin)
+        const selected = new Set(dataTypes)
+        await clearBrowsingData({
+          origin: site.origin,
+          history: selected.has('history'),
+          cookiesAndSiteData: selected.has('cookies-and-storage'),
+          cache: selected.has('cache')
+        }, 1)
+        return {
+          origin: site.origin,
+          cleared: dataTypes,
+          remaining: await currentBrowsingDataSiteSummary(site.origin)
+        }
+      }
+    },
+    onTabActivity: (activity) => {
+      if (activity.phase === 'started') activeMcpActivities.add(activity.activityId)
+      else activeMcpActivities.delete(activity.activityId)
+      tabsManager?.handleMcpTabActivity(activity)
+      if (mainWindow && !mainWindow.webContents.isDestroyed()) {
+        mainWindow.webContents.send('browser:mcp-tab-activity', activity)
+      }
+    }
+  })
+}
+
+async function setMcpPort(port: number): Promise<AppSettings> {
+  if (!isValidMcpPort(port)) throw new TypeError('MCP port must be an integer from 1024 through 65535')
+  if (port === mcpPort && mcpRuntimeStatus === 'ready') return { ...settings }
+
+  const candidate = createRuntimeMcpServer(port)
+  candidate.setPaused(mcpPaused)
+  try {
+    await candidate.start()
+  } catch (error) {
+    await candidate.stop().catch(() => undefined)
+    throw new Error(`Could not listen on ${MCP_HOST}:${port}: ${error instanceof Error ? error.message : String(error)}`)
+  }
+
+  const nextSettings = { ...settings, mcpPort: port }
+  try {
+    await settingsStore!.save(nextSettings)
+  } catch (error) {
+    await candidate.stop().catch(() => undefined)
+    throw error
+  }
+
+  const previous = mcpServer
+  mcpServer = candidate
+  mcpPort = port
+  mcpUrl = `http://${MCP_HOST}:${port}/mcp`
+  settings = nextSettings
+  mcpRuntimeStatus = 'ready'
+  mcpStartupError = undefined
+  tabsManager?.setMcpUrl(mcpUrl)
+  publishSettings()
+  publishMcpControlState()
+  await previous?.stop().catch((error) => console.error('[mcp] Failed to stop previous listener:', error))
+  console.info(`[mcp] Moved listener to ${mcpUrl}`)
+  return { ...settings }
+}
+
+app.on('second-instance', (_event, argv) => {
+  if (argv.includes('--quit')) {
+    quitting = true
+    app.quit()
+    return
+  }
+  showWindow()
+})
+app.on('activate', showWindow)
+app.on('window-all-closed', () => {
+  // The app intentionally stays alive: MCP clients may reconnect later.
+})
+app.on('before-quit', () => {
+  quitting = true
+  lastWindowState = currentWindowState() ?? lastWindowState
+  lastPanelWindowState = currentPanelWindowState() ?? lastPanelWindowState
+})
+
+app.whenReady().then(async () => {
+  if (!gotLock) return
+  nativeTheme.on('updated', () => {
+    if (settings.theme !== 'system') return
+    const systemTheme = nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
+    mainWindow?.setBackgroundColor(THEME_BACKGROUND[systemTheme])
+    mainWindow?.webContents.send('settings:system-theme-changed', systemTheme)
+  })
+  mcpTokenConfiguration = await loadMcpToken(
+    join(app.getPath('userData'), 'mcp-token'),
+    process.env.BRONOM_MCP_TOKEN
+  )
+  configureAutoUpdater()
+  installApplicationMenu()
+  await configurePersistentSession()
+  registerHomeProtocol()
+  await createWindow()
+  if (!settings.mcpAuthentication) {
+    console.warn('[mcp] Authentication is disabled. Any local process can control this browser profile.')
+  }
+  createTray()
+  mcpServer = createRuntimeMcpServer(mcpPort)
+  mcpServer.setPaused(mcpPaused)
+  try {
+    const url = await mcpServer.start()
+    mcpRuntimeStatus = 'ready'
+    mcpStartupError = undefined
+    publishMcpControlState()
+    console.log(`[mcp] Bronom listening at ${url}`)
+  } catch (error) {
+    mcpRuntimeStatus = 'error'
+    mcpStartupError = error instanceof Error ? error.message : String(error)
+    publishMcpControlState()
+    console.error('[mcp] Failed to start:', error)
+    await showMessageBox({
+      type: 'error',
+      title: 'MCP server failed to start',
+      message: `Could not listen on ${MCP_HOST}:${mcpPort}`,
+      detail: mcpStartupError
+    })
+  }
+  if (settings.checkForUpdatesOnStartup) {
+    setTimeout(() => void checkForUpdates(), 5_000)
+  }
+})
+
+app.on('will-quit', (event) => {
+  if (!tabsManager && !mcpServer) return
+  event.preventDefault()
+  if (shutdownExitScheduled) return
+  shutdownExitScheduled = true
+  const forceExit = setTimeout(() => {
+    console.error('[shutdown] Runtime cleanup exceeded 10 seconds; exiting so update relaunch can continue.')
+    app.exit(0)
+  }, 10_000)
+  forceExit.unref()
+  void releaseRuntimeResources().then(() => {
+    clearTimeout(forceExit)
+    app.exit(0)
+  })
+})
