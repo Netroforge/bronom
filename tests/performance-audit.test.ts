@@ -1,3 +1,4 @@
+import { runInNewContext } from 'node:vm'
 import { describe, expect, it } from 'vitest'
 import {
   PERFORMANCE_AUDIT_LIMITS,
@@ -179,6 +180,48 @@ describe('performance audit', () => {
     expect(script).toContain('forcedStyleAndLayoutDurationMs')
     expect(script).not.toContain('outerHTML')
     expect(script).not.toContain('entry.detail')
+  })
+
+  it('retains the highest-scoring layout shifts when the collector reaches its bound', async () => {
+    const entries = [
+      { startTime: 1, value: 0.99, hadRecentInput: false, sources: [] },
+      ...Array.from({ length: PERFORMANCE_AUDIT_LIMITS.maxLayoutShifts }, (_, index) => ({
+        startTime: index + 2,
+        value: 0.01,
+        hadRecentInput: false,
+        sources: []
+      }))
+    ]
+    class MockPerformanceObserver {
+      static supportedEntryTypes = ['layout-shift']
+
+      constructor(private readonly callback: (list: { getEntries(): typeof entries }) => void) {}
+
+      observe(options: { type: string }): void {
+        if (options.type === 'layout-shift') this.callback({ getEntries: () => entries })
+      }
+    }
+    const report = await runInNewContext(
+      performanceAuditPageScript(
+        'globalThis.webVitals = { onLCP() {}, onINP() {}, onCLS() {}, onFCP() {}, onTTFB() {} };',
+        normalizePerformanceOptions({ settleMs: 0 }),
+        '6.1.0'
+      ),
+      {
+        PerformanceObserver: MockPerformanceObserver,
+        performance: { getEntriesByType: () => [] },
+        location: { href: 'https://example.test/layout-shifts' },
+        document: { title: 'Layout shift burst' },
+        setTimeout
+      }
+    ) as BrowserPerformanceReport
+
+    expect(report.layoutShifts).toMatchObject({
+      count: PERFORMANCE_AUDIT_LIMITS.maxLayoutShifts + 1,
+      truncated: true
+    })
+    expect(report.layoutShifts.entries).toHaveLength(PERFORMANCE_AUDIT_LIMITS.maxReportedLayoutShifts)
+    expect(report.layoutShifts.entries[0]).toMatchObject({ startTimeMs: 1, value: 0.99 })
   })
 
   it('redacts page-authored performance attribution before returning it', () => {

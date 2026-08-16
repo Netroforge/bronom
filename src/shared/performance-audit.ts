@@ -275,7 +275,8 @@ export function performanceAuditPageScript(
                   .slice(0, config.maxLayoutShiftSources)
               });
               if (layoutShifts.length > config.maxLayoutShifts) {
-                layoutShifts.splice(0, layoutShifts.length - config.maxLayoutShifts);
+                layoutShifts.sort((left, right) => right.value - left.value || left.startTimeMs - right.startTimeMs);
+                layoutShifts.splice(config.maxLayoutShifts);
                 layoutShiftsTruncated = true;
               }
             }
