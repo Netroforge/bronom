@@ -7,6 +7,7 @@ import type {
   BronomBookmarksApi,
   BronomBrowsingDataApi,
   BronomHistoryApi,
+  BronomLicenseApi,
   BronomPermissionsApi,
   BronomSettingsApi,
   BronomUpdatesApi,
@@ -306,6 +307,18 @@ const credentialsApi: BronomCredentialsApi = {
 }
 
 contextBridge.exposeInMainWorld('bronomCredentials', credentialsApi)
+const licenseApi: BronomLicenseApi = {
+  getState: () => ipcRenderer.invoke('license:get-state'),
+  activate: (licenseKey: string) => ipcRenderer.invoke('license:activate', licenseKey),
+  refresh: () => ipcRenderer.invoke('license:refresh'),
+  deactivate: () => ipcRenderer.invoke('license:deactivate'),
+  onChanged: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: import('../shared/types.js').CommercialLicenseState): void => listener(state)
+    ipcRenderer.on('license:changed', handler)
+    return () => ipcRenderer.removeListener('license:changed', handler)
+  }
+}
+contextBridge.exposeInMainWorld('bronomLicense', licenseApi)
 const updatesApi: BronomUpdatesApi = {
   getState: () => ipcRenderer.invoke('updates:get-state'),
   check: () => ipcRenderer.invoke('updates:check'),

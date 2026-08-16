@@ -152,6 +152,7 @@ import {
   McpControlState,
   CredentialStorageStatus,
   CredentialSummary,
+  CommercialLicenseState,
   DetachablePanelId,
   PanelDock,
   SitePermissionDecision,
@@ -337,6 +338,14 @@ const systemTheme = ref<'light' | 'dark'>('light')
 const sitePermissions = ref<SitePermissionEntry[]>([])
 const credentials = ref<CredentialSummary[]>([])
 const credentialStorage = ref<CredentialStorageStatus>({ available: false, reason: 'Secure storage is initializing.' })
+const commercialLicense = ref<CommercialLicenseState>({
+  status: 'not-activated',
+  active: false,
+  secureStorageAvailable: false
+})
+const commercialLicenseKey = ref('')
+const commercialLicenseAction = ref<'idle' | 'activating' | 'refreshing' | 'deactivating'>('idle')
+const commercialLicenseError = ref('')
 const updateState = ref<AppUpdateState>({ status: 'idle', currentVersion: '' })
 const mcpControl = ref<McpControlState>({ status: 'starting', paused: false })
 const address = ref('')
@@ -614,6 +623,7 @@ let unsubscribeSettings: (() => void) | undefined
 let unsubscribeSystemTheme: (() => void) | undefined
 let unsubscribePermissions: (() => void) | undefined
 let unsubscribeCredentials: (() => void) | undefined
+let unsubscribeLicense: (() => void) | undefined
 let unsubscribeUpdates: (() => void) | undefined
 let unsubscribePanelRequested: (() => void) | undefined
 let unsubscribePanelActive: (() => void) | undefined
@@ -2229,6 +2239,7 @@ function emulationLabel(emulation: BrowserEmulationState): string {
   if (emulation.timezoneId) return emulation.timezoneId
   if (emulation.geolocation) return 'Location override'
   if (emulation.cpuThrottlingRate > 1) return `CPU ${emulation.cpuThrottlingRate}\u00d7`
+  if ((emulation.animationPlaybackRate ?? 1) !== 1) return emulation.animationPlaybackRate === 0 ? 'Animations paused' : `Animations ${Math.round(emulation.animationPlaybackRate! * 100)}%`
   if (emulation.colorScheme !== 'auto') return `${emulation.colorScheme === 'dark' ? 'Dark' : 'Light'} mode`
   if (emulation.reducedMotion !== 'auto') return emulation.reducedMotion === 'reduce' ? 'Reduced motion' : 'Full motion'
   if (emulation.mediaType !== 'auto') return `${emulation.mediaType === 'print' ? 'Print' : 'Screen'} media`
@@ -2259,6 +2270,7 @@ function emulationDescription(emulation: BrowserEmulationState): string {
   if (emulation.locale) conditions.push(`${emulation.locale} locale`)
   if (emulation.timezoneId) conditions.push(`${emulation.timezoneId} time zone`)
   if (emulation.cpuThrottlingRate > 1) conditions.push(`CPU ${emulation.cpuThrottlingRate}\u00d7 slower`)
+  if ((emulation.animationPlaybackRate ?? 1) !== 1) conditions.push(emulation.animationPlaybackRate === 0 ? 'animations paused' : `animations at ${Math.round(emulation.animationPlaybackRate! * 100)}% speed`)
   if (emulation.colorScheme !== 'auto') conditions.push(`${emulation.colorScheme} color scheme`)
   if (emulation.reducedMotion !== 'auto') conditions.push(emulation.reducedMotion === 'reduce' ? 'reduced motion' : 'no reduced motion')
   if (emulation.mediaType !== 'auto') conditions.push(`${emulation.mediaType} media`)
@@ -4854,6 +4866,54 @@ function openSupportSettings(): void {
   closeTransientPanels()
   settingsSection.value = 'support'
   settingsOpen.value = true
+  void loadCommercialLicenseState()
+}
+
+async function loadCommercialLicenseState(): Promise<void> {
+  commercialLicense.value = await window.bronomLicense.getState()
+}
+
+async function activateCommercialLicense(): Promise<void> {
+  const key = commercialLicenseKey.value.trim()
+  if (!key) {
+    commercialLicenseError.value = 'Enter the license key from your Creem receipt.'
+    return
+  }
+  commercialLicenseAction.value = 'activating'
+  commercialLicenseError.value = ''
+  try {
+    commercialLicense.value = await window.bronomLicense.activate(key)
+    commercialLicenseKey.value = ''
+  } catch (error) {
+    commercialLicenseError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    commercialLicenseAction.value = 'idle'
+  }
+}
+
+async function refreshCommercialLicense(): Promise<void> {
+  commercialLicenseAction.value = 'refreshing'
+  commercialLicenseError.value = ''
+  try {
+    commercialLicense.value = await window.bronomLicense.refresh()
+  } catch (error) {
+    commercialLicenseError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    commercialLicenseAction.value = 'idle'
+  }
+}
+
+async function deactivateCommercialLicense(): Promise<void> {
+  if (!window.confirm('Deactivate this Bronom installation and free its device slot?')) return
+  commercialLicenseAction.value = 'deactivating'
+  commercialLicenseError.value = ''
+  try {
+    commercialLicense.value = await window.bronomLicense.deactivate()
+  } catch (error) {
+    commercialLicenseError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    commercialLicenseAction.value = 'idle'
+  }
 }
 
 function toggleSettings(): void {
@@ -5121,6 +5181,7 @@ onMounted(async () => {
   unsubscribeSystemTheme = window.bronomSettings.onSystemThemeChanged(handleSystemThemeChange)
   unsubscribePermissions = window.bronomPermissions.onChanged((next) => (sitePermissions.value = next))
   unsubscribeCredentials = window.bronomCredentials.onChanged((next) => (credentials.value = next))
+  unsubscribeLicense = window.bronomLicense.onChanged((next) => (commercialLicense.value = next))
   unsubscribeUpdates = window.bronomUpdates.onChanged(handleUpdateState)
   unsubscribeUpdateOpen = window.bronomUpdates.onOpenRequested(() => {
     openUpdateSettings()
@@ -5151,7 +5212,7 @@ onMounted(async () => {
   unsubscribePanelClosed = window.bronomPanelWindow.onClosed(() => {
     if (!isDetachedPanelWindow) closeDockedPanels()
   })
-  const [browserState, appSettings, nativeSystemTheme, systemDownloadDirectory, permissions, appUpdateState, mcpControlState, credentialStatus, savedCredentials, savedDownloads, savedBookmarks, savedVisitHistory] = await Promise.all([
+  const [browserState, appSettings, nativeSystemTheme, systemDownloadDirectory, permissions, appUpdateState, mcpControlState, credentialStatus, savedCredentials, savedDownloads, savedBookmarks, savedVisitHistory, savedCommercialLicense] = await Promise.all([
     browser.getState(),
     window.bronomSettings.get(),
     window.bronomSettings.getSystemTheme(),
@@ -5163,7 +5224,8 @@ onMounted(async () => {
     window.bronomCredentials.list(),
     window.bronomDownloads.list(),
     window.bronomBookmarks.list(),
-    window.bronomHistory.list()
+    window.bronomHistory.list(),
+    window.bronomLicense.getState()
   ])
   state.value = browserState
   systemTheme.value = nativeSystemTheme
@@ -5174,6 +5236,7 @@ onMounted(async () => {
   mcpControl.value = mcpControlState
   credentialStorage.value = credentialStatus
   credentials.value = savedCredentials
+  commercialLicense.value = savedCommercialLicense
   downloads.value = savedDownloads
   for (const download of savedDownloads) knownDownloadIds.add(download.id)
   bookmarks.value = savedBookmarks
@@ -5200,6 +5263,7 @@ onBeforeUnmount(() => {
   unsubscribeSystemTheme?.()
   unsubscribePermissions?.()
   unsubscribeCredentials?.()
+  unsubscribeLicense?.()
   unsubscribeUpdates?.()
   unsubscribeUpdateOpen?.()
   unsubscribeHelp?.()
@@ -6267,7 +6331,19 @@ onBeforeUnmount(() => {
         </section>
         <section aria-labelledby="environment-runtime-title">
           <div class="environment-section-heading">
-            <div><h3 id="environment-runtime-title">Page runtime</h3><p>Check the page’s HTML and CSS fallback without client scripts.</p></div>
+            <div><h3 id="environment-runtime-title">Page runtime</h3><p>Inspect motion precisely or check the page’s HTML and CSS fallback without client scripts.</p></div>
+          </div>
+          <div class="environment-field-grid">
+            <label class="environment-field-wide">
+              <span>Animation playback</span>
+              <select v-model.number="environmentDraft.animationPlaybackRate" aria-label="Animation playback" @change="environmentState = 'idle'">
+                <option :value="1">Normal speed</option>
+                <option :value="0.25">25% speed</option>
+                <option :value="0.1">10% speed</option>
+                <option :value="0">Paused</option>
+              </select>
+              <small>Controls CSS Animations, transitions, and Web Animations on this tab; animation-frame scripts continue normally.</small>
+            </label>
           </div>
           <label class="environment-toggle">
             <input v-model="environmentDraft.javaScriptDisabled" type="checkbox" @change="environmentState = 'idle'" />
@@ -9656,19 +9732,55 @@ onBeforeUnmount(() => {
           <main v-else class="settings-content support-settings">
             <div class="setting-copy">
               <span class="support-kicker">Commercial licensing</span>
-              <h3>License Bronom for paid work</h3>
-              <p>Bronom 1.0 is source-available under PolyForm Noncommercial 1.0.0. Businesses can evaluate it internally for 30 days.</p>
+              <h3>{{ commercialLicense.active ? 'Commercial license active' : 'License Bronom for paid work' }}</h3>
+              <p>Bronom is source-available under PolyForm Noncommercial 1.0.0. Businesses can evaluate it internally for 30 days; ongoing paid work requires one active license per named user.</p>
             </div>
-            <div class="support-card">
+            <div v-if="commercialLicense.active" class="support-card commercial-license-card active">
+              <span class="support-heart" aria-hidden="true"><IconCheck /></span>
+              <strong>{{ commercialLicense.maskedKey }} is active on this device.</strong>
+              <small>
+                {{ commercialLicense.activations ?? '—' }} of {{ commercialLicense.activationLimit ?? 'unlimited' }} device activations used.
+                <template v-if="commercialLicense.lastValidatedAt"> Last checked {{ new Date(commercialLicense.lastValidatedAt).toLocaleString() }}.</template>
+              </small>
+              <div class="commercial-license-actions">
+                <button class="secondary-button" type="button" :disabled="commercialLicenseAction !== 'idle'" @click="refreshCommercialLicense">
+                  {{ commercialLicenseAction === 'refreshing' ? 'Checking…' : 'Check license' }}
+                </button>
+                <button class="secondary-button" type="button" :disabled="commercialLicenseAction !== 'idle'" @click="openSupport('https://www.creem.io/my-orders/login')">
+                  Manage subscription ↗
+                </button>
+                <button class="secondary-button danger" type="button" :disabled="commercialLicenseAction !== 'idle'" @click="deactivateCommercialLicense">
+                  {{ commercialLicenseAction === 'deactivating' ? 'Deactivating…' : 'Deactivate device' }}
+                </button>
+              </div>
+            </div>
+            <div v-else class="support-card commercial-license-card">
               <span class="support-heart" aria-hidden="true"><IconFavorite /></span>
-              <strong>Ongoing commercial use requires a separate license from Netroforge.</strong>
-              <small>Personal and other permitted noncommercial uses remain available under PolyForm.</small>
-              <button class="primary-button support-primary" type="button" @click="openSupport('https://github.com/Netroforge/bronom/blob/main/COMMERCIAL-LICENSE.md')">
-                Commercial licensing ↗
-              </button>
+              <strong>Activate the key from your Creem receipt.</strong>
+              <small v-if="commercialLicense.secureStorageAvailable">The key is encrypted with your operating system secure storage and is used only for Creem license validation.</small>
+              <small v-else>License activation requires an operating-system secure storage backend.</small>
+              <form class="commercial-license-form" @submit.prevent="activateCommercialLicense">
+                <label for="commercial-license-key">License key</label>
+                <input
+                  id="commercial-license-key"
+                  v-model="commercialLicenseKey"
+                  type="password"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="XXXX-XXXX-XXXX-XXXX"
+                  :disabled="!commercialLicense.secureStorageAvailable || commercialLicenseAction !== 'idle'"
+                />
+                <button class="primary-button support-primary" type="submit" :disabled="!commercialLicense.secureStorageAvailable || commercialLicenseAction !== 'idle'">
+                  {{ commercialLicenseAction === 'activating' ? 'Activating…' : 'Activate license' }}
+                </button>
+              </form>
+              <small v-if="commercialLicense.message">{{ commercialLicense.message }}</small>
+              <small v-if="commercialLicenseError" class="commercial-license-error" role="alert">{{ commercialLicenseError }}</small>
+              <button class="secondary-button" type="button" @click="openSupport('https://bronom.pages.dev')">Buy a commercial license ↗</button>
             </div>
             <div class="support-alternatives">
               <span>Review the terms</span>
+              <button type="button" @click="openSupport('https://github.com/Netroforge/bronom/blob/main/COMMERCIAL-LICENSE.md')">Commercial terms ↗</button>
               <button type="button" @click="openSupport('https://github.com/Netroforge/bronom/blob/main/LICENSE')">PolyForm license ↗</button>
               <button type="button" @click="openSupport('https://github.com/Netroforge/bronom/blob/main/EVALUATION-LICENSE.md')">30-day evaluation ↗</button>
             </div>

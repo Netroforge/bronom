@@ -10,6 +10,28 @@ export type { InterfaceScale } from './interface-scale.js'
 
 export type HelpMenuAction = 'shortcuts' | 'about' | 'support'
 
+export interface CommercialLicenseProviderResult {
+  valid: boolean
+  status: string
+  productId: string
+  instanceId?: string
+  activations?: number
+  activationLimit?: number | null
+  expiresAt?: string | null
+}
+
+export interface CommercialLicenseState {
+  status: string
+  active: boolean
+  secureStorageAvailable: boolean
+  maskedKey?: string
+  activations?: number
+  activationLimit?: number | null
+  expiresAt?: string | null
+  lastValidatedAt?: string
+  message?: string
+}
+
 export interface BrowserActionFailure {
   action: string
   message: string
@@ -39,6 +61,7 @@ export interface BrowserJavaScriptDialog {
 
 export type BrowserNetworkEmulation = 'none' | 'offline' | 'slow-3g' | 'slow-4g' | 'fast-4g'
 export type BrowserDataSaverEmulation = 'auto' | 'enabled' | 'disabled'
+export type BrowserAnimationPlaybackRate = 0 | 0.1 | 0.25 | 1
 export type BrowserColorSchemeEmulation = 'auto' | 'light' | 'dark'
 export type BrowserReducedMotionEmulation = 'auto' | 'reduce' | 'no-preference'
 export type BrowserMediaTypeEmulation = 'auto' | 'screen' | 'print'
@@ -78,6 +101,7 @@ export interface BrowserEmulationState {
   bypassServiceWorker: boolean
   dataSaver: BrowserDataSaverEmulation
   cpuThrottlingRate: number
+  animationPlaybackRate: BrowserAnimationPlaybackRate
   colorScheme: BrowserColorSchemeEmulation
   reducedMotion: BrowserReducedMotionEmulation
   mediaType: BrowserMediaTypeEmulation
@@ -103,6 +127,7 @@ export interface BrowserEmulationOptions {
   bypassServiceWorker?: boolean
   dataSaver?: BrowserDataSaverEmulation
   cpuThrottlingRate?: number
+  animationPlaybackRate?: BrowserAnimationPlaybackRate
   colorScheme?: BrowserColorSchemeEmulation
   reducedMotion?: BrowserReducedMotionEmulation
   mediaType?: BrowserMediaTypeEmulation
@@ -128,6 +153,7 @@ export interface BrowserEnvironmentSettings {
   bypassServiceWorker: boolean
   dataSaver: BrowserDataSaverEmulation
   cpuThrottlingRate: number
+  animationPlaybackRate: BrowserAnimationPlaybackRate
   colorScheme: BrowserColorSchemeEmulation
   reducedMotion: BrowserReducedMotionEmulation
   mediaType: BrowserMediaTypeEmulation
@@ -556,6 +582,7 @@ export interface BrowserPerformanceEnvironment {
   bypassServiceWorker: boolean
   dataSaver: BrowserDataSaverEmulation
   cpuThrottlingRate: number
+  animationPlaybackRate: BrowserAnimationPlaybackRate
   viewport: {
     width: number
     height: number
@@ -2128,4 +2155,12 @@ export interface BronomUpdatesApi {
   install(): Promise<boolean>
   onChanged(listener: (state: AppUpdateState) => void): () => void
   onOpenRequested(listener: () => void): () => void
+}
+
+export interface BronomLicenseApi {
+  getState(): Promise<CommercialLicenseState>
+  activate(licenseKey: string): Promise<CommercialLicenseState>
+  refresh(): Promise<CommercialLicenseState>
+  deactivate(): Promise<CommercialLicenseState>
+  onChanged(listener: (state: CommercialLicenseState) => void): () => void
 }

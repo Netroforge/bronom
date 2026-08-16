@@ -1,4 +1,4 @@
-import type { BrowserActionFailure, BronomApi, BronomBookmarksApi, BronomBrowsingDataApi, BronomCredentialsApi, BronomDownloadsApi, BronomHistoryApi, BronomMcpApi, BronomPanelWindowApi, BronomPermissionsApi, BronomSettingsApi, BronomUpdatesApi, HelpMenuAction } from '../shared/types'
+import type { BrowserActionFailure, BronomApi, BronomBookmarksApi, BronomBrowsingDataApi, BronomCredentialsApi, BronomDownloadsApi, BronomHistoryApi, BronomLicenseApi, BronomMcpApi, BronomPanelWindowApi, BronomPermissionsApi, BronomSettingsApi, BronomUpdatesApi, HelpMenuAction } from '../shared/types'
 
 declare global {
   interface Window {
@@ -12,6 +12,7 @@ declare global {
     bronomPermissions: BronomPermissionsApi
     bronomSettings: BronomSettingsApi
     bronomUpdates: BronomUpdatesApi
+    bronomLicense: BronomLicenseApi
     bronomPanelWindow: BronomPanelWindowApi
     bronomShell: {
       setToolbarHeight(height: number): void

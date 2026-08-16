@@ -70,8 +70,11 @@ test('explains commercial licensing without interrupting the user', async ({ app
   await appWindow.getByRole('button', { name: 'Settings' }).click()
   await appWindow.getByRole('button', { name: /Commercial licensing/ }).click()
   await expect(appWindow.getByText('License Bronom for paid work')).toBeVisible()
-  await expect(appWindow.getByText(/permitted noncommercial uses remain available/i)).toBeVisible()
-  await expect(appWindow.getByRole('button', { name: 'Commercial licensing ↗' })).toBeVisible()
+  await expect(appWindow.getByText(/one active license per named user/i)).toBeVisible()
+  await expect(appWindow.getByLabel('License key')).toBeVisible()
+  await expect(appWindow.getByRole('button', { name: 'Activate license' })).toBeVisible()
+  await expect(appWindow.getByRole('button', { name: 'Buy a commercial license ↗' })).toBeVisible()
+  await expect(appWindow.getByRole('button', { name: 'Commercial terms ↗' })).toBeVisible()
 })
 
 test('persists the selected theme across application restarts', async ({

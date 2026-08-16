@@ -33,6 +33,8 @@ import type { BrowserCredentialCandidate } from './browser/tabs-manager.js'
 import { BookmarkStore } from './bookmark-store.js'
 import { HistoryStore } from './history-store.js'
 import { CredentialStore } from './credential-store.js'
+import { CommercialLicenseClient, CommercialLicenseError } from './commercial-license-client.js'
+import { CommercialLicenseStore } from './commercial-license-store.js'
 import { buildBrowsingDataWebsiteInventory } from './browsing-data-websites.js'
 import { renderHomePage } from './home-page.js'
 import {
@@ -94,6 +96,7 @@ import {
   type BrowsingDataWebsiteSummary,
   type CredentialStorageStatus,
   type CredentialSummary,
+  type CommercialLicenseState,
   type DetachablePanelId,
   type HelpMenuAction,
   type McpControlState,
@@ -111,6 +114,7 @@ import { writeVerifiedClipboardText } from './verified-clipboard.js'
 
 const MCP_HOST = process.env.BRONOM_MCP_HOST || '127.0.0.1'
 const MCP_AUTH_DISABLED = process.env.BRONOM_DISABLE_MCP_AUTH === '1'
+const COMMERCIAL_LICENSE_API_BASE = process.env.BRONOM_LICENSE_API_BASE || 'https://bronom.pages.dev/api/creem-license'
 const PARTITION = 'persist:bronom'
 const { autoUpdater } = electronUpdater
 
@@ -150,6 +154,9 @@ let persistentSession: Session | null = null
 let settingsStore: SettingsStore | null = null
 let sitePermissionStore: SitePermissionStore | null = null
 let credentialStore: CredentialStore | null = null
+let commercialLicenseStore: CommercialLicenseStore | null = null
+let commercialLicenseClient: CommercialLicenseClient | null = null
+let commercialLicenseMessage: string | undefined
 let bookmarkStore: BookmarkStore | null = null
 let historyStore: HistoryStore | null = null
 let credentialStorageStatus: CredentialStorageStatus = { available: false, reason: 'Secure storage is initializing.' }
@@ -522,6 +529,107 @@ async function configureCredentialStore(): Promise<void> {
     decrypt: (value) => safeStorage.decryptStringAsync(value)
   })
   await credentialStore.load()
+}
+
+async function configureCommercialLicenseStore(): Promise<void> {
+  commercialLicenseClient = new CommercialLicenseClient(COMMERCIAL_LICENSE_API_BASE)
+  if (!credentialStorageStatus.available) return
+  commercialLicenseStore = new CommercialLicenseStore(join(app.getPath('userData'), 'commercial-license.json'), {
+    encrypt: (value) => safeStorage.encryptStringAsync(value),
+    decrypt: (value) => safeStorage.decryptStringAsync(value)
+  })
+  await commercialLicenseStore.load()
+}
+
+function currentCommercialLicenseState(): CommercialLicenseState {
+  if (!commercialLicenseStore) {
+    return {
+      status: 'not-activated',
+      active: false,
+      secureStorageAvailable: false,
+      message: credentialStorageStatus.reason || 'Operating system secure storage is unavailable.'
+    }
+  }
+  return commercialLicenseStore.summary(true, commercialLicenseMessage)
+}
+
+function publishCommercialLicenseState(): CommercialLicenseState {
+  const state = currentCommercialLicenseState()
+  sendToShellWindows('license:changed', state)
+  return state
+}
+
+function commercialLicenseFriendlyMessage(reason: string): string {
+  const messages: Record<string, string> = {
+    activation_limit_reached: 'This license has reached its device activation limit.',
+    instance_conflict: 'This device activation is no longer available.',
+    license_inactive: 'This commercial license is no longer active.',
+    license_not_found: 'The license key was not found.',
+    invalid_license: 'The license key could not be validated.',
+    invalid_license_key: 'Enter the complete license key from your Creem receipt.',
+    provider_unavailable: 'The licensing service is temporarily unavailable.',
+    service_unavailable: 'The licensing service is temporarily unavailable.',
+    wrong_product: 'This license key is not for Bronom.'
+  }
+  return messages[reason] ?? 'The commercial license could not be validated.'
+}
+
+async function activateCommercialLicense(value: unknown): Promise<CommercialLicenseState> {
+  if (typeof value !== 'string') throw new TypeError('License key must be a string')
+  const licenseKey = value.trim().toUpperCase()
+  if (!/^[A-Z0-9][A-Z0-9-]{15,127}$/.test(licenseKey)) throw new TypeError('Enter the complete license key from your Creem receipt')
+  if (!commercialLicenseStore || !commercialLicenseClient) throw new Error('Secure license storage is unavailable')
+  try {
+    const result = await commercialLicenseClient.activate(licenseKey, commercialLicenseStore.installationName())
+    if (!result.valid || result.status !== 'active') throw new CommercialLicenseError('license_inactive')
+    await commercialLicenseStore.saveActivation(licenseKey, result)
+    commercialLicenseMessage = 'Commercial license activated for this device.'
+    return publishCommercialLicenseState()
+  } catch (error) {
+    const reason = error instanceof CommercialLicenseError ? error.reason : 'service_unavailable'
+    commercialLicenseMessage = commercialLicenseFriendlyMessage(reason)
+    publishCommercialLicenseState()
+    throw new Error(commercialLicenseMessage)
+  }
+}
+
+async function refreshCommercialLicense(): Promise<CommercialLicenseState> {
+  if (!commercialLicenseStore || !commercialLicenseClient) return currentCommercialLicenseState()
+  const credentials = await commercialLicenseStore.credentials()
+  if (!credentials) return currentCommercialLicenseState()
+  try {
+    const result = await commercialLicenseClient.validate(credentials.licenseKey, credentials.instanceId)
+    await commercialLicenseStore.saveValidation(result)
+    commercialLicenseMessage = result.valid && result.status === 'active'
+      ? 'Commercial license is active.'
+      : commercialLicenseFriendlyMessage('license_inactive')
+    return publishCommercialLicenseState()
+  } catch (error) {
+    const reason = error instanceof CommercialLicenseError ? error.reason : 'service_unavailable'
+    commercialLicenseMessage = reason === 'service_unavailable' || reason === 'provider_unavailable'
+      ? 'Could not reach the licensing service. The last successful validation remains stored on this device.'
+      : commercialLicenseFriendlyMessage(reason)
+    return publishCommercialLicenseState()
+  }
+}
+
+async function deactivateCommercialLicense(): Promise<CommercialLicenseState> {
+  if (!commercialLicenseStore || !commercialLicenseClient) return currentCommercialLicenseState()
+  const credentials = await commercialLicenseStore.credentials()
+  if (!credentials) return currentCommercialLicenseState()
+  try {
+    await commercialLicenseClient.deactivate(credentials.licenseKey, credentials.instanceId)
+  } catch (error) {
+    const reason = error instanceof CommercialLicenseError ? error.reason : 'service_unavailable'
+    if (reason !== 'instance_conflict' && reason !== 'license_not_found') {
+      commercialLicenseMessage = commercialLicenseFriendlyMessage(reason)
+      publishCommercialLicenseState()
+      throw new Error(commercialLicenseMessage)
+    }
+  }
+  await commercialLicenseStore.clear()
+  commercialLicenseMessage = 'Commercial license removed from this device.'
+  return publishCommercialLicenseState()
 }
 
 function publishSitePermissions(): void {
@@ -2226,6 +2334,22 @@ function registerIpc(): void {
     await credentialStore?.clear()
     publishCredentials()
   })
+  ipcMain.handle('license:get-state', (event) => {
+    assertTrustedShellSender(event)
+    return currentCommercialLicenseState()
+  })
+  ipcMain.handle('license:activate', (event, licenseKey: unknown) => {
+    assertTrustedShellSender(event)
+    return activateCommercialLicense(licenseKey)
+  })
+  ipcMain.handle('license:refresh', (event) => {
+    assertTrustedShellSender(event)
+    return refreshCommercialLicense()
+  })
+  ipcMain.handle('license:deactivate', (event) => {
+    assertTrustedShellSender(event)
+    return deactivateCommercialLicense()
+  })
   ipcMain.handle('updates:get-state', (event) => { assertTrustedShellSender(event); return { ...updateState } })
   ipcMain.handle('updates:check', (event) => { assertTrustedShellSender(event); return checkForUpdates() })
   ipcMain.handle('updates:download', (event) => { assertTrustedShellSender(event); return downloadUpdate() })
@@ -2266,6 +2390,7 @@ async function createWindow(): Promise<void> {
   persistentSession?.setDownloadPath(effectiveDownloadDirectory())
   mcpUrl = `http://${MCP_HOST}:${mcpPort}/mcp`
   await configureCredentialStore()
+  await configureCommercialLicenseStore()
   if (MCP_AUTH_DISABLED) settings = { ...settings, mcpAuthentication: false }
   applyTheme(settings.theme)
   windowStateStore = new WindowStateStore(join(app.getPath('userData'), 'window-state.json'))
@@ -2685,6 +2810,9 @@ app.whenReady().then(async () => {
   }
   if (settings.checkForUpdatesOnStartup) {
     setTimeout(() => void checkForUpdates(), 5_000)
+  }
+  if (commercialLicenseStore?.hasActivation()) {
+    setTimeout(() => void refreshCommercialLicense(), 7_500)
   }
 })
 

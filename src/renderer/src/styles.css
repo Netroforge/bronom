@@ -3210,6 +3210,14 @@ button { color: inherit; }
 .support-alternatives { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; color: var(--muted); font-size: 13px; }
 .support-alternatives button { padding: 7px 10px; border: 1px solid var(--border-soft); border-radius: 7px; color: var(--accent-text); background: transparent; cursor: pointer; font-size: 13px; }
 .support-alternatives button:hover { background: var(--hover); }
+.commercial-license-card.active { border-color: color-mix(in srgb, #43c59e 55%, var(--border-soft)); }
+.commercial-license-form { display: grid; width: min(100%, 440px); gap: 8px; }
+.commercial-license-form label { color: var(--muted); font-size: 12px; font-weight: 700; }
+.commercial-license-form input { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--surface-raised); font: inherit; letter-spacing: .08em; }
+.commercial-license-form input:focus { border-color: var(--accent); outline: 2px solid var(--accent-soft); }
+.commercial-license-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.commercial-license-actions .danger { color: var(--danger-text, #c24848); }
+.commercial-license-error { color: var(--danger-text, #c24848) !important; }
 
 .settings-rows { margin-top: 20px; overflow: hidden; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--surface); }
 .settings-row { display: flex; min-height: 72px; align-items: center; justify-content: space-between; gap: 24px; padding: 14px 16px; }
