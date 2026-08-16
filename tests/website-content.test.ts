@@ -31,4 +31,9 @@ describe('public website content', () => {
     expect(matchingReleaseAsset([{ name: 'bronom-1.4.0-x86_64.AppImage' }], 'linux-x64')).toBeDefined()
     expect(matchingReleaseAsset([{ name: 'bronom-1.4.0-arm64.AppImage' }], 'linux-arm')).toBeDefined()
   })
+
+  it('announces website clipboard results without silently swallowing permission failures', () => {
+    expect(websiteHtml).toContain('id="copy-config-status"')
+    expect(websiteHtml).toContain('aria-live="polite"')
+  })
 })

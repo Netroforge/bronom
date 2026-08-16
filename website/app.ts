@@ -1,4 +1,5 @@
 import { isReleaseAssetTarget, matchingReleaseAsset } from '../src/shared/release-assets'
+import { writeWebClipboardText } from '../src/shared/web-clipboard'
 
 interface ClientConfiguration {
   location: string
@@ -38,6 +39,33 @@ const configurations: Record<string, ClientConfiguration> = {
 const configCode = document.querySelector<HTMLElement>('#config-code')
 const configLocation = document.querySelector<HTMLElement>('#config-location')
 const copyConfig = document.querySelector<HTMLButtonElement>('#copy-config')
+const copyConfigStatus = document.querySelector<HTMLElement>('#copy-config-status')
+let copyConfigResetTimer: number | undefined
+
+function legacyCopyText(text: string): boolean {
+  const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.readOnly = true
+  textarea.setAttribute('aria-hidden', 'true')
+  textarea.style.position = 'fixed'
+  textarea.style.inset = '0 auto auto -9999px'
+  document.body.append(textarea)
+  textarea.select()
+  const copied = document.execCommand('copy')
+  textarea.remove()
+  activeElement?.focus()
+  return copied
+}
+
+function selectConfigurationText(): void {
+  if (!configCode) return
+  const selection = window.getSelection()
+  const range = document.createRange()
+  range.selectNodeContents(configCode)
+  selection?.removeAllRanges()
+  selection?.addRange(range)
+}
 
 function selectClient(id: string): void {
   const configuration = configurations[id]
@@ -75,10 +103,36 @@ if (featureGrid && featureToggle) {
 
 copyConfig?.addEventListener('click', async () => {
   if (!configCode) return
-  await navigator.clipboard.writeText(configCode.textContent ?? '')
-  const original = copyConfig.textContent
-  copyConfig.textContent = 'Copied'
-  window.setTimeout(() => (copyConfig.textContent = original), 1_200)
+  if (copyConfigResetTimer !== undefined) window.clearTimeout(copyConfigResetTimer)
+  const text = configCode.textContent ?? ''
+  copyConfig.disabled = true
+  copyConfig.removeAttribute('title')
+  if (copyConfigStatus) copyConfigStatus.textContent = ''
+  try {
+    await writeWebClipboardText(
+      text,
+      async (value) => {
+        if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable')
+        await navigator.clipboard.writeText(value)
+      },
+      legacyCopyText
+    )
+    copyConfig.textContent = 'Copied'
+    if (copyConfigStatus) copyConfigStatus.textContent = 'MCP configuration copied to the clipboard.'
+  } catch (error) {
+    selectConfigurationText()
+    const message = error instanceof Error ? error.message : 'Clipboard access was blocked. Select and copy the configuration manually.'
+    copyConfig.textContent = 'Copy failed'
+    copyConfig.title = message
+    if (copyConfigStatus) copyConfigStatus.textContent = message
+  } finally {
+    copyConfig.disabled = false
+    copyConfigResetTimer = window.setTimeout(() => {
+      copyConfig.textContent = 'Copy'
+      copyConfig.removeAttribute('title')
+      copyConfigResetTimer = undefined
+    }, 2_500)
+  }
 })
 
 const releaseApi = 'https://api.github.com/repos/Netroforge/bronom/releases/latest'

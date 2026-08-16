@@ -67,6 +67,7 @@ h1 { max-width: 670px; margin: 20px 0; font-size: clamp(50px, 6.4vw, 88px); line
 .code-panel > div { display: flex; align-items: center; justify-content: space-between; padding: 15px 18px 0; color: var(--muted); font-size: 16px; }
 .code-panel button { padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); cursor: pointer; font-size: 15px; }
 .code-panel pre { min-height: 170px; margin: 0; padding: 22px; overflow: auto; color: #e9ddf8; font: 15px/1.7 "SFMono-Regular", Consolas, monospace; white-space: pre-wrap; }
+.copy-status { min-height: 24px; margin: 10px 0 0; color: var(--muted); font-size: 15px; }
 .endpoint { color: var(--muted); font-size: 16px; }
 .endpoint code { color: var(--cyan); }
 .downloads { display: grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap: 12px; }
