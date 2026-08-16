@@ -431,9 +431,16 @@ export function renderHomePage(options: HomePageOptions): string {
     document.querySelectorAll('[data-copy-target]').forEach((button) => button.addEventListener('click', async () => {
       const target = document.getElementById(button.dataset.copyTarget);
       const label = button.textContent;
-      await navigator.clipboard.writeText(target.textContent || '');
-      button.textContent = 'Copied';
-      setTimeout(() => { button.textContent = label; }, 1200);
+      const title = button.title;
+      try {
+        if (!window.bronomHome?.copyText) throw new Error('The native clipboard bridge is unavailable');
+        await window.bronomHome.copyText(target.textContent || '');
+        button.textContent = 'Copied';
+      } catch (error) {
+        button.textContent = 'Copy failed';
+        button.title = error instanceof Error ? error.message : 'The system clipboard did not accept the text';
+      }
+      setTimeout(() => { button.textContent = label; button.title = title; }, 1200);
     }));
 
     renderGuide();

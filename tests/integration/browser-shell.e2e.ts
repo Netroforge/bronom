@@ -60,6 +60,52 @@ test('copies shell text through the verified native clipboard bridge', async ({ 
   await expect.poll(() => electronApp.evaluate(({ clipboard }) => clipboard.readText())).toBe(expected)
 })
 
+test('copies Home setup natively, reports failures in shell chrome, and withholds the bridge from websites', async ({
+  appWindow,
+  electronApp
+}) => {
+  await expect.poll(() => electronApp.evaluate(({ webContents }) =>
+    webContents.getAllWebContents().some((contents) => contents.getURL().startsWith('bronom://home'))
+  )).toBe(true)
+  await electronApp.evaluate(({ clipboard }) => clipboard.clear())
+  await electronApp.evaluate(async ({ webContents }) => {
+    const home = webContents.getAllWebContents().find((contents) => contents.getURL().startsWith('bronom://home'))
+    if (!home) throw new Error('Bronom Home web contents was not found')
+    await home.executeJavaScript(`document.querySelector('[data-copy-target="guide-code"]').click()`)
+  })
+
+  await expect.poll(() => electronApp.evaluate(({ clipboard }) => clipboard.readText())).toContain('codex mcp add bronom')
+  await expect.poll(() => electronApp.evaluate(async ({ webContents }) => {
+    const home = webContents.getAllWebContents().find((contents) => contents.getURL().startsWith('bronom://home'))
+    return home?.executeJavaScript(`document.querySelector('[data-copy-target="guide-code"]').textContent`)
+  })).toBe('Copied')
+
+  await appWindow.evaluate(`window.bronom.newTab({ url: 'data:text/html,<title>Clipboard boundary</title>', active: true })`)
+  await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.find((tab) => tab.active)?.title)'))
+    .toBe('Clipboard boundary')
+  const websiteBridge = await electronApp.evaluate(async ({ webContents }) => {
+    const website = webContents.getAllWebContents().find((contents) => contents.getTitle() === 'Clipboard boundary')
+    if (!website) throw new Error('Website web contents was not found')
+    return website.executeJavaScript(`typeof window.bronomHome`)
+  })
+  expect(websiteBridge).toBe('undefined')
+
+  await appWindow.getByRole('button', { name: 'Open Bronom Home' }).click()
+  await electronApp.evaluate(async ({ webContents }) => {
+    const home = webContents.getAllWebContents().find((contents) => contents.getURL().startsWith('bronom://home'))
+    if (!home) throw new Error('Bronom Home web contents was not found')
+    await home.executeJavaScript(`(() => {
+      const button = document.querySelector('[data-copy-target="guide-code"]');
+      const target = document.getElementById(button.dataset.copyTarget);
+      target.textContent = 'x'.repeat(${8 * 1024 * 1024 + 1});
+      button.click();
+    })()`)
+  })
+  const toast = appWindow.getByRole('alert', { name: 'Copy failed' })
+  await expect(toast).toBeVisible()
+  await expect(toast).toContainText('maximum 8 MB')
+})
+
 test('shows an error status when the MCP port is already in use', async ({
   mcpPort,
   profileDirectory

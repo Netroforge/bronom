@@ -17,6 +17,7 @@ declare global {
       setToolbarHeight(height: number): void
       setContentInsets(insets: { top: number; right: number; bottom: number; left: number }): void
       onHelpRequested(listener: (action: HelpMenuAction) => void): () => void
+      onClipboardFailed(listener: (message: string) => void): () => void
     }
   }
 }

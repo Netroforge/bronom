@@ -1082,6 +1082,17 @@ function assertPanelShellSender(event: Electron.IpcMainInvokeEvent | Electron.Ip
   }
 }
 
+function assertHomePageSender(event: Electron.IpcMainInvokeEvent): void {
+  const actual = event.senderFrame?.url
+  try {
+    const url = new URL(actual ?? '')
+    if (url.protocol === 'bronom:' && url.hostname === 'home' && (url.pathname === '/' || url.pathname === '')) return
+  } catch {
+    // Fall through to the trusted-origin error below.
+  }
+  throw new Error('Rejected IPC from a non-Home page')
+}
+
 function sendPanelWindowSnapshot(target: BrowserWindow): void {
   if (target.isDestroyed() || target.webContents.isDestroyed()) return
   target.webContents.send('browser:state-changed', tabsManager?.getState())
@@ -1221,6 +1232,19 @@ function registerIpc(): void {
     assertTrustedShellSender(event)
     if (typeof value !== 'string') throw new TypeError('Clipboard text must be a string')
     await copyTextToClipboard(value)
+  })
+  ipcMain.handle('bronom-home:copy-text', async (event, value: unknown) => {
+    assertHomePageSender(event)
+    if (typeof value !== 'string') throw new TypeError('Clipboard text must be a string')
+    try {
+      await copyTextToClipboard(value)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'The system clipboard did not accept the text.'
+      if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+        mainWindow.webContents.send('clipboard:failed', message)
+      }
+      throw error
+    }
   })
   ipcMain.handle('browser:open-home', (event) => { assertTrustedShellSender(event); return tabsManager!.openHome() })
   ipcMain.handle('browser:new-tab', (event, options) => { assertTrustedShellSender(event); return tabsManager!.newTab(options) })
@@ -2295,7 +2319,6 @@ async function configurePersistentSession(): Promise<void> {
   persistentSession.setDownloadPath(defaultDownloadDirectory())
   persistentSession.setPermissionCheckHandler((_webContents, permission, requestingOrigin, details) => {
     const requestingUrl = details.requestingUrl || details.securityOrigin || requestingOrigin
-    if (requestingUrl.startsWith('bronom://home') && permission === 'clipboard-sanitized-write') return true
     const origin =
       normalizeSitePermissionOrigin(requestingOrigin) ??
       normalizeSitePermissionOrigin(details.securityOrigin || '') ??
@@ -2306,7 +2329,7 @@ async function configurePersistentSession(): Promise<void> {
   persistentSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
     const requestingUrl = details.requestingUrl || webContents.getURL()
     if (requestingUrl.startsWith('bronom://home')) {
-      callback(permission === 'clipboard-sanitized-write')
+      callback(false)
       return
     }
     const origin = normalizeSitePermissionOrigin(requestingUrl)

@@ -616,6 +616,7 @@ let unsubscribePanelClosed: (() => void) | undefined
 let syncingDetachedPanelState = false
 let unsubscribeUpdateOpen: (() => void) | undefined
 let unsubscribeHelp: (() => void) | undefined
+let unsubscribeClipboardFailed: (() => void) | undefined
 let unsubscribeTabGroupEdit: (() => void) | undefined
 let resizeObserver: ResizeObserver | undefined
 let updateNoticeDismissTimer: number | undefined
@@ -5069,6 +5070,9 @@ onMounted(async () => {
     openUpdateSettings()
   })
   unsubscribeHelp = window.bronomShell.onHelpRequested(handleHelpRequested)
+  unsubscribeClipboardFailed = window.bronomShell.onClipboardFailed((message) => {
+    showAppToast('error', 'Copy failed', friendlyUiError(message, 'The system clipboard did not accept the text.'))
+  })
   unsubscribePanelRequested = window.bronomPanelWindow.onPanelRequested((panel) => {
     if (isDetachedPanelWindow) void showDetachedPanel(panel)
   })
@@ -5138,6 +5142,7 @@ onBeforeUnmount(() => {
   unsubscribeUpdates?.()
   unsubscribeUpdateOpen?.()
   unsubscribeHelp?.()
+  unsubscribeClipboardFailed?.()
   unsubscribeTabGroupEdit?.()
   unsubscribePanelRequested?.()
   unsubscribePanelActive?.()

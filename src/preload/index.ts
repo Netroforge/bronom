@@ -356,5 +356,10 @@ contextBridge.exposeInMainWorld('bronomShell', {
     const handler = (_event: Electron.IpcRendererEvent, action: HelpMenuAction): void => listener(action)
     ipcRenderer.on('help:open', handler)
     return () => ipcRenderer.removeListener('help:open', handler)
+  },
+  onClipboardFailed: (listener: (message: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, message: string): void => listener(message)
+    ipcRenderer.on('clipboard:failed', handler)
+    return () => ipcRenderer.removeListener('clipboard:failed', handler)
   }
 })

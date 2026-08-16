@@ -1,4 +1,4 @@
-import { ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
 
 const MAX_EXCEPTION_INPUT_CHARS = 64_000
 
@@ -20,6 +20,15 @@ interface PageWindow {
 }
 
 const pageWindow = globalThis as unknown as PageWindow
+const pageLocation = (globalThis as unknown as {
+  location?: { protocol?: string; hostname?: string }
+}).location
+
+if (pageLocation?.protocol === 'bronom:' && pageLocation.hostname === 'home') {
+  contextBridge.exposeInMainWorld('bronomHome', {
+    copyText: (text: string) => ipcRenderer.invoke('bronom-home:copy-text', text)
+  })
+}
 
 function bounded(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
