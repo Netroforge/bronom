@@ -1713,6 +1713,36 @@ test('shows a native webpage context menu and suppresses it while human interact
     await expect.poll(() => electronApp.evaluate(({ clipboard }) => clipboard.readText()))
       .toBe(`http://127.0.0.1:${address.port}/image.png`)
 
+    await electronApp.evaluate(({ clipboard }) => {
+      clipboard.clear()
+      const menu = (globalThis as typeof globalThis & { __bronomContextMenu?: Electron.Menu }).__bronomContextMenu
+      const item = menu?.getMenuItemById('copy-image')
+      if (!item?.click) throw new Error('Copy Image context action was not found')
+      ;(item.click as unknown as () => void)()
+    })
+    await expect.poll(() => electronApp.evaluate(({ clipboard }) => {
+      const image = clipboard.readImage()
+      return { empty: image.isEmpty(), size: image.getSize(), pngBytes: image.toPNG().byteLength }
+    })).toEqual({ empty: false, size: { width: 1, height: 1 }, pngBytes: expect.any(Number) })
+
+    await rightClick('#image')
+    await expect.poll(contextMenuItems).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'copy-image', label: 'Copy Image' })
+    ]))
+    await electronApp.evaluate(({ clipboard, nativeImage }) => {
+      const menu = (globalThis as typeof globalThis & { __bronomContextMenu?: Electron.Menu }).__bronomContextMenu
+      const item = menu?.getMenuItemById('copy-image')
+      if (!item?.click) throw new Error('Copy Image context action was not found')
+      const originalReadImage = clipboard.readImage
+      clipboard.readImage = () => nativeImage.createEmpty()
+      ;(item.click as unknown as () => void)()
+      setTimeout(() => { clipboard.readImage = originalReadImage }, 700)
+    })
+    const imageCopyFailure = appWindow.getByRole('alert', { name: 'Copy failed' })
+    await expect(imageCopyFailure).toBeVisible()
+    await expect(imageCopyFailure).toContainText('system clipboard did not accept it')
+    await new Promise((resolve) => setTimeout(resolve, 800))
+
     const activeTabId = await appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)') as string
     await appWindow.evaluate(`window.bronom.setTabHumanInteractionLocked(${JSON.stringify(activeTabId)}, true)`)
     await electronApp.evaluate(() => {

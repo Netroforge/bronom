@@ -19,7 +19,8 @@ import {
   Tray,
   type MessageBoxOptions,
   type NativeImage,
-  type Session
+  type Session,
+  type WebContents
 } from 'electron'
 import electronUpdater from 'electron-updater'
 import { updateErrorMessage, type UpdateOperation } from '../shared/update-errors.js'
@@ -169,15 +170,19 @@ let trayAttentionIcon: NativeImage | null = null
 // wrapper being retained by the Linux clipboard backend.
 let lastScreenshotClipboardImage: NativeImage | null = null
 let lastCopiedText = ''
-let clipboardTextWriteQueue: Promise<void> = Promise.resolve()
+let clipboardOperationQueue: Promise<void> = Promise.resolve()
+
+function queueClipboardOperation<T>(operation: () => Promise<T>): Promise<T> {
+  const result = clipboardOperationQueue.then(operation)
+  clipboardOperationQueue = result.then(() => undefined, () => undefined)
+  return result
+}
 
 async function copyTextToClipboard(text: string): Promise<void> {
-  const operation = clipboardTextWriteQueue.then(async () => {
+  await queueClipboardOperation(async () => {
     await writeVerifiedClipboardText(text, clipboard)
     lastCopiedText = text
   })
-  clipboardTextWriteQueue = operation.catch(() => undefined)
-  await operation
 }
 
 function reportClipboardFailure(error: unknown): void {
@@ -187,7 +192,7 @@ function reportClipboardFailure(error: unknown): void {
   }
 }
 
-async function copyPngToClipboard(data: Buffer): Promise<{ width: number; height: number }> {
+async function writePngToClipboard(data: Buffer): Promise<{ width: number; height: number }> {
   const image = nativeImage.createFromBuffer(data)
   if (image.isEmpty()) throw new Error('Could not create the selected screenshot')
   const expectedSize = image.getSize()
@@ -212,6 +217,30 @@ async function copyPngToClipboard(data: Buffer): Promise<{ width: number; height
   }
 
   throw new Error('The screenshot was captured, but the system clipboard did not accept the image')
+}
+
+async function copyPngToClipboard(data: Buffer): Promise<{ width: number; height: number }> {
+  return queueClipboardOperation(() => writePngToClipboard(data))
+}
+
+async function copyPageImageToClipboard(webContents: WebContents, x: number, y: number): Promise<void> {
+  await queueClipboardOperation(async () => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (webContents.isDestroyed()) throw new Error('The page closed before its image could be copied')
+      clipboard.clear()
+      webContents.copyImageAt(x, y)
+      await new Promise<void>((resolve) => setTimeout(resolve, 40 * (attempt + 1)))
+      const image = clipboard.readImage()
+      if (!image.isEmpty()) {
+        const png = image.toPNG()
+        if (png.byteLength > 0) {
+          await writePngToClipboard(png)
+          return
+        }
+      }
+    }
+    throw new Error('The page image was selected, but the system clipboard did not accept it')
+  })
 }
 
 function defaultDownloadDirectory(): string {
@@ -2244,6 +2273,7 @@ async function createWindow(): Promise<void> {
       if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('browser:shortcut-requested', action)
     },
     copyText: copyTextToClipboard,
+    copyImageAt: copyPageImageToClipboard,
     onClipboardCopyFailed: reportClipboardFailure,
     onStateChanged: (state) => sendToPanelWindow('browser:state-changed', state),
     onDownloadsChanged: (downloads) => sendToPanelWindow('browser:downloads-changed', downloads),

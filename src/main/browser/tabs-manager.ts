@@ -17,7 +17,8 @@ import {
   type MenuItemConstructorOptions,
   type NavigationEntry,
   type Rectangle,
-  type Session
+  type Session,
+  type WebContents
 } from 'electron'
 import { browserShortcutAction, type BrowserShortcutAction } from '../../shared/browser-shortcuts.js'
 import { accessibilityAuditPageScript, normalizeAccessibilityAuditOptions } from '../../shared/accessibility-audit.js'
@@ -642,6 +643,7 @@ export interface TabsManagerOptions {
   onCredentialSubmitted?: (candidate: BrowserCredentialCandidate) => void
   onShortcutRequested?: (action: BrowserShortcutAction) => void
   copyText: (text: string) => Promise<void>
+  copyImageAt: (webContents: WebContents, x: number, y: number) => Promise<void>
   onClipboardCopyFailed?: (error: unknown) => void
   onPageVisited?: (visit: { url: string; title: string }) => void
   onStateChanged?: (state: BrowserState) => void
@@ -4884,11 +4886,16 @@ export class BrowserTabsManager {
     const openBackgroundTab = (url: string): void => {
       void this.createTab({ url, active: false, mcpGroupId: tab.mcpGroupId }).catch((error) => console.error(`[browser] Could not open context-menu URL ${url}:`, error))
     }
+    const reportCopyFailure = (kind: 'text' | 'image', error: unknown): void => {
+      console.error(`[browser] Could not copy context-menu ${kind}:`, error)
+      this.options.onClipboardCopyFailed?.(error)
+    }
     const copyText = (text: string): void => {
-      void this.options.copyText(text).catch((error) => {
-        console.error('[browser] Could not copy context-menu text:', error)
-        this.options.onClipboardCopyFailed?.(error)
-      })
+      void this.options.copyText(text).catch((error) => reportCopyFailure('text', error))
+    }
+    const copyImage = (): void => {
+      void this.options.copyImageAt(webContents, params.x, params.y)
+        .catch((error) => reportCopyFailure('image', error))
     }
 
     if (params.linkURL) {
@@ -4926,7 +4933,7 @@ export class BrowserTabsManager {
           id: 'copy-image',
           label: 'Copy Image',
           enabled: params.hasImageContents,
-          click: withLiveContents(() => webContents.copyImageAt(params.x, params.y))
+          click: copyImage
         },
         {
           id: 'copy-image-address',
