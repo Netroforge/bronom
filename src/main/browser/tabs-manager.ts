@@ -645,6 +645,7 @@ export interface TabsManagerOptions {
   copyText: (text: string) => Promise<void>
   copyImageAt: (webContents: WebContents, x: number, y: number) => Promise<void>
   onClipboardCopyFailed?: (error: unknown) => void
+  onActionFailed?: (action: string, error: unknown) => void
   onPageVisited?: (visit: { url: string; title: string }) => void
   onStateChanged?: (state: BrowserState) => void
   onDownloadsChanged?: (downloads: BrowserDownloadState[]) => void
@@ -1814,6 +1815,7 @@ export class BrowserTabsManager {
     const activeWebsiteTab = this.activeTabId ? this.tabs.get(this.activeTabId) : undefined
     const reportError = (action: string) => (error: unknown): void => {
       console.error(`[browser] Could not ${action} from tab context menu:`, error)
+      this.options.onActionFailed?.(action, error)
     }
     const currentGroup = tab.mcpGroupId ? this.mcpTabGroups.get(tab.mcpGroupId) : undefined
     const groupChoices: MenuItemConstructorOptions[] = this.listMcpTabGroups()
@@ -4867,6 +4869,10 @@ export class BrowserTabsManager {
     webContents.setWindowOpenHandler(({ url }) => {
       if (tab.mcpGroupId && isBronomHomeUrl(url)) return { action: 'deny' }
       void this.createTab({ url, active: true, mcpGroupId: tab.mcpGroupId })
+        .catch((error) => {
+          console.error(`[browser] Could not open requested page ${url}:`, error)
+          this.options.onActionFailed?.('open page in new tab', error)
+        })
       return { action: 'deny' }
     })
   }
@@ -4884,7 +4890,11 @@ export class BrowserTabsManager {
       if (!webContents.isDestroyed()) action()
     }
     const openBackgroundTab = (url: string): void => {
-      void this.createTab({ url, active: false, mcpGroupId: tab.mcpGroupId }).catch((error) => console.error(`[browser] Could not open context-menu URL ${url}:`, error))
+      void this.createTab({ url, active: false, mcpGroupId: tab.mcpGroupId })
+        .catch((error) => {
+          console.error(`[browser] Could not open context-menu URL ${url}:`, error)
+          this.options.onActionFailed?.('open link in new tab', error)
+        })
     }
     const reportCopyFailure = (kind: 'text' | 'image', error: unknown): void => {
       console.error(`[browser] Could not copy context-menu ${kind}:`, error)
@@ -4985,23 +4995,32 @@ export class BrowserTabsManager {
         id: 'back',
         label: 'Back',
         enabled: navigation.canGoBack(),
-        click: () => { void this.back(tab.id).catch(() => undefined) }
+        click: () => {
+          void this.back(tab.id).catch((error) => this.options.onActionFailed?.('go back', error))
+        }
       },
       {
         id: 'forward',
         label: 'Forward',
         enabled: navigation.canGoForward(),
-        click: () => { void this.forward(tab.id).catch(() => undefined) }
+        click: () => {
+          void this.forward(tab.id).catch((error) => this.options.onActionFailed?.('go forward', error))
+        }
       },
       {
         id: 'reload',
         label: 'Reload',
-        click: () => { void this.reload(tab.id).catch(() => undefined) }
+        click: () => {
+          void this.reload(tab.id).catch((error) => this.options.onActionFailed?.('reload', error))
+        }
       },
       {
         id: 'reload-ignoring-cache',
         label: 'Reload Without Cache',
-        click: () => { void this.reloadIgnoringCache(tab.id).catch(() => undefined) }
+        click: () => {
+          void this.reloadIgnoringCache(tab.id)
+            .catch((error) => this.options.onActionFailed?.('reload without cache', error))
+        }
       },
       {
         id: 'copy-page-address',
@@ -5013,7 +5032,10 @@ export class BrowserTabsManager {
         label: 'Inspect',
         click: () => {
           void this.inspectElement(tab, params.x, params.y)
-            .catch((error) => console.error('[browser] Could not inspect the selected element:', error))
+            .catch((error) => {
+              console.error('[browser] Could not inspect the selected element:', error)
+              this.options.onActionFailed?.('inspect element', error)
+            })
         }
       }
     ])

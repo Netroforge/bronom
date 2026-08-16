@@ -10,6 +10,11 @@ export type { InterfaceScale } from './interface-scale.js'
 
 export type HelpMenuAction = 'shortcuts' | 'about' | 'support'
 
+export interface BrowserActionFailure {
+  action: string
+  message: string
+}
+
 export type BrowserPageProblemKind = 'load-error' | 'renderer-gone' | 'unresponsive'
 
 export interface BrowserPageProblem {

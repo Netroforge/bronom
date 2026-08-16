@@ -65,6 +65,7 @@ import {
   isAttentionSoundCue,
   type AppSettings,
   type AppUpdateState,
+  type BrowserActionFailure,
   type BrowserAccessibilityAuditOptions,
   type BrowserElementInspectionOptions,
   type BrowserPageCaptureOptions,
@@ -189,6 +190,19 @@ function reportClipboardFailure(error: unknown): void {
   const message = error instanceof Error ? error.message : 'The system clipboard did not accept the text.'
   if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
     mainWindow.webContents.send('clipboard:failed', message)
+  }
+}
+
+function reportBrowserActionFailure(action: string, error: unknown): void {
+  const rawMessage = error instanceof Error ? error.message : ''
+  const failure: BrowserActionFailure = {
+    action,
+    message: /^Tab not found:/i.test(rawMessage)
+      ? 'The tab is no longer available.'
+      : rawMessage || 'The requested browser action could not be completed.'
+  }
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+    mainWindow.webContents.send('browser:action-failed', failure)
   }
 }
 
@@ -2275,6 +2289,7 @@ async function createWindow(): Promise<void> {
     copyText: copyTextToClipboard,
     copyImageAt: copyPageImageToClipboard,
     onClipboardCopyFailed: reportClipboardFailure,
+    onActionFailed: reportBrowserActionFailure,
     onStateChanged: (state) => sendToPanelWindow('browser:state-changed', state),
     onDownloadsChanged: (downloads) => sendToPanelWindow('browser:downloads-changed', downloads),
     onPageVisited: ({ url, title }) => {

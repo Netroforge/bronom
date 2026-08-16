@@ -1,4 +1,4 @@
-import type { BronomApi, BronomBookmarksApi, BronomBrowsingDataApi, BronomCredentialsApi, BronomDownloadsApi, BronomHistoryApi, BronomMcpApi, BronomPanelWindowApi, BronomPermissionsApi, BronomSettingsApi, BronomUpdatesApi, HelpMenuAction } from '../shared/types'
+import type { BrowserActionFailure, BronomApi, BronomBookmarksApi, BronomBrowsingDataApi, BronomCredentialsApi, BronomDownloadsApi, BronomHistoryApi, BronomMcpApi, BronomPanelWindowApi, BronomPermissionsApi, BronomSettingsApi, BronomUpdatesApi, HelpMenuAction } from '../shared/types'
 
 declare global {
   interface Window {
@@ -18,6 +18,7 @@ declare global {
       setContentInsets(insets: { top: number; right: number; bottom: number; left: number }): void
       onHelpRequested(listener: (action: HelpMenuAction) => void): () => void
       onClipboardFailed(listener: (message: string) => void): () => void
+      onActionFailed(listener: (failure: BrowserActionFailure) => void): () => void
     }
   }
 }

@@ -1743,6 +1743,23 @@ test('shows a native webpage context menu and suppresses it while human interact
     await expect(imageCopyFailure).toContainText('system clipboard did not accept it')
     await new Promise((resolve) => setTimeout(resolve, 800))
 
+    await rightClick('#link')
+    const staleTabId = await appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)') as string
+    await appWindow.evaluate(`window.bronom.closeTab(${JSON.stringify(staleTabId)})`)
+    await electronApp.evaluate(() => {
+      const menu = (globalThis as typeof globalThis & { __bronomContextMenu?: Electron.Menu }).__bronomContextMenu
+      const item = menu?.getMenuItemById('reload')
+      if (!item?.click) throw new Error('Reload context action was not found')
+      ;(item.click as unknown as () => void)()
+    })
+    const actionFailure = appWindow.getByRole('alert', { name: 'Reload failed' })
+    await expect(actionFailure).toBeVisible()
+    await expect(actionFailure).toContainText('The tab is no longer available')
+    await expect(actionFailure).not.toContainText(staleTabId)
+
+    await appWindow.evaluate(`window.bronom.newTab({ url: ${JSON.stringify(url)}, active: true })`)
+    await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.find((tab) => tab.active)?.title)')).toBe('Context menu fixture')
+
     const activeTabId = await appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)') as string
     await appWindow.evaluate(`window.bronom.setTabHumanInteractionLocked(${JSON.stringify(activeTabId)}, true)`)
     await electronApp.evaluate(() => {

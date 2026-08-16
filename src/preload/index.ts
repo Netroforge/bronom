@@ -10,6 +10,7 @@ import type {
   BronomPermissionsApi,
   BronomSettingsApi,
   BronomUpdatesApi,
+  BrowserActionFailure,
   BrowserState,
   BrowserTabGroupUpdate,
   BrowserFindOptions,
@@ -361,5 +362,10 @@ contextBridge.exposeInMainWorld('bronomShell', {
     const handler = (_event: Electron.IpcRendererEvent, message: string): void => listener(message)
     ipcRenderer.on('clipboard:failed', handler)
     return () => ipcRenderer.removeListener('clipboard:failed', handler)
+  },
+  onActionFailed: (listener: (failure: BrowserActionFailure) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, failure: BrowserActionFailure): void => listener(failure)
+    ipcRenderer.on('browser:action-failed', handler)
+    return () => ipcRenderer.removeListener('browser:action-failed', handler)
   }
 })
