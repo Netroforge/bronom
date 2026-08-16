@@ -1568,6 +1568,20 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     expect(slowestFetch).toHaveLength(1)
     expect(slowestFetch[0]).toMatchObject({ resourceType: 'fetch', durationMs: expect.any(Number) })
     expect(String(slowestFetch[0]?.url)).toContain('timing=delayed')
+    const propertyFilteredNetworkResult = await client.callTool({
+      name: 'browser_network',
+      arguments: {
+        tabId,
+        query: 'method:POST status-code:200 scheme:http domain:127.0.0.1 resource-type:fetch/xhr larger-than:1 url:api-details'
+      }
+    }) as CallToolResult
+    expect(propertyFilteredNetworkResult.isError, text(propertyFilteredNetworkResult)).not.toBe(true)
+    const propertyFilteredNetwork = JSON.parse(text(propertyFilteredNetworkResult)) as Array<Record<string, unknown>>
+    expect(propertyFilteredNetwork.length).toBeGreaterThan(0)
+    expect(propertyFilteredNetwork).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: detailedRequest?.id, method: 'POST', status: 200, resourceType: 'fetch' })
+    ]))
+    expect(propertyFilteredNetwork.every((request) => String(request.url).includes('/api-details'))).toBe(true)
     const networkDetailsResult = await client.callTool({
       name: 'browser_network_request',
       arguments: { tabId, requestId: detailedRequest?.id }
@@ -1685,7 +1699,7 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       name: 'browser_network_har',
       arguments: {
         tabId,
-        query: 'api-details',
+        query: 'method:POST status-code:200 domain:127.0.0.1 url:api-details',
         resourceType: 'fetch/xhr',
         includeBodies: true,
         maxRequests: 10,
@@ -1724,7 +1738,7 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       name: 'browser_network_har',
       arguments: {
         tabId,
-        query: 'api-details',
+        query: 'method:POST status-code:200 domain:127.0.0.1 url:api-details',
         resourceType: 'fetch/xhr',
         maxRequests: 10,
         saveToDownloads: true,
@@ -1794,7 +1808,8 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     await networkPanel.getByRole('button', { name: /Inspect redirect hop 1 redirect-start/ }).click()
     await expect(networkPanel.locator('.network-detail-url')).toContainText('/redirect-start')
     await expect(networkPanel.getByRole('searchbox', { name: 'Filter network requests' })).toHaveValue('')
-    await networkPanel.getByRole('searchbox', { name: 'Filter network requests' }).fill('api-details')
+    await networkPanel.getByRole('searchbox', { name: 'Filter network requests' })
+      .fill('method:POST status-code:200 domain:127.0.0.1 larger-than:1 url:api-details')
     await expect(networkPanel.locator('.network-request-list > button').first()).toContainText('timing=delayed')
     const apiRequest = networkPanel.locator(`[data-request-id="${String(detailedRequest?.id)}"]`)
     await expect(apiRequest).toBeVisible()

@@ -7363,7 +7363,14 @@ onBeforeUnmount(() => {
       <div class="network-monitor-tools">
         <label class="network-monitor-search">
           <IconSearch aria-hidden="true" />
-          <input v-model="networkSearch" type="search" aria-label="Filter network requests" placeholder="Filter URL, status, error, or source" spellcheck="false" />
+          <input
+            v-model="networkSearch"
+            type="search"
+            aria-label="Filter network requests"
+            placeholder="Filter requests · method:POST status-code:500"
+            title="Combine free text with domain:, is:running, larger-than:, method:, resource-type:, scheme:, status-code:, or url: filters"
+            spellcheck="false"
+          />
         </label>
         <div class="network-sort-controls">
           <label>

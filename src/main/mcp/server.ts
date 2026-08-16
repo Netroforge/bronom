@@ -218,12 +218,12 @@ export const BROWSER_TOOL_CATALOG: BrowserToolDefinition[] = [
   { name: 'browser_issues', category: 'Inspection', description: 'List or clear bounded Chromium Issues such as CORS, CSP, mixed-content, cookie, deprecation, quirks-mode, and stylesheet problems.' },
   { name: 'browser_console', category: 'Inspection', description: 'Read or clear bounded sanitized console entries with repeat counts, distinct uncaught exceptions, and structured call stacks from a tab.' },
   { name: 'browser_diagnostic_logs', category: 'Inspection', description: 'Inspect, preserve across navigation, or clear the bounded Console and Network evidence for one group tab.' },
-  { name: 'browser_network', category: 'Inspection', description: 'Read, search, filter, sort, limit, or clear bounded network request metadata, including duration, TTFB, and the exact browser, prefetch, disk-cache, or service-worker response source, from a tab.' },
+  { name: 'browser_network', category: 'Inspection', description: 'Read, search, property-filter, sort, limit, or clear bounded network request metadata, including duration, TTFB, and the exact browser, prefetch, disk-cache, or service-worker response source, from a tab.' },
   { name: 'browser_network_wait', category: 'Inspection', description: 'Wait without polling for a retained or future network request matching a URL pattern and optional method, resource type, status, or lifecycle phase; use a prior request ID cursor when an endpoint may repeat.' },
   { name: 'browser_network_search', category: 'Inspection', description: 'Search bounded sanitized URLs, headers, payloads, responses, and retained WebSocket text across recent requests; returns request IDs and short matching snippets for follow-up inspection.' },
   { name: 'browser_network_request', category: 'Inspection', description: 'Inspect one HTTP or WebSocket request with bounded bodies or messages, redacted secrets, response source, service-worker and Cache Storage provenance, initiator frames, redirect and Chromium-reported request relationships, browser timing, and parsed Server-Timing metrics; for HTTP(S), optionally return a sanitized cURL or fetch reproduction that must be reviewed before sharing or running.' },
   { name: 'browser_network_replay', category: 'Interaction', description: 'Replay one retained XMLHttpRequest inside its original tab and session without exposing its original credentials, headers, or body. GET and HEAD replay directly; every other method requires confirmSideEffects: true because it can repeat writes or other side effects.' },
-  { name: 'browser_network_har', category: 'Inspection', description: 'Return or save a filtered, bounded, sanitized HAR 1.2 network log with bodies omitted by default; saved files use collision-safe names in Downloads.' },
+  { name: 'browser_network_har', category: 'Inspection', description: 'Return or save a property-filtered, bounded, sanitized HAR 1.2 network log with bodies omitted by default; saved files use collision-safe names in Downloads.' },
   { name: 'browser_network_routes', category: 'Inspection', description: 'List, add, prioritize, remove, or clear temporary per-tab request mocks, failures, and individual network throttles.' },
   { name: 'browser_downloads', category: 'Inspection', description: 'List, cancel, or clear tracked downloads.' },
   { name: 'browser_evaluate', category: 'Inspection', description: 'Evaluate JavaScript and return a JSON-safe result.' }
@@ -234,6 +234,8 @@ function toolDescription(name: string): string {
   if (!tool) throw new Error(`Unknown browser tool: ${name}`)
   return tool.description
 }
+
+const NETWORK_FILTER_QUERY_DESCRIPTION = 'Free text plus Chrome-style AND filters: domain (wildcards allowed), is:running, larger-than (B, K/KB, M/MB), method, resource-type, scheme, status-code, and url. Quote a phrase that contains spaces.'
 
 const textResult = (value: unknown): CallToolResult => ({
   content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }]
@@ -1334,7 +1336,7 @@ function createBrowserMcpServer(
       description: toolDescription('browser_network'),
       inputSchema: {
         tabId: z.string().optional(),
-        query: z.string().max(500).optional(),
+        query: z.string().max(500).optional().describe(NETWORK_FILTER_QUERY_DESCRIPTION),
         resourceType: z.string().optional(),
         sortBy: z.enum(['start-time', 'end-time', 'duration', 'waiting', 'size', 'status']).optional(),
         sortDirection: z.enum(['asc', 'desc']).optional(),
@@ -1454,7 +1456,7 @@ function createBrowserMcpServer(
       description: toolDescription('browser_network_har'),
       inputSchema: {
         tabId: z.string().optional(),
-        query: z.string().max(500).optional(),
+        query: z.string().max(500).optional().describe(NETWORK_FILTER_QUERY_DESCRIPTION),
         resourceType: z.string().max(64).optional(),
         errorsOnly: z.boolean().optional(),
         includeBodies: z.boolean().optional(),

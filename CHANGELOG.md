@@ -7,6 +7,7 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 ### Added
 
 - Save filtered, sanitized Network monitor HAR files directly to Downloads with collision-safe names, both from the human interface and the `browser_network_har` MCP tool; request and response bodies remain omitted by default.
+- Filter the human Network monitor, `browser_network`, and HAR exports with composable Chrome-style `domain`, running-state, size, method, resource-type, scheme, status-code, URL, and quoted free-text expressions.
 
 ### Fixed
 

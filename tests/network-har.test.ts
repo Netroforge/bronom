@@ -173,6 +173,17 @@ describe('sanitized network HAR', () => {
       .toEqual([details])
   })
 
+  it('combines Chrome-style property filters with AND semantics', () => {
+    expect(filterNetworkRequests([details], normalizeNetworkHarOptions({
+      query: 'method:POST status-code:200 scheme:https domain:example.test resource-type:fetch larger-than:40 url:compact'
+    }))).toEqual([details])
+    expect(filterNetworkRequests([details], normalizeNetworkHarOptions({ query: 'domain:*.test "cache storage"' })))
+      .toEqual([details])
+    expect(filterNetworkRequests([details], normalizeNetworkHarOptions({ query: 'larger-than:42' }))).toEqual([])
+    expect(filterNetworkRequests([details], normalizeNetworkHarOptions({ query: 'status-code:404' }))).toEqual([])
+    expect(filterNetworkRequests([details], normalizeNetworkHarOptions({ query: 'larger-than:nope' }))).toEqual([])
+  })
+
   it('exports only a payload-free WebSocket summary', () => {
     const webSocketDetails: BrowserNetworkRequestDetails = {
       ...details,
@@ -208,5 +219,8 @@ describe('sanitized network HAR', () => {
     expect(JSON.stringify(har)).not.toContain('private websocket payload')
     expect(filterNetworkRequests([webSocketDetails], normalizeNetworkHarOptions({ resourceType: 'websocket' })))
       .toEqual([webSocketDetails])
+    const runningWebSocket = { ...webSocketDetails, completedAt: undefined }
+    expect(filterNetworkRequests([details, runningWebSocket], normalizeNetworkHarOptions({ query: 'is:running' })))
+      .toEqual([runningWebSocket])
   })
 })

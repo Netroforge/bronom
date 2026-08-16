@@ -79,32 +79,118 @@ export function networkResourceCategory(resourceType: string): string {
   return 'other'
 }
 
+const NETWORK_FILTER_PROPERTIES = new Set([
+  'domain',
+  'is',
+  'larger-than',
+  'method',
+  'resource-type',
+  'scheme',
+  'status-code',
+  'url'
+])
+
+function networkFilterTokens(query: string): string[] {
+  const tokens: string[] = []
+  let token = ''
+  let quoted = false
+  for (const character of query) {
+    if (character === '"') {
+      quoted = !quoted
+      continue
+    }
+    if (/\s/.test(character) && !quoted) {
+      if (token) tokens.push(token)
+      token = ''
+      continue
+    }
+    token += character
+  }
+  if (token) tokens.push(token)
+  return tokens
+}
+
+function networkFilterSize(value: string): number | undefined {
+  const match = /^(\d+(?:\.\d+)?)(b|k|kb|m|mb)?$/i.exec(value.trim())
+  if (!match) return undefined
+  const amount = Number(match[1])
+  const unit = match[2]?.toLowerCase()
+  const multiplier = unit === 'm' || unit === 'mb' ? 1_000_000 : unit === 'k' || unit === 'kb' ? 1_000 : 1
+  return Number.isFinite(amount) ? amount * multiplier : undefined
+}
+
+function wildcardMatch(value: string, pattern: string): boolean {
+  const source = pattern
+    .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')
+  return new RegExp(`^${source}$`, 'i').test(value)
+}
+
+function requestMatchesPropertyFilter(request: BrowserNetworkRequest, property: string, expected: string): boolean {
+  if (!expected) return false
+  if (property === 'method') return request.method.toLowerCase() === expected.toLowerCase()
+  if (property === 'status-code') return request.status !== undefined && String(request.status) === expected
+  if (property === 'larger-than') {
+    const minimumBytes = networkFilterSize(expected)
+    return minimumBytes !== undefined && (request.responseSizeBytes ?? 0) > minimumBytes
+  }
+  if (property === 'resource-type') {
+    const resourceType = expected.toLowerCase()
+    return request.resourceType.toLowerCase() === resourceType
+      || networkResourceCategory(request.resourceType) === resourceType
+  }
+  if (property === 'is') {
+    return expected.toLowerCase() === 'running'
+      && networkResourceCategory(request.resourceType) === 'websocket'
+      && !request.completedAt
+  }
+  try {
+    const url = new URL(request.url)
+    if (property === 'domain') return wildcardMatch(url.hostname, expected)
+    if (property === 'scheme') return url.protocol.slice(0, -1).toLowerCase() === expected.toLowerCase()
+    if (property === 'url') return request.url.toLowerCase().includes(expected.toLowerCase())
+  } catch {
+    return false
+  }
+  return false
+}
+
+function requestMatchesTextFilter(request: BrowserNetworkRequest, query: string): boolean {
+  const normalized = query.toLowerCase()
+  return [
+    request.method,
+    request.url,
+    request.resourceType,
+    request.status,
+    request.error,
+    request.responseSource,
+    request.responseSource ? networkResponseSourceLabel(request.responseSource) : undefined,
+    request.serviceWorkerResponseSource,
+    request.serviceWorkerResponseSource
+      ? serviceWorkerResponseSourceLabel(request.serviceWorkerResponseSource)
+      : undefined,
+    request.cacheStorageCacheName
+  ].some((value) => String(value ?? '').toLowerCase().includes(normalized))
+}
+
 export function filterNetworkRequests(
   requests: BrowserNetworkRequest[],
   options: NormalizedNetworkHarOptions
 ): BrowserNetworkRequest[] {
-  const query = options.query.toLowerCase()
+  const queryTokens = networkFilterTokens(options.query)
   return requests.filter((request) => {
     if (options.errorsOnly && !isNetworkRequestFailure(request)) return false
     if (options.resourceType
       && request.resourceType.toLowerCase() !== options.resourceType
       && networkResourceCategory(request.resourceType) !== options.resourceType) return false
-    if (!query) return true
-    return [
-      request.method,
-      request.url,
-      request.resourceType,
-      request.status,
-      request.error,
-      request.responseSource,
-      request.responseSource ? networkResponseSourceLabel(request.responseSource) : undefined,
-      request.serviceWorkerResponseSource,
-      request.serviceWorkerResponseSource
-        ? serviceWorkerResponseSourceLabel(request.serviceWorkerResponseSource)
-        : undefined,
-      request.cacheStorageCacheName
-    ]
-      .some((value) => String(value ?? '').toLowerCase().includes(query))
+    return queryTokens.every((token) => {
+      const separator = token.indexOf(':')
+      const property = separator > 0 ? token.slice(0, separator).toLowerCase() : ''
+      if (NETWORK_FILTER_PROPERTIES.has(property)) {
+        return requestMatchesPropertyFilter(request, property, token.slice(separator + 1))
+      }
+      return requestMatchesTextFilter(request, token)
+    })
   })
 }
 
