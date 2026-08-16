@@ -2828,13 +2828,37 @@ watch(
     }
     if (findOpen.value && findTabId && tabId !== findTabId) void closeFind()
     if (accessibilityPanelOpen.value && accessibilityAudit.value?.tabId !== tabId) accessibilityPanelOpen.value = false
+    accessibilityAudit.value = null
+    accessibilityAuditState.value = 'idle'
+    accessibilityAuditError.value = ''
     if (performancePanelOpen.value && performanceReport.value?.tabId !== tabId) performancePanelOpen.value = false
+    performanceReport.value = null
+    performanceState.value = 'idle'
+    performanceError.value = ''
     if (designOverviewPanelOpen.value && designOverviewReport.value?.tabId !== tabId) designOverviewPanelOpen.value = false
+    designOverviewReport.value = null
+    designOverviewState.value = 'idle'
+    designOverviewError.value = ''
     if (pageMetadataPanelOpen.value && pageMetadataReport.value?.tabId !== tabId) pageMetadataPanelOpen.value = false
+    pageMetadataReport.value = null
+    pageMetadataState.value = 'idle'
+    pageMetadataError.value = ''
     if (securityPanelOpen.value && securityReport.value?.tabId !== tabId) securityPanelOpen.value = false
+    securityReport.value = null
+    securityReportState.value = 'idle'
+    securityReportError.value = ''
     if (coveragePanelOpen.value && coverageResult.value?.tabId !== tabId) coveragePanelOpen.value = false
+    coverageResult.value = null
+    coverageState.value = 'idle'
+    coverageError.value = ''
     if (cpuProfilePanelOpen.value && cpuProfileResult.value?.tabId !== tabId) cpuProfilePanelOpen.value = false
+    cpuProfileResult.value = null
+    cpuProfileState.value = 'idle'
+    cpuProfileError.value = ''
     if (memoryPanelOpen.value && memoryReport.value?.tabId !== tabId) memoryPanelOpen.value = false
+    memoryReport.value = null
+    memoryState.value = 'idle'
+    memoryError.value = ''
     if (consolePanelOpen.value) {
       consoleMessages.value = []
       consoleState.value = 'idle'
@@ -2842,10 +2866,25 @@ watch(
       else void refreshConsole()
     }
     if (debugReportPanelOpen.value && debugReport.value?.tabId !== tabId) debugReportPanelOpen.value = false
+    debugReport.value = null
+    debugReportState.value = 'idle'
+    debugReportError.value = ''
     if (reproPanelOpen.value && reproRecording.value?.tabId !== tabId) reproPanelOpen.value = false
+    reproRecording.value = null
+    reproState.value = 'idle'
+    reproError.value = ''
     if (domChangesPanelOpen.value && domChangesReport.value?.tabId !== tabId) domChangesPanelOpen.value = false
+    domChangesReport.value = null
+    domChangesState.value = 'idle'
+    domChangesError.value = ''
     if (visualComparePanelOpen.value && visualCompareReport.value?.tabId !== tabId) visualComparePanelOpen.value = false
+    visualCompareReport.value = null
+    visualCompareState.value = 'idle'
+    visualCompareError.value = ''
     if (inspectorIssuesOpen.value && inspectorIssuesReport.value?.tabId !== tabId) inspectorIssuesOpen.value = false
+    inspectorIssuesReport.value = null
+    inspectorIssuesState.value = 'idle'
+    inspectorIssuesError.value = ''
     if (networkMonitorOpen.value && networkRequestDetails.value && networkRequestDetails.value.id !== networkSelectedRequestId.value) {
       networkRequestDetails.value = null
     }
@@ -3318,9 +3357,12 @@ async function runPerformanceReport(action: BrowserPerformanceAction = 'measure'
   performanceState.value = 'running'
   performanceError.value = ''
   try {
-    performanceReport.value = await browser.measurePerformance({ tabId: tab.id, settleMs: 800, action })
+    const report = await browser.measurePerformance({ tabId: tab.id, settleMs: 800, action })
+    if (activeTab.value?.id !== tab.id) return
+    performanceReport.value = report
     performanceState.value = 'complete'
   } catch (error) {
+    if (activeTab.value?.id !== tab.id) return
     performanceState.value = 'error'
     performanceError.value = error instanceof Error ? error.message : String(error)
   }
@@ -3342,9 +3384,12 @@ async function runDesignOverview(): Promise<void> {
   designOverviewState.value = 'loading'
   designOverviewError.value = ''
   try {
-    designOverviewReport.value = await browser.inspectDesign(tab.id)
+    const report = await browser.inspectDesign(tab.id)
+    if (activeTab.value?.id !== tab.id) return
+    designOverviewReport.value = report
     designOverviewState.value = 'ready'
   } catch (error) {
+    if (activeTab.value?.id !== tab.id) return
     designOverviewState.value = 'error'
     designOverviewError.value = error instanceof Error ? error.message : String(error)
   }
@@ -3366,9 +3411,12 @@ async function runPageMetadata(): Promise<void> {
   pageMetadataState.value = 'loading'
   pageMetadataError.value = ''
   try {
-    pageMetadataReport.value = await browser.inspectPageMetadata(tab.id)
+    const report = await browser.inspectPageMetadata(tab.id)
+    if (activeTab.value?.id !== tab.id) return
+    pageMetadataReport.value = report
     pageMetadataState.value = 'ready'
   } catch (error) {
+    if (activeTab.value?.id !== tab.id) return
     pageMetadataState.value = 'error'
     pageMetadataError.value = error instanceof Error ? error.message : String(error)
   }
@@ -3390,9 +3438,12 @@ async function runSecurityReport(): Promise<void> {
   securityReportState.value = 'loading'
   securityReportError.value = ''
   try {
-    securityReport.value = await browser.inspectSecurity(tab.id)
+    const report = await browser.inspectSecurity(tab.id)
+    if (activeTab.value?.id !== tab.id) return
+    securityReport.value = report
     securityReportState.value = 'ready'
   } catch (error) {
+    if (activeTab.value?.id !== tab.id) return
     securityReportState.value = 'error'
     securityReportError.value = error instanceof Error ? error.message : String(error)
   }
@@ -3415,14 +3466,17 @@ async function manageCodeCoverage(
   coverageState.value = 'loading'
   coverageError.value = ''
   try {
-    coverageResult.value = await browser.manageCodeCoverage({
+    const result = await browser.manageCodeCoverage({
       tabId: tab.id,
       action,
       mode: coverageMode.value,
       reload
     })
+    if (activeTab.value?.id !== tab.id) return
+    coverageResult.value = result
     coverageState.value = 'ready'
   } catch (error) {
+    if (activeTab.value?.id !== tab.id) return
     coverageState.value = 'error'
     coverageError.value = error instanceof Error ? error.message : String(error)
   }
@@ -3444,9 +3498,12 @@ async function manageCpuProfile(action: 'get' | 'start' | 'stop' | 'clear'): Pro
   cpuProfileState.value = 'loading'
   cpuProfileError.value = ''
   try {
-    cpuProfileResult.value = await browser.manageCpuProfile({ tabId: tab.id, action })
+    const result = await browser.manageCpuProfile({ tabId: tab.id, action })
+    if (activeTab.value?.id !== tab.id) return
+    cpuProfileResult.value = result
     cpuProfileState.value = 'ready'
   } catch (error) {
+    if (activeTab.value?.id !== tab.id) return
     cpuProfileState.value = 'error'
     cpuProfileError.value = error instanceof Error ? error.message : String(error)
   }
@@ -3485,9 +3542,12 @@ async function runMemoryReport(action: 'measure' | 'set-baseline' = 'measure', c
   memoryState.value = 'running'
   memoryError.value = ''
   try {
-    memoryReport.value = await browser.measureMemory({ tabId: tab.id, action, collectGarbage })
+    const report = await browser.measureMemory({ tabId: tab.id, action, collectGarbage })
+    if (activeTab.value?.id !== tab.id) return
+    memoryReport.value = report
     memoryState.value = 'complete'
   } catch (error) {
+    if (activeTab.value?.id !== tab.id) return
     memoryState.value = 'error'
     memoryError.value = error instanceof Error ? error.message : String(error)
   }
@@ -3501,6 +3561,7 @@ async function clearMemoryBaseline(): Promise<void> {
   try {
     const previous = memoryReport.value
     const cleared = await browser.measureMemory({ tabId: tab.id, action: 'clear-baseline' })
+    if (activeTab.value?.id !== tab.id) return
     const preserveCurrent = previous?.tabId === cleared.tabId
       && previous.url === cleared.url
       && previous.current
@@ -3513,6 +3574,7 @@ async function clearMemoryBaseline(): Promise<void> {
     }
     memoryState.value = 'complete'
   } catch (error) {
+    if (activeTab.value?.id !== tab.id) return
     memoryState.value = 'error'
     memoryError.value = error instanceof Error ? error.message : String(error)
   }
@@ -3531,10 +3593,13 @@ async function manageMemoryAllocation(action: 'start' | 'stop' | 'clear'): Promi
       : action === 'stop'
         ? 'stop-allocation-sampling'
         : 'clear-allocation-sampling'
-    memoryReport.value = await browser.measureMemory({ tabId: tab.id, action: memoryAction })
-    if (action === 'clear') memoryReport.value = await browser.measureMemory({ tabId: tab.id, action: 'measure' })
+    let report = await browser.measureMemory({ tabId: tab.id, action: memoryAction })
+    if (action === 'clear') report = await browser.measureMemory({ tabId: tab.id, action: 'measure' })
+    if (activeTab.value?.id !== tab.id) return
+    memoryReport.value = report
     memoryState.value = 'complete'
   } catch (error) {
+    if (activeTab.value?.id !== tab.id) return
     memoryState.value = 'error'
     memoryError.value = error instanceof Error ? error.message : String(error)
   }
@@ -4133,14 +4198,17 @@ async function runDebugReport(): Promise<void> {
   debugReportError.value = ''
   debugReportCopied.value = false
   try {
-    debugReport.value = await browser.createDebugReport({
+    const report = await browser.createDebugReport({
       tabId: tab.id,
       maxConsoleMessages: 30,
       maxNetworkRequests: 30,
       includeSuccessfulRequests: false
     })
+    if (activeTab.value?.id !== tab.id) return
+    debugReport.value = report
     debugReportState.value = 'complete'
   } catch (error) {
+    if (activeTab.value?.id !== tab.id) return
     debugReportState.value = 'error'
     debugReportError.value = error instanceof Error ? error.message : String(error)
   }
@@ -4174,6 +4242,7 @@ async function manageRepro(action: 'start' | 'get' | 'stop' | 'clear'): Promise<
     reproRecording.value = recording
     reproState.value = 'ready'
   } catch (error) {
+    if (activeTab.value?.id !== tab.id) return
     reproState.value = 'error'
     reproError.value = error instanceof Error ? error.message : String(error)
   }
@@ -4236,7 +4305,7 @@ async function manageDomChanges(
     domChangesReport.value = report
     domChangesState.value = 'ready'
   } catch (error) {
-    if (request !== domChangesRequestSequence) return
+    if (request !== domChangesRequestSequence || activeTab.value?.id !== tab.id) return
     domChangesState.value = 'error'
     domChangesError.value = error instanceof Error ? error.message : String(error)
   }
@@ -4281,6 +4350,7 @@ async function manageVisualCompare(action: 'get' | 'set-baseline' | 'compare' | 
     visualCompareReport.value = report
     visualCompareState.value = 'ready'
   } catch (error) {
+    if (activeTab.value?.id !== tab.id) return
     visualCompareState.value = 'error'
     visualCompareError.value = error instanceof Error ? error.message : String(error)
   }
@@ -4322,6 +4392,7 @@ async function refreshInspectorIssues(): Promise<void> {
     inspectorIssuesReport.value = report
     inspectorIssuesState.value = 'ready'
   } catch (error) {
+    if (activeTab.value?.id !== tab.id) return
     inspectorIssuesState.value = 'error'
     inspectorIssuesError.value = error instanceof Error ? error.message : String(error)
   }
@@ -4343,9 +4414,12 @@ async function clearInspectorIssues(): Promise<void> {
   inspectorIssuesState.value = 'loading'
   inspectorIssuesError.value = ''
   try {
-    inspectorIssuesReport.value = await browser.listInspectorIssues(tab.id, true)
+    const report = await browser.listInspectorIssues(tab.id, true)
+    if (activeTab.value?.id !== tab.id) return
+    inspectorIssuesReport.value = report
     inspectorIssuesState.value = 'ready'
   } catch (error) {
+    if (activeTab.value?.id !== tab.id) return
     inspectorIssuesState.value = 'error'
     inspectorIssuesError.value = error instanceof Error ? error.message : String(error)
   }
@@ -4367,14 +4441,17 @@ async function runAccessibilityAudit(): Promise<void> {
   accessibilityAuditError.value = ''
   accessibilityAudit.value = null
   try {
-    accessibilityAudit.value = await browser.runAccessibilityAudit({
+    const audit = await browser.runAccessibilityAudit({
       tabId: tab.id,
       standard: 'wcag-aa',
       maxViolations: 50,
       maxNodesPerViolation: 3
     })
+    if (activeTab.value?.id !== tab.id) return
+    accessibilityAudit.value = audit
     accessibilityAuditState.value = 'complete'
   } catch (error) {
+    if (activeTab.value?.id !== tab.id) return
     accessibilityAuditState.value = 'error'
     accessibilityAuditError.value = error instanceof Error ? error.message : String(error)
   }

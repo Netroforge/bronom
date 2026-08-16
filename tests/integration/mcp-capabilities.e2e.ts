@@ -1119,6 +1119,22 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     await memoryPanel.getByRole('button', { name: 'Close memory report' }).click()
     await expect(memoryPanel).toBeHidden()
 
+    const sameUrlTabResult = await client.callTool({
+      name: 'browser_new_tab',
+      arguments: { url: `http://127.0.0.1:${address.port}/`, active: true }
+    }) as CallToolResult
+    expect(sameUrlTabResult.isError, text(sameUrlTabResult)).not.toBe(true)
+    const sameUrlTabId = JSON.parse(text(sameUrlTabResult)).activeTabId as string
+    await client.callTool({ name: 'browser_wait', arguments: { tabId: sameUrlTabId } })
+    await appWindow.getByRole('button', { name: 'Page tools' }).click()
+    const sameUrlPageTools = appWindow.getByRole('dialog', { name: 'Page tools' })
+    await expect(sameUrlPageTools).toBeVisible()
+    await expect(sameUrlPageTools.getByRole('button', { name: 'Page memory: Heap, DOM, and allocation diagnostics' })).toBeVisible()
+    await expect(sameUrlPageTools).not.toContainText('retainMemoryForProfile')
+    await sameUrlPageTools.getByRole('button', { name: 'Close page tools' }).click()
+    await client.callTool({ name: 'browser_close_tab', arguments: { tabId: sameUrlTabId } })
+    await client.callTool({ name: 'browser_select_tab', arguments: { tabId } })
+
     const fixtureOrigin = `http://127.0.0.1:${address.port}`
     await appWindow.evaluate(`window.bronomPermissions.set(${JSON.stringify(fixtureOrigin)}, 'geolocation', 'allow')`)
     const protectedCookieSetup = await client.callTool({
