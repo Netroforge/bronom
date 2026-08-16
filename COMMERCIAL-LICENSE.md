@@ -24,7 +24,7 @@ List pricing is USD $19 per named user per month or USD $149 per named user per 
 
 Creem generates a license key after successful payment and makes it available in the order confirmation, receipt email, and Customer Portal. Bronom uses that key to activate and periodically validate up to three devices per seat. Keep the key confidential. The desktop application stores it using the operating system's secure storage when available.
 
-Subscriptions renew automatically until canceled. You can manage or cancel a subscription at <https://www.creem.io/my-orders/login>. Cancellation stops future renewal; the commercial grant normally continues through the already-paid period unless a refund or mandatory law requires a different result.
+Subscriptions renew automatically until canceled. You can manage or cancel a subscription at <https://www.creem.io/my-orders/login>. Cancellation stops future renewal. The commercial grant continues only until the cancellation effective date shown by Creem: an immediate cancellation or refund ends the grant immediately, while a scheduled cancellation continues through the stated date unless mandatory law requires a different result.
 
 ## 5. End of the subscription
 
