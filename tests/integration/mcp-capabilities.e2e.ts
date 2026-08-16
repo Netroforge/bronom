@@ -1328,6 +1328,20 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     const humanPdf = await readFile(join(profileDirectory, 'Capability fixture.pdf'))
     expect(humanPdf.subarray(0, 5).toString()).toBe('%PDF-')
 
+    const pdfIsolationTabResult = await client.callTool({
+      name: 'browser_new_tab',
+      arguments: { url: `http://127.0.0.1:${address.port}/`, active: true }
+    }) as CallToolResult
+    expect(pdfIsolationTabResult.isError, text(pdfIsolationTabResult)).not.toBe(true)
+    const pdfIsolationTabId = JSON.parse(text(pdfIsolationTabResult)).activeTabId as string
+    await appWindow.getByRole('button', { name: 'Page tools' }).click()
+    const isolatedPdfPageTools = appWindow.getByRole('dialog', { name: 'Page tools' })
+    await expect(isolatedPdfPageTools.getByRole('button', { name: 'Save page as PDF', exact: true })).toBeVisible()
+    await expect(isolatedPdfPageTools).not.toContainText('PDF saved to')
+    await isolatedPdfPageTools.getByRole('button', { name: 'Close page tools' }).click()
+    await client.callTool({ name: 'browser_close_tab', arguments: { tabId: pdfIsolationTabId } })
+    await client.callTool({ name: 'browser_select_tab', arguments: { tabId } })
+
     const selected = await client.callTool({
       name: 'browser_select',
       arguments: { tabId, selector: '#choice', value: 'Two' }

@@ -653,6 +653,8 @@ let areaCaptureResetTimer: number | undefined
 let nextAppToastId = 1
 const appToastTimers = new Map<number, number>()
 let pdfExportResetTimer: number | undefined
+let pdfExportRequestSequence = 0
+let emulationMutationSequence = 0
 let consoleRefreshTimer: number | undefined
 let domChangesRefreshTimer: number | undefined
 let networkReplayConfirmTimer: number | undefined
@@ -2359,8 +2361,14 @@ function visionDeficiencyLabel(value: BrowserEmulationState['visionDeficiency'])
 }
 
 async function resetActiveTabEmulation(): Promise<void> {
-  if (!activeTab.value?.emulation) return
-  await syncState(browser.resetTabEmulation(activeTab.value.id))
+  const tab = activeTab.value
+  if (!tab?.emulation) return
+  const requestSequence = ++emulationMutationSequence
+  const nextState = await browser.resetTabEmulation(tab.id)
+  if (requestSequence !== emulationMutationSequence || activeTab.value?.id !== tab.id) return
+  state.value = nextState
+  if (responsivePanelOpen.value) loadResponsiveDraft(activeTab.value?.emulation?.viewport)
+  if (environmentPanelOpen.value) loadEnvironmentDraft(activeTab.value?.emulation)
 }
 
 function loadResponsiveDraft(viewport = activeEmulation.value?.viewport): void {
@@ -2434,12 +2442,16 @@ async function applyResponsivePreview(): Promise<void> {
   const tab = activeTab.value
   const viewport = responsiveViewport.value
   if (!tab || !viewport) return
+  const requestSequence = ++emulationMutationSequence
   responsiveState.value = 'applying'
   responsiveError.value = ''
   try {
-    await syncState(browser.setTabViewport(tab.id, viewport))
+    const nextState = await browser.setTabViewport(tab.id, viewport)
+    if (requestSequence !== emulationMutationSequence || activeTab.value?.id !== tab.id) return
+    state.value = nextState
     responsiveState.value = 'applied'
   } catch (error) {
+    if (requestSequence !== emulationMutationSequence || activeTab.value?.id !== tab.id) return
     responsiveState.value = 'error'
     responsiveError.value = error instanceof Error ? error.message : String(error)
   }
@@ -2448,12 +2460,16 @@ async function applyResponsivePreview(): Promise<void> {
 async function resetResponsivePreview(): Promise<void> {
   const tab = activeTab.value
   if (!tab) return
+  const requestSequence = ++emulationMutationSequence
   responsiveState.value = 'applying'
   responsiveError.value = ''
   try {
-    await syncState(browser.setTabViewport(tab.id, null))
+    const nextState = await browser.setTabViewport(tab.id, null)
+    if (requestSequence !== emulationMutationSequence || activeTab.value?.id !== tab.id) return
+    state.value = nextState
     loadResponsiveDraft(undefined)
   } catch (error) {
+    if (requestSequence !== emulationMutationSequence || activeTab.value?.id !== tab.id) return
     responsiveState.value = 'error'
     responsiveError.value = error instanceof Error ? error.message : String(error)
   }
@@ -2486,15 +2502,21 @@ async function applyEnvironment(reload = false): Promise<void> {
   const tab = activeTab.value
   const environment = environmentSettingsDraft.value
   if (!tab || !environment) return
+  const requestSequence = ++emulationMutationSequence
   environmentState.value = 'applying'
   environmentError.value = ''
   try {
-    await syncState(browser.setTabEnvironment(tab.id, environment))
-    if (reload) await syncState(browser.reloadIgnoringCache(tab.id))
-    environmentState.value = 'applied'
+    let nextState = await browser.setTabEnvironment(tab.id, environment)
+    if (requestSequence !== emulationMutationSequence || activeTab.value?.id !== tab.id) return
+    if (reload) {
+      nextState = await browser.reloadIgnoringCache(tab.id)
+      if (requestSequence !== emulationMutationSequence || activeTab.value?.id !== tab.id) return
+    }
+    state.value = nextState
     loadEnvironmentDraft(activeTab.value?.emulation)
     environmentState.value = 'applied'
   } catch (error) {
+    if (requestSequence !== emulationMutationSequence || activeTab.value?.id !== tab.id) return
     environmentState.value = 'error'
     environmentError.value = error instanceof Error ? error.message : String(error)
   }
@@ -2764,6 +2786,8 @@ watch(
 watch(
   () => activeTab.value?.url,
   (url) => {
+    emulationMutationSequence += 1
+    resetPdfExportFeedback()
     addressSuggestionsOpen.value = false
     if (!isDetachedPanelWindow) siteControlsOpen.value = false
     siteDataSummary.value = null
@@ -2774,9 +2798,20 @@ watch(
       void refreshSiteStorage()
     }
     if (!isDetachedPanelWindow) pageToolsOpen.value = false
-    if (!isDetachedPanelWindow) responsivePanelOpen.value = false
-    if (!isDetachedPanelWindow) environmentPanelOpen.value = false
-    environmentState.value = 'idle'
+    if (responsivePanelOpen.value) {
+      if (!isDetachedPanelWindow && panelDock.value !== 'window') responsivePanelOpen.value = false
+      else loadResponsiveDraft(activeEmulation.value?.viewport)
+    } else {
+      responsiveState.value = 'idle'
+      responsiveError.value = ''
+    }
+    if (environmentPanelOpen.value) {
+      if (!isDetachedPanelWindow && panelDock.value !== 'window') environmentPanelOpen.value = false
+      else loadEnvironmentDraft(activeEmulation.value)
+    } else {
+      environmentState.value = 'idle'
+      environmentError.value = ''
+    }
     if (!isDetachedPanelWindow) designOverviewPanelOpen.value = false
     designOverviewReport.value = null
     designOverviewState.value = 'idle'
@@ -2821,6 +2856,8 @@ watch(
   () => state.value.activeTabId,
   (tabId) => {
     const tab = state.value.tabs.find((candidate) => candidate.id === tabId)
+    emulationMutationSequence += 1
+    resetPdfExportFeedback()
     if (tab && !tab.url.startsWith('bronom://home')) lastWebTabId.value = tab.id
     if (elementPickerState.value === 'picking' && elementPickerTabId && tabId !== elementPickerTabId) {
       const previousPickerTabId = elementPickerTabId
@@ -2902,10 +2939,19 @@ watch(
     if (isDetachedPanelWindow && networkMonitorOpen.value && tab && !tab.url.startsWith('bronom://home')) {
       void Promise.all([refreshNetworkMonitor(), refreshNetworkRoutes()])
     }
-    if (responsivePanelOpen.value) responsivePanelOpen.value = false
+    if (responsivePanelOpen.value) {
+      if (!isDetachedPanelWindow && panelDock.value !== 'window') responsivePanelOpen.value = false
+      else loadResponsiveDraft(tab?.emulation?.viewport)
+    } else {
+      responsiveState.value = 'idle'
+      responsiveError.value = ''
+    }
     if (environmentPanelOpen.value) {
-      if (!isDetachedPanelWindow) environmentPanelOpen.value = false
+      if (!isDetachedPanelWindow && panelDock.value !== 'window') environmentPanelOpen.value = false
       else loadEnvironmentDraft(tab?.emulation)
+    } else {
+      environmentState.value = 'idle'
+      environmentError.value = ''
     }
   }
 )
@@ -3240,19 +3286,36 @@ async function closeFind(): Promise<void> {
   if (tabId) await browser.stopFindInPage(tabId).catch(() => undefined)
 }
 
+function resetPdfExportFeedback(): void {
+  pdfExportRequestSequence += 1
+  if (pdfExportResetTimer !== undefined) {
+    window.clearTimeout(pdfExportResetTimer)
+    pdfExportResetTimer = undefined
+  }
+  pdfExportState.value = 'idle'
+  pdfExport.value = null
+}
+
 async function saveActivePdf(): Promise<void> {
-  if (!activeTab.value || pdfExportState.value === 'saving') return
+  const tab = activeTab.value
+  if (!tab || pdfExportState.value === 'saving') return
   if (pdfExportResetTimer !== undefined) window.clearTimeout(pdfExportResetTimer)
+  const requestSequence = ++pdfExportRequestSequence
   pdfExportState.value = 'saving'
   pdfExport.value = null
   try {
-    pdfExport.value = await browser.savePdf({ tabId: activeTab.value.id })
+    const exported = await browser.savePdf({ tabId: tab.id })
+    if (requestSequence !== pdfExportRequestSequence || activeTab.value?.id !== tab.id) return
+    pdfExport.value = exported
     pdfExportState.value = 'saved'
   } catch {
+    if (requestSequence !== pdfExportRequestSequence || activeTab.value?.id !== tab.id) return
     pdfExportState.value = 'error'
   }
   pdfExportResetTimer = window.setTimeout(() => {
+    if (requestSequence !== pdfExportRequestSequence) return
     pdfExportState.value = 'idle'
+    pdfExport.value = null
     pdfExportResetTimer = undefined
   }, 2_500)
 }

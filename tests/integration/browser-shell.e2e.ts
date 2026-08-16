@@ -351,6 +351,34 @@ test('detaches tool panels into a hardened window and redocks them', async ({ ap
 
   await dockedPageTools.getByRole('combobox', { name: 'Dock page tools' }).selectOption('right')
   await dockedPageTools.getByRole('button', { name: 'Close page tools' }).click()
+  await appWindow.getByRole('button', { name: 'Page tools' }).click()
+  await appWindow.getByRole('dialog', { name: 'Page tools' })
+    .getByRole('button', { name: 'Responsive preview: Test phones, tablets, and desktops' }).click()
+  const dockedResponsive = appWindow.getByRole('dialog', { name: 'Responsive preview' })
+  const detachedResponsivePromise = electronApp.waitForEvent('window')
+  await dockedResponsive.getByRole('combobox', { name: 'Dock responsive preview' }).selectOption('window')
+  const detachedResponsive = await detachedResponsivePromise
+  await detachedResponsive.waitForLoadState('domcontentloaded')
+  await expect(detachedResponsive).toHaveTitle('Responsive preview — Bronom')
+  await expect(detachedResponsive.getByRole('dialog', { name: 'Responsive preview' })).toBeVisible()
+
+  const previousTabId = await appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')
+  await appWindow.getByRole('button', { name: 'New tab' }).click()
+  await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')).not.toBe(previousTabId)
+  const nextTabId = await appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')
+  await expect.poll(() => detachedResponsive.evaluate('window.bronom.getState().then((state) => state.activeTabId)')).toBe(nextTabId)
+  await expect(detachedResponsive.getByRole('dialog', { name: 'Responsive preview' })).toBeVisible()
+
+  const detachedResponsiveClosed = detachedResponsive.waitForEvent('close')
+  await detachedResponsive.evaluate(`setTimeout(() => {
+    const select = document.querySelector('select[aria-label="Dock responsive preview"]')
+    if (!(select instanceof HTMLSelectElement)) throw new Error('Missing responsive-preview dock selector')
+    select.value = 'right'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+  }, 0)`)
+  await detachedResponsiveClosed
+  await expect(dockedResponsive).toBeVisible()
+  await dockedResponsive.getByRole('button', { name: 'Close responsive preview' }).click()
   await appWindow.getByRole('button', { name: 'Bookmarks', exact: true }).click()
   const dockedBookmarks = appWindow.getByRole('dialog', { name: 'Bookmarks' })
   const detachedBookmarksPromise = electronApp.waitForEvent('window')
