@@ -1171,6 +1171,11 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       arguments: { tabId, kind: 'session-storage', action: 'delete', key: 'debug-session' }
     }) as CallToolResult
     expect(JSON.parse(text(deletedDebugValue))).toMatchObject({ changed: true, itemCount: 0 })
+    const tabScopedStorage = await client.callTool({
+      name: 'browser_storage',
+      arguments: { tabId, kind: 'session-storage', action: 'set', key: 'first-tab-only', value: 'private-to-this-tab' }
+    }) as CallToolResult
+    expect(JSON.parse(text(tabScopedStorage))).toMatchObject({ changed: true, itemCount: 1 })
     const cookieStorage = await client.callTool({
       name: 'browser_storage',
       arguments: { tabId, kind: 'cookies', action: 'list', includeValues: true }
@@ -1186,6 +1191,25 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     await expect(storagePanel).toBeVisible()
     await expect(storagePanel).toContainText('bronom-mcp-site-data')
     await expect(storagePanel).toContainText('Shared by origin across groups')
+    await storagePanel.getByRole('button', { name: 'Session', exact: true }).click()
+    await expect(storagePanel).toContainText('first-tab-only')
+
+    const storageIsolationTabResult = await client.callTool({
+      name: 'browser_new_tab',
+      arguments: { url: `http://127.0.0.1:${address.port}/`, active: true }
+    }) as CallToolResult
+    expect(storageIsolationTabResult.isError, text(storageIsolationTabResult)).not.toBe(true)
+    const storageIsolationTabId = JSON.parse(text(storageIsolationTabResult)).activeTabId as string
+    await client.callTool({ name: 'browser_wait', arguments: { tabId: storageIsolationTabId } })
+    await expect(storagePanel).toBeHidden()
+    await openPageTool('Site storage for 127.0.0.1')
+    await storagePanel.getByRole('button', { name: 'Session', exact: true }).click()
+    await expect(storagePanel).not.toContainText('first-tab-only')
+    await storagePanel.getByRole('button', { name: 'Close site storage' }).click()
+    await client.callTool({ name: 'browser_close_tab', arguments: { tabId: storageIsolationTabId } })
+    await client.callTool({ name: 'browser_select_tab', arguments: { tabId } })
+
+    await openPageTool('Site storage for 127.0.0.1')
     await storagePanel.getByRole('button', { name: 'Cookies' }).click()
     await expect(storagePanel).toContainText('bronom-protected')
     await expect(storagePanel).toContainText('HttpOnly value protected')

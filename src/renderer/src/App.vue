@@ -1396,19 +1396,60 @@ async function toggleVisitHistory(): Promise<void> {
   historyOpen.value = !historyOpen.value
 }
 
+function resetSiteStorageView(closePanel = false): void {
+  if (closePanel && !isDetachedPanelWindow) siteStorageOpen.value = false
+  siteStorageResult.value = null
+  siteStorageState.value = 'idle'
+  siteStorageError.value = ''
+  siteStorageSearch.value = ''
+  siteStorageKey.value = ''
+  siteStorageValue.value = ''
+  siteStorageChangesOpen.value = false
+  siteStorageChangesReport.value = null
+  siteStorageChangesState.value = 'idle'
+  siteStorageChangesError.value = ''
+  siteStorageChangesCopied.value = false
+  siteStorageUsageOpen.value = false
+  siteStorageUsageReport.value = null
+  siteStorageUsageState.value = 'idle'
+  siteStorageUsageError.value = ''
+  siteStorageUsageCopied.value = false
+  siteStorageIndexedDbOpen.value = false
+  siteStorageIndexedDbReport.value = null
+  siteStorageIndexedDbState.value = 'idle'
+  siteStorageIndexedDbError.value = ''
+  siteStorageIndexedDbDatabase.value = ''
+  siteStorageIndexedDbStore.value = ''
+  siteStorageIndexedDbOffset.value = 0
+  siteStorageIndexedDbSearch.value = ''
+  siteStorageIndexedDbCopied.value = false
+  siteStoragePwaOpen.value = false
+  siteStoragePwaReport.value = null
+  siteStoragePwaState.value = 'idle'
+  siteStoragePwaError.value = ''
+  siteStoragePwaCache.value = ''
+  siteStoragePwaQuery.value = ''
+  siteStoragePwaOffset.value = 0
+  siteStoragePwaCopied.value = false
+}
+
 async function refreshSiteStorage(): Promise<void> {
-  if (!state.value.activeTabId || !activeWebUrl.value) return
+  const tab = activeTab.value
+  if (!tab || !activeWebUrl.value) return
   siteStorageState.value = 'loading'
   siteStorageError.value = ''
   try {
-    siteStorageResult.value = await browser.manageStorage({
-      tabId: state.value.activeTabId,
+    const result = await browser.manageStorage({
+      tabId: tab.id,
       kind: siteStorageKind.value,
       action: 'list',
       includeValues: true
     })
+    if (activeTab.value?.id !== tab.id) return
+    siteStorageResult.value = result
     siteStorageState.value = 'idle'
   } catch (error) {
+    if (activeTab.value?.id !== tab.id) return
     siteStorageResult.value = null
     siteStorageState.value = 'error'
     siteStorageError.value = error instanceof Error ? error.message : String(error)
@@ -1712,31 +1753,7 @@ async function toggleSiteStorage(): Promise<void> {
   tabSearchOpen.value = false
   zoomOpen.value = false
   addressSuggestionsOpen.value = false
-  siteStorageSearch.value = ''
-  siteStorageKey.value = ''
-  siteStorageValue.value = ''
-  siteStorageChangesOpen.value = false
-  siteStorageChangesReport.value = null
-  siteStorageChangesState.value = 'idle'
-  siteStorageChangesError.value = ''
-  siteStorageUsageOpen.value = false
-  siteStorageUsageReport.value = null
-  siteStorageUsageState.value = 'idle'
-  siteStorageUsageError.value = ''
-  siteStorageIndexedDbOpen.value = false
-  siteStorageIndexedDbReport.value = null
-  siteStorageIndexedDbState.value = 'idle'
-  siteStorageIndexedDbError.value = ''
-  siteStorageIndexedDbDatabase.value = ''
-  siteStorageIndexedDbStore.value = ''
-  siteStorageIndexedDbOffset.value = 0
-  siteStoragePwaOpen.value = false
-  siteStoragePwaReport.value = null
-  siteStoragePwaState.value = 'idle'
-  siteStoragePwaError.value = ''
-  siteStoragePwaCache.value = ''
-  siteStoragePwaQuery.value = ''
-  siteStoragePwaOffset.value = 0
+  resetSiteStorageView()
   siteStorageOpen.value = true
   await refreshSiteStorage()
 }
@@ -1760,61 +1777,73 @@ function editSiteStorageItem(item: BrowserStorageItem): void {
 }
 
 async function saveSiteStorageItem(): Promise<void> {
-  if (!state.value.activeTabId || !siteStorageKey.value.trim()) return
+  const tab = activeTab.value
+  if (!tab || !siteStorageKey.value.trim()) return
   siteStorageState.value = 'saving'
   siteStorageError.value = ''
   try {
-    siteStorageResult.value = await browser.manageStorage({
-      tabId: state.value.activeTabId,
+    const result = await browser.manageStorage({
+      tabId: tab.id,
       kind: siteStorageKind.value,
       action: 'set',
       key: siteStorageKey.value,
       value: siteStorageValue.value,
       includeValues: true
     })
+    if (activeTab.value?.id !== tab.id) return
+    siteStorageResult.value = result
     siteStorageKey.value = ''
     siteStorageValue.value = ''
     siteStorageState.value = 'idle'
   } catch (error) {
+    if (activeTab.value?.id !== tab.id) return
     siteStorageState.value = 'error'
     siteStorageError.value = error instanceof Error ? error.message : String(error)
   }
 }
 
 async function deleteSiteStorageItem(item: BrowserStorageItem): Promise<void> {
-  if (!state.value.activeTabId || item.protected) return
+  const tab = activeTab.value
+  if (!tab || item.protected) return
   siteStorageState.value = 'saving'
   siteStorageError.value = ''
   try {
-    siteStorageResult.value = await browser.manageStorage({
-      tabId: state.value.activeTabId,
+    const result = await browser.manageStorage({
+      tabId: tab.id,
       kind: siteStorageKind.value,
       action: 'delete',
       key: item.key,
       includeValues: true
     })
+    if (activeTab.value?.id !== tab.id) return
+    siteStorageResult.value = result
     siteStorageState.value = 'idle'
   } catch (error) {
+    if (activeTab.value?.id !== tab.id) return
     siteStorageState.value = 'error'
     siteStorageError.value = error instanceof Error ? error.message : String(error)
   }
 }
 
 async function clearSiteStorageKind(): Promise<void> {
-  if (!state.value.activeTabId || !siteStorageResult.value?.itemCount) return
+  const tab = activeTab.value
+  if (!tab || !siteStorageResult.value?.itemCount) return
   const protectedNote = siteStorageKind.value === 'cookies' ? ' HttpOnly cookies will remain protected.' : ''
   if (!window.confirm(`Clear ${siteStorageKindLabel.value.toLocaleLowerCase()} for ${activeHostname.value}?${protectedNote}`)) return
   siteStorageState.value = 'saving'
   siteStorageError.value = ''
   try {
-    siteStorageResult.value = await browser.manageStorage({
-      tabId: state.value.activeTabId,
+    const result = await browser.manageStorage({
+      tabId: tab.id,
       kind: siteStorageKind.value,
       action: 'clear',
       includeValues: true
     })
+    if (activeTab.value?.id !== tab.id) return
+    siteStorageResult.value = result
     siteStorageState.value = 'idle'
   } catch (error) {
+    if (activeTab.value?.id !== tab.id) return
     siteStorageState.value = 'error'
     siteStorageError.value = error instanceof Error ? error.message : String(error)
   }
@@ -2732,25 +2761,10 @@ watch(
     siteDataSummary.value = null
     siteDataState.value = 'idle'
     siteDataMessage.value = ''
-    if (!isDetachedPanelWindow) siteStorageOpen.value = false
-    siteStorageResult.value = null
-    siteStorageChangesReport.value = null
-    siteStorageChangesState.value = 'idle'
-    siteStorageChangesError.value = ''
-    siteStorageIndexedDbOpen.value = false
-    siteStorageIndexedDbReport.value = null
-    siteStorageIndexedDbState.value = 'idle'
-    siteStorageIndexedDbError.value = ''
-    siteStorageIndexedDbDatabase.value = ''
-    siteStorageIndexedDbStore.value = ''
-    siteStorageIndexedDbOffset.value = 0
-    siteStoragePwaOpen.value = false
-    siteStoragePwaReport.value = null
-    siteStoragePwaState.value = 'idle'
-    siteStoragePwaError.value = ''
-    siteStoragePwaCache.value = ''
-    siteStoragePwaQuery.value = ''
-    siteStoragePwaOffset.value = 0
+    resetSiteStorageView(true)
+    if (isDetachedPanelWindow && siteStorageOpen.value && url && !url.startsWith('bronom://home')) {
+      void refreshSiteStorage()
+    }
     if (!isDetachedPanelWindow) pageToolsOpen.value = false
     if (!isDetachedPanelWindow) responsivePanelOpen.value = false
     if (!isDetachedPanelWindow) environmentPanelOpen.value = false
@@ -2827,6 +2841,10 @@ watch(
       if (wasPicking) void browser.cancelAreaCapture(previousCaptureTabId).catch(() => false)
     }
     if (findOpen.value && findTabId && tabId !== findTabId) void closeFind()
+    resetSiteStorageView(true)
+    if (isDetachedPanelWindow && siteStorageOpen.value && tab && !tab.url.startsWith('bronom://home')) {
+      void refreshSiteStorage()
+    }
     if (accessibilityPanelOpen.value && accessibilityAudit.value?.tabId !== tabId) accessibilityPanelOpen.value = false
     accessibilityAudit.value = null
     accessibilityAuditState.value = 'idle'
