@@ -323,6 +323,15 @@ test('detaches tool panels into a hardened window and redocks them', async ({ ap
     sandbox: true
   })
   expect(detachedSecurity.url).toContain('bronomPanel=page-tools')
+
+  const detachedTargetState = await appWindow.evaluate(`window.bronom.newTab({
+    url: 'data:text/html,<title>Detached panel target</title>',
+    active: true
+  })`) as { activeTabId: string | null }
+  await expect.poll(() => detachedPage.evaluate('window.bronom.getState().then((state) => state.activeTabId)'))
+    .toBe(detachedTargetState.activeTabId)
+  await expect(detachedPage.getByRole('dialog', { name: 'Page tools' })).toBeVisible()
+
   const trustedPanelUrl = detachedPage.url()
   await detachedPage.evaluate("location.assign('https://example.com/blocked-panel-navigation')")
   await expect.poll(() => detachedPage.url()).toBe(trustedPanelUrl)

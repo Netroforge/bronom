@@ -4,6 +4,20 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-16
+
+### Added
+
+- Record bounded JavaScript CPU profiles from Page tools or `browser_cpu_profile`, then inspect a sanitized bottom-up hot-function summary without exposing source code or arbitrary stack data.
+- Sample JavaScript heap allocations from Page tools or `browser_memory`, save an in-memory baseline, and compare later profiles to identify growing allocation sites while keeping raw heap snapshots out of Bronom and MCP responses.
+
+### Fixed
+
+- Stop expired or invalid commercial subscriptions from retaining an active local grant after their stored entitlement is no longer valid.
+- Keep a completed memory-allocation profile visible when its comparison baseline is cleared so the same sample can immediately become a new baseline.
+- Isolate Page tools, Site storage, Console, and Network monitor results by active tab so delayed responses and tab changes cannot display data collected from another website.
+- Keep every Page tools panel open in a separate window while the active tab navigates or changes, and refresh that window against the new active website instead of silently closing it or leaving stale results.
+
 ## [1.2.0] - 2026-08-16
 
 ### Added

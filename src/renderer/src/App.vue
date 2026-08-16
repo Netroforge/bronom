@@ -318,6 +318,10 @@ const savedVerticalPanelSize = Number(window.localStorage.getItem('bronom:panel-
 const panelDockHorizontalSize = ref<number | null>(Number.isFinite(savedHorizontalPanelSize) && savedHorizontalPanelSize > 0 ? savedHorizontalPanelSize : null)
 const panelDockVerticalSize = ref<number | null>(Number.isFinite(savedVerticalPanelSize) && savedVerticalPanelSize > 0 ? savedVerticalPanelSize : null)
 const panelResizeGesture = ref<{ pointerId: number; coordinate: number; size: number; handle: HTMLElement } | null>(null)
+
+function keepsSeparatePanelOpen(): boolean {
+  return isDetachedPanelWindow || panelDock.value === 'window'
+}
 const collapsedTabGroupIds = ref(new Set<string>(loadCollapsedTabGroupIds()))
 const shellContentTop = ref(105)
 const state = ref<BrowserState>(emptyState)
@@ -1403,7 +1407,7 @@ async function toggleVisitHistory(): Promise<void> {
 }
 
 function resetSiteStorageView(closePanel = false): void {
-  if (closePanel && !isDetachedPanelWindow) siteStorageOpen.value = false
+  if (closePanel && !keepsSeparatePanelOpen()) siteStorageOpen.value = false
   siteStorageResult.value = null
   siteStorageState.value = 'idle'
   siteStorageError.value = ''
@@ -2676,7 +2680,7 @@ watch(activePanelId, async (panel) => {
 watch(
   [settingsOpen, commandPaletteOpen, helpDialog, siteControlsOpen, siteStorageOpen, addressSuggestionsOpen, findOpen, zoomOpen, splitMenuOpen, tabSearchOpen, downloadsOpen, bookmarksOpen, historyOpen],
   (openStates) => {
-    if (openStates.some(Boolean)) {
+    if (openStates.some(Boolean) && !keepsSeparatePanelOpen()) {
       pageToolsOpen.value = false
       environmentPanelOpen.value = false
       accessibilityPanelOpen.value = false
@@ -2786,67 +2790,84 @@ watch(
 watch(
   () => activeTab.value?.url,
   (url) => {
+    const keepPanelOpen = keepsSeparatePanelOpen()
     emulationMutationSequence += 1
     resetPdfExportFeedback()
     addressSuggestionsOpen.value = false
-    if (!isDetachedPanelWindow) siteControlsOpen.value = false
+    if (!keepPanelOpen) {
+      siteControlsOpen.value = false
+      pageToolsOpen.value = false
+      responsivePanelOpen.value = false
+      environmentPanelOpen.value = false
+      accessibilityPanelOpen.value = false
+      performancePanelOpen.value = false
+      designOverviewPanelOpen.value = false
+      pageMetadataPanelOpen.value = false
+      securityPanelOpen.value = false
+      coveragePanelOpen.value = false
+      cpuProfilePanelOpen.value = false
+      memoryPanelOpen.value = false
+      debugReportPanelOpen.value = false
+      reproPanelOpen.value = false
+      domChangesPanelOpen.value = false
+      visualComparePanelOpen.value = false
+      inspectorIssuesOpen.value = false
+    }
     siteDataSummary.value = null
     siteDataState.value = 'idle'
     siteDataMessage.value = ''
     resetSiteStorageView(true)
-    if (isDetachedPanelWindow && siteStorageOpen.value && url && !url.startsWith('bronom://home')) {
-      void refreshSiteStorage()
-    }
-    if (!isDetachedPanelWindow) pageToolsOpen.value = false
-    if (responsivePanelOpen.value) {
-      if (!isDetachedPanelWindow && panelDock.value !== 'window') responsivePanelOpen.value = false
-      else loadResponsiveDraft(activeEmulation.value?.viewport)
-    } else {
+    if (responsivePanelOpen.value && keepPanelOpen) loadResponsiveDraft(activeEmulation.value?.viewport)
+    else {
       responsiveState.value = 'idle'
       responsiveError.value = ''
     }
-    if (environmentPanelOpen.value) {
-      if (!isDetachedPanelWindow && panelDock.value !== 'window') environmentPanelOpen.value = false
-      else loadEnvironmentDraft(activeEmulation.value)
-    } else {
+    if (environmentPanelOpen.value && keepPanelOpen) loadEnvironmentDraft(activeEmulation.value)
+    else {
       environmentState.value = 'idle'
       environmentError.value = ''
     }
-    if (!isDetachedPanelWindow) designOverviewPanelOpen.value = false
+    accessibilityAudit.value = null
+    accessibilityAuditState.value = 'idle'
+    accessibilityAuditError.value = ''
+    performanceReport.value = null
+    performanceState.value = 'idle'
+    performanceError.value = ''
     designOverviewReport.value = null
     designOverviewState.value = 'idle'
-    if (!isDetachedPanelWindow) pageMetadataPanelOpen.value = false
+    designOverviewError.value = ''
     pageMetadataReport.value = null
     pageMetadataState.value = 'idle'
-    if (!isDetachedPanelWindow) securityPanelOpen.value = false
+    pageMetadataError.value = ''
     securityReport.value = null
     securityReportState.value = 'idle'
-    if (!isDetachedPanelWindow) memoryPanelOpen.value = false
+    securityReportError.value = ''
+    coverageResult.value = null
+    coverageState.value = 'idle'
+    coverageError.value = ''
+    cpuProfileResult.value = null
+    cpuProfileState.value = 'idle'
+    cpuProfileError.value = ''
     memoryReport.value = null
     memoryState.value = 'idle'
+    memoryError.value = ''
     resetConsoleView(true)
-    if (isDetachedPanelWindow && consolePanelOpen.value && url && !url.startsWith('bronom://home')) {
-      void refreshConsole()
-    }
-    if (!isDetachedPanelWindow) debugReportPanelOpen.value = false
     debugReport.value = null
     debugReportState.value = 'idle'
-    if (!isDetachedPanelWindow) reproPanelOpen.value = false
+    debugReportError.value = ''
     reproRecording.value = null
     reproState.value = 'idle'
-    if (!isDetachedPanelWindow) domChangesPanelOpen.value = false
+    reproError.value = ''
     domChangesReport.value = null
     domChangesState.value = 'idle'
-    if (!isDetachedPanelWindow) visualComparePanelOpen.value = false
+    domChangesError.value = ''
     visualCompareReport.value = null
     visualCompareState.value = 'idle'
-    if (!isDetachedPanelWindow) inspectorIssuesOpen.value = false
+    visualCompareError.value = ''
     inspectorIssuesReport.value = null
     inspectorIssuesState.value = 'idle'
+    inspectorIssuesError.value = ''
     resetNetworkMonitorView(true)
-    if (isDetachedPanelWindow && networkMonitorOpen.value && url && !url.startsWith('bronom://home')) {
-      void Promise.all([refreshNetworkMonitor(), refreshNetworkRoutes()])
-    }
     address.value = url === 'about:blank' || url?.startsWith('bronom://home') ? '' : url || ''
   },
   { immediate: true }
@@ -2856,8 +2877,13 @@ watch(
   () => state.value.activeTabId,
   (tabId) => {
     const tab = state.value.tabs.find((candidate) => candidate.id === tabId)
+    const keepPanelOpen = keepsSeparatePanelOpen()
     emulationMutationSequence += 1
     resetPdfExportFeedback()
+    if (!keepPanelOpen) {
+      siteControlsOpen.value = false
+      pageToolsOpen.value = false
+    }
     if (tab && !tab.url.startsWith('bronom://home')) lastWebTabId.value = tab.id
     if (elementPickerState.value === 'picking' && elementPickerTabId && tabId !== elementPickerTabId) {
       const previousPickerTabId = elementPickerTabId
@@ -2876,83 +2902,85 @@ watch(
     }
     if (findOpen.value && findTabId && tabId !== findTabId) void closeFind()
     resetSiteStorageView(true)
-    if (isDetachedPanelWindow && siteStorageOpen.value && tab && !tab.url.startsWith('bronom://home')) {
-      void refreshSiteStorage()
-    }
-    if (accessibilityPanelOpen.value && accessibilityAudit.value?.tabId !== tabId) accessibilityPanelOpen.value = false
+    if (!keepPanelOpen && accessibilityPanelOpen.value && accessibilityAudit.value?.tabId !== tabId) accessibilityPanelOpen.value = false
     accessibilityAudit.value = null
     accessibilityAuditState.value = 'idle'
     accessibilityAuditError.value = ''
-    if (performancePanelOpen.value && performanceReport.value?.tabId !== tabId) performancePanelOpen.value = false
+    if (!keepPanelOpen && performancePanelOpen.value && performanceReport.value?.tabId !== tabId) performancePanelOpen.value = false
     performanceReport.value = null
     performanceState.value = 'idle'
     performanceError.value = ''
-    if (designOverviewPanelOpen.value && designOverviewReport.value?.tabId !== tabId) designOverviewPanelOpen.value = false
+    if (!keepPanelOpen && designOverviewPanelOpen.value && designOverviewReport.value?.tabId !== tabId) designOverviewPanelOpen.value = false
     designOverviewReport.value = null
     designOverviewState.value = 'idle'
     designOverviewError.value = ''
-    if (pageMetadataPanelOpen.value && pageMetadataReport.value?.tabId !== tabId) pageMetadataPanelOpen.value = false
+    if (!keepPanelOpen && pageMetadataPanelOpen.value && pageMetadataReport.value?.tabId !== tabId) pageMetadataPanelOpen.value = false
     pageMetadataReport.value = null
     pageMetadataState.value = 'idle'
     pageMetadataError.value = ''
-    if (securityPanelOpen.value && securityReport.value?.tabId !== tabId) securityPanelOpen.value = false
+    if (!keepPanelOpen && securityPanelOpen.value && securityReport.value?.tabId !== tabId) securityPanelOpen.value = false
     securityReport.value = null
     securityReportState.value = 'idle'
     securityReportError.value = ''
-    if (coveragePanelOpen.value && coverageResult.value?.tabId !== tabId) coveragePanelOpen.value = false
+    if (!keepPanelOpen && coveragePanelOpen.value && coverageResult.value?.tabId !== tabId) coveragePanelOpen.value = false
     coverageResult.value = null
     coverageState.value = 'idle'
     coverageError.value = ''
-    if (cpuProfilePanelOpen.value && cpuProfileResult.value?.tabId !== tabId) cpuProfilePanelOpen.value = false
+    if (!keepPanelOpen && cpuProfilePanelOpen.value && cpuProfileResult.value?.tabId !== tabId) cpuProfilePanelOpen.value = false
     cpuProfileResult.value = null
     cpuProfileState.value = 'idle'
     cpuProfileError.value = ''
-    if (memoryPanelOpen.value && memoryReport.value?.tabId !== tabId) memoryPanelOpen.value = false
+    if (!keepPanelOpen && memoryPanelOpen.value && memoryReport.value?.tabId !== tabId) memoryPanelOpen.value = false
     memoryReport.value = null
     memoryState.value = 'idle'
     memoryError.value = ''
     resetConsoleView(true)
-    if (isDetachedPanelWindow && consolePanelOpen.value && tab && !tab.url.startsWith('bronom://home')) {
-      void refreshConsole()
-    }
-    if (debugReportPanelOpen.value && debugReport.value?.tabId !== tabId) debugReportPanelOpen.value = false
+    if (!keepPanelOpen && debugReportPanelOpen.value && debugReport.value?.tabId !== tabId) debugReportPanelOpen.value = false
     debugReport.value = null
     debugReportState.value = 'idle'
     debugReportError.value = ''
-    if (reproPanelOpen.value && reproRecording.value?.tabId !== tabId) reproPanelOpen.value = false
+    if (!keepPanelOpen && reproPanelOpen.value && reproRecording.value?.tabId !== tabId) reproPanelOpen.value = false
     reproRecording.value = null
     reproState.value = 'idle'
     reproError.value = ''
-    if (domChangesPanelOpen.value && domChangesReport.value?.tabId !== tabId) domChangesPanelOpen.value = false
+    if (!keepPanelOpen && domChangesPanelOpen.value && domChangesReport.value?.tabId !== tabId) domChangesPanelOpen.value = false
     domChangesReport.value = null
     domChangesState.value = 'idle'
     domChangesError.value = ''
-    if (visualComparePanelOpen.value && visualCompareReport.value?.tabId !== tabId) visualComparePanelOpen.value = false
+    if (!keepPanelOpen && visualComparePanelOpen.value && visualCompareReport.value?.tabId !== tabId) visualComparePanelOpen.value = false
     visualCompareReport.value = null
     visualCompareState.value = 'idle'
     visualCompareError.value = ''
-    if (inspectorIssuesOpen.value && inspectorIssuesReport.value?.tabId !== tabId) inspectorIssuesOpen.value = false
+    if (!keepPanelOpen && inspectorIssuesOpen.value && inspectorIssuesReport.value?.tabId !== tabId) inspectorIssuesOpen.value = false
     inspectorIssuesReport.value = null
     inspectorIssuesState.value = 'idle'
     inspectorIssuesError.value = ''
     resetNetworkMonitorView(true)
-    if (isDetachedPanelWindow && networkMonitorOpen.value && tab && !tab.url.startsWith('bronom://home')) {
-      void Promise.all([refreshNetworkMonitor(), refreshNetworkRoutes()])
-    }
     if (responsivePanelOpen.value) {
-      if (!isDetachedPanelWindow && panelDock.value !== 'window') responsivePanelOpen.value = false
+      if (!keepPanelOpen) responsivePanelOpen.value = false
       else loadResponsiveDraft(tab?.emulation?.viewport)
     } else {
       responsiveState.value = 'idle'
       responsiveError.value = ''
     }
     if (environmentPanelOpen.value) {
-      if (!isDetachedPanelWindow && panelDock.value !== 'window') environmentPanelOpen.value = false
+      if (!keepPanelOpen) environmentPanelOpen.value = false
       else loadEnvironmentDraft(tab?.emulation)
     } else {
       environmentState.value = 'idle'
       environmentError.value = ''
     }
+  }
+)
+
+watch(
+  () => [state.value.activeTabId, activeTab.value?.url, activeTab.value?.loading] as const,
+  ([tabId, url, loading], [previousTabId, previousUrl, previousLoading]) => {
+    if (!isDetachedPanelWindow || !tabId || !url || url.startsWith('bronom://home') || loading) return
+    const contextChanged = tabId !== previousTabId || url !== previousUrl || previousLoading === true
+    if (!contextChanged) return
+    const panel = activePanelId.value
+    if (panel) void refreshDetachedPanel(panel)
   }
 )
 
@@ -3834,7 +3862,7 @@ function networkTimingPercent(value: number, timing: BrowserNetworkRequestDetail
 
 function resetConsoleView(closePanel = false): void {
   consoleRequestSequence += 1
-  if (closePanel && !isDetachedPanelWindow) consolePanelOpen.value = false
+  if (closePanel && !keepsSeparatePanelOpen()) consolePanelOpen.value = false
   consoleMessages.value = []
   consoleState.value = 'idle'
   consoleError.value = ''
@@ -3848,7 +3876,7 @@ function resetNetworkMonitorView(closePanel = false): void {
   networkRouteMutationSequence += 1
   networkRequestDetailsSequence += 1
   networkContentSearchSequence += 1
-  if (closePanel && !isDetachedPanelWindow) networkMonitorOpen.value = false
+  if (closePanel && !keepsSeparatePanelOpen()) networkMonitorOpen.value = false
   networkRequests.value = []
   networkMonitorState.value = 'idle'
   networkMonitorError.value = ''
@@ -5162,7 +5190,7 @@ async function showDetachedPanel(panel: DetachablePanelId): Promise<void> {
 }
 
 function closeTransientPanels(): void {
-  closeDockedPanels()
+  if (isDetachedPanelWindow || panelDock.value !== 'window') closeDockedPanels()
   addressSuggestionsOpen.value = false
   zoomOpen.value = false
   downloadsOpen.value = false
@@ -5584,7 +5612,6 @@ onMounted(async () => {
   for (const download of savedDownloads) knownDownloadIds.add(download.id)
   bookmarks.value = savedBookmarks
   visitHistory.value = savedVisitHistory
-  if (isDetachedPanelWindow && detachedPanelId) await refreshDetachedPanel(detachedPanelId)
   window.addEventListener('keydown', handleKeyDown)
   window.addEventListener('resize', reportShellHeight)
   await nextTick()
