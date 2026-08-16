@@ -332,6 +332,20 @@ test('detaches tool panels into a hardened window and redocks them', async ({ ap
     .toBe(detachedTargetState.activeTabId)
   await expect(detachedPage.getByRole('dialog', { name: 'Page tools' })).toBeVisible()
 
+  const homeTabId = await appWindow.evaluate(`window.bronom.getState().then((state) => {
+    const home = state.tabs.find((tab) => tab.url.startsWith('bronom://home'))
+    if (!home) throw new Error('Missing Home tab')
+    return home.id
+  })`) as string
+  await appWindow.evaluate(`window.bronom.selectTab(${JSON.stringify(homeTabId)})`)
+  const detachedWebsiteRequired = detachedPage.getByRole('dialog', { name: 'Page tools' })
+  await expect(detachedWebsiteRequired.getByRole('heading', { name: 'Open a website tab' })).toBeVisible()
+  await expect(detachedWebsiteRequired).toContainText('This panel will refresh automatically.')
+
+  await appWindow.evaluate(`window.bronom.selectTab(${JSON.stringify(detachedTargetState.activeTabId)})`)
+  await expect(detachedPage.getByRole('heading', { name: 'Open a website tab' })).toBeHidden()
+  await expect(detachedPage.getByRole('dialog', { name: 'Page tools' })).toBeVisible()
+
   const trustedPanelUrl = detachedPage.url()
   await detachedPage.evaluate("location.assign('https://example.com/blocked-panel-navigation')")
   await expect.poll(() => detachedPage.url()).toBe(trustedPanelUrl)

@@ -241,7 +241,7 @@ function isDetachablePanelId(value: string | null): value is DetachablePanelId {
   return value !== null && (DETACHABLE_PANEL_IDS as readonly string[]).includes(value)
 }
 
-function detachedPanelTitle(panel: DetachablePanelId): string {
+function detachedPanelLabel(panel: DetachablePanelId): string {
   const labels: Record<DetachablePanelId, string> = {
     'site-controls': 'Site controls',
     'site-storage': 'Site storage',
@@ -265,7 +265,11 @@ function detachedPanelTitle(panel: DetachablePanelId): string {
     issues: 'Issues',
     bookmarks: 'Bookmarks'
   }
-  return `${labels[panel]} — Bronom`
+  return labels[panel]
+}
+
+function detachedPanelTitle(panel: DetachablePanelId): string {
+  return `${detachedPanelLabel(panel)} — Bronom`
 }
 
 const PanelDockPicker = defineComponent({
@@ -1041,6 +1045,14 @@ watch(() => state.value.mcpTabGroups.map((group) => group.id).join(','), () => {
   persistCollapsedTabGroups()
 })
 const activeIsHome = computed(() => !state.value.activeTabId || activeTab.value?.url.startsWith('bronom://home') === true)
+const detachedPanelUnavailable = computed(() => (
+  isDetachedPanelWindow
+  && activeIsHome.value
+  && activePanelId.value !== 'bookmarks'
+))
+const detachedPanelLabelText = computed(() => (
+  activePanelId.value ? detachedPanelLabel(activePanelId.value) : 'Page tools'
+))
 const showUpdateStatusPill = computed(() => (
   updateNoticeOpen.value
   && !settingsOpen.value
@@ -5670,7 +5682,12 @@ onBeforeUnmount(() => {
     ref="shell"
     class="shell"
     :class="[
-      { 'all-human-interaction-locked': state.allHumanInteractionLocked, 'home-shell': activeIsHome, 'detached-panel-window': isDetachedPanelWindow },
+      {
+        'all-human-interaction-locked': state.allHumanInteractionLocked,
+        'home-shell': activeIsHome,
+        'detached-panel-window': isDetachedPanelWindow,
+        'detached-panel-unavailable': detachedPanelUnavailable
+      },
       `panel-dock-${panelDock}`
     ]"
     :style="{
@@ -10388,6 +10405,29 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </section>
+    </div>
+    <div
+      v-if="detachedPanelUnavailable"
+      class="detached-panel-unavailable-state"
+      role="dialog"
+      aria-modal="false"
+      :aria-label="detachedPanelLabelText"
+    >
+      <header>
+        <span>
+          <small>WEBSITE REQUIRED</small>
+          <strong>{{ detachedPanelLabelText }}</strong>
+        </span>
+        <div class="panel-header-actions">
+          <PanelDockPicker v-model="panelDock" :label="`Dock ${detachedPanelLabelText.toLocaleLowerCase()}`" />
+          <button class="panel-close" type="button" :aria-label="`Close ${detachedPanelLabelText.toLocaleLowerCase()}`" @click="closeDockedPanels"><IconClose aria-hidden="true" /></button>
+        </div>
+      </header>
+      <div>
+        <span aria-hidden="true"><IconLanguage /></span>
+        <h2>Open a website tab</h2>
+        <p>Select or open a website tab in the main Bronom window. This panel will refresh automatically.</p>
+      </div>
     </div>
     <div
       v-if="dockedPanelOpen && panelDock !== 'window'"
