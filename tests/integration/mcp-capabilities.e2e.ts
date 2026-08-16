@@ -1113,7 +1113,9 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     await expect(memoryPanel).toContainText('retainMemoryForProfile')
     await expect(memoryPanel.getByRole('button', { name: 'GC & measure' })).toBeVisible()
     await memoryPanel.getByRole('button', { name: 'Clear', exact: true }).click()
-    await expect(memoryPanel).toContainText('Baseline cleared')
+    await expect(memoryPanel).toContainText('No baseline')
+    await expect(memoryPanel).toContainText('retainMemoryForProfile')
+    await expect(memoryPanel).not.toContainText('Baseline cleared')
     await memoryPanel.getByRole('button', { name: 'Close memory report' }).click()
     await expect(memoryPanel).toBeHidden()
 

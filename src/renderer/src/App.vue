@@ -3499,7 +3499,18 @@ async function clearMemoryBaseline(): Promise<void> {
   memoryState.value = 'running'
   memoryError.value = ''
   try {
-    memoryReport.value = await browser.measureMemory({ tabId: tab.id, action: 'clear-baseline' })
+    const previous = memoryReport.value
+    const cleared = await browser.measureMemory({ tabId: tab.id, action: 'clear-baseline' })
+    const preserveCurrent = previous?.tabId === cleared.tabId
+      && previous.url === cleared.url
+      && previous.current
+    memoryReport.value = {
+      ...cleared,
+      ...(preserveCurrent ? {
+        current: previous.current,
+        forcedGarbageCollection: previous.forcedGarbageCollection
+      } : {})
+    }
     memoryState.value = 'complete'
   } catch (error) {
     memoryState.value = 'error'
