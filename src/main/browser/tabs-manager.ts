@@ -47,7 +47,12 @@ import {
   summarizeCoverageResources,
   type CoverageRange
 } from '../../shared/code-coverage.js'
-import { normalizePerformanceOptions, performanceAuditPageScript, sanitizePerformanceReport } from '../../shared/performance-audit.js'
+import {
+  buildPerformanceComparison,
+  normalizePerformanceOptions,
+  performanceAuditPageScript,
+  sanitizePerformanceReport
+} from '../../shared/performance-audit.js'
 import { designOverviewPageScript } from '../../shared/design-overview.js'
 import { pageMetadataScript } from '../../shared/page-metadata.js'
 import { indexedDbPageScript, normalizeBrowserIndexedDbOptions } from '../../shared/indexeddb.js'
@@ -147,6 +152,7 @@ import type {
   BrowserAccessibilityAudit,
   BrowserAccessibilityAuditOptions,
   BrowserPerformanceOptions,
+  BrowserPerformanceEnvironment,
   BrowserPerformanceReport,
   BrowserDesignOverviewReport,
   BrowserPageMetadataReport,
@@ -486,6 +492,11 @@ interface BrowserTab {
   emulationExtraHttpHeaders: Record<string, string>
   mcpGroupId?: string
   memoryBaseline?: { url: string; measurement: BrowserMemoryMeasurement }
+  performanceBaseline?: {
+    report: BrowserPerformanceReport
+    environment: BrowserPerformanceEnvironment
+    environmentFingerprint: string
+  }
   securitySnapshot?: {
     url: string
     checkedAt: string
@@ -2450,7 +2461,39 @@ export class BrowserTabsManager {
       [{ code: performanceAuditPageScript(webVitalsSource, normalized, webVitalsVersion) }],
       false
     ) as Omit<BrowserPerformanceReport, 'tabId'>
-    return sanitizePerformanceReport({ tabId: tab.id, ...result })
+    const report = sanitizePerformanceReport({ tabId: tab.id, ...result })
+    const environment = this.performanceEnvironment(tab)
+    const environmentFingerprint = this.performanceEnvironmentFingerprint(tab)
+    if (normalized.action === 'clear-baseline') {
+      const baselineCleared = Boolean(tab.performanceBaseline)
+      tab.performanceBaseline = undefined
+      return { ...report, action: normalized.action, baselineCleared }
+    }
+    if (normalized.action === 'set-baseline') {
+      tab.performanceBaseline = { report, environment, environmentFingerprint }
+      return {
+        ...report,
+        action: normalized.action,
+        baseline: { measuredAt: report.measuredAt, url: report.url, environment }
+      }
+    }
+    if (!tab.performanceBaseline) return { ...report, action: normalized.action }
+    const comparison = buildPerformanceComparison(
+      tab.performanceBaseline.report,
+      report,
+      tab.performanceBaseline.environment,
+      environment,
+      tab.performanceBaseline.environmentFingerprint === environmentFingerprint
+    )
+    const caveats = [...report.caveats]
+    if (!comparison.comparison.sameUrl) {
+      caveats.push('The baseline URL differs from this measurement; compare only if the navigation change was intentional.')
+    }
+    if (!comparison.comparison.sameEnvironment) {
+      caveats.push('The browser environment differs from the baseline; viewport, throttling, cache, headers, or locale changes can affect the delta.')
+    }
+    caveats.push('Before-and-after deltas compare two local samples and may include normal run-to-run variation; repeat important measurements under matching conditions.')
+    return { ...report, action: normalized.action, ...comparison, caveats }
   }
 
   async designOverview(tabId?: string): Promise<BrowserDesignOverviewReport> {
@@ -6066,6 +6109,50 @@ export class BrowserTabsManager {
       ...(state.extraHttpHeaderNames ? { extraHttpHeaderNames: [...state.extraHttpHeaderNames] } : {}),
       ...(state.renderingDebug ? { renderingDebug: { ...state.renderingDebug } } : {})
     }
+  }
+
+  private performanceEnvironment(tab: BrowserTab): BrowserPerformanceEnvironment {
+    const bounds = tab.view.getBounds()
+    const viewport = tab.emulation.viewport
+    return {
+      network: tab.emulation.network,
+      cacheDisabled: tab.emulation.cacheDisabled,
+      bypassServiceWorker: tab.emulation.bypassServiceWorker,
+      dataSaver: tab.emulation.dataSaver,
+      cpuThrottlingRate: tab.emulation.cpuThrottlingRate,
+      viewport: viewport
+        ? {
+            width: viewport.width,
+            height: viewport.height,
+            deviceScaleFactor: viewport.deviceScaleFactor,
+            mobile: viewport.mobile,
+            touch: viewport.touch
+          }
+        : {
+            width: bounds.width,
+            height: bounds.height,
+            deviceScaleFactor: 1,
+            mobile: false,
+            touch: false
+          },
+      zoomPercent: Math.round(tab.view.webContents.getZoomFactor() * 100),
+      userAgentOverridden: tab.emulation.userAgent !== undefined,
+      localeOverridden: tab.emulation.locale !== undefined,
+      timezoneOverridden: tab.emulation.timezoneId !== undefined,
+      extraHttpHeaders: Boolean(Object.keys(tab.emulationExtraHttpHeaders).length)
+    }
+  }
+
+  private performanceEnvironmentFingerprint(tab: BrowserTab): string {
+    const bounds = tab.view.getBounds()
+    const emulation = this.cloneEmulationState(tab.emulation)
+    if (emulation.extraHttpHeaderNames) emulation.extraHttpHeaderNames.sort()
+    return createHash('sha256').update(JSON.stringify({
+      emulation,
+      extraHttpHeaders: Object.fromEntries(Object.entries(tab.emulationExtraHttpHeaders).sort(([left], [right]) => left.localeCompare(right))),
+      viewport: { width: bounds.width, height: bounds.height },
+      zoomPercent: Math.round(tab.view.webContents.getZoomFactor() * 100)
+    })).digest('hex')
   }
 
   private validateViewportEmulation(viewport: BrowserViewportEmulation): void {

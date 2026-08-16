@@ -205,7 +205,7 @@ export const BROWSER_TOOL_CATALOG: BrowserToolDefinition[] = [
   { name: 'browser_screenshot', category: 'Inspection', description: 'Return a viewport, full page, element, or selected rectangle as a chat-ready PNG or compact JPEG.' },
   { name: 'browser_pdf_save', category: 'Inspection', description: 'Save the rendered page as a collision-safe PDF in the download directory.' },
   { name: 'browser_accessibility_audit', category: 'Inspection', description: 'Audit a page or element for bounded WCAG accessibility violations with local axe-core rules.' },
-  { name: 'browser_performance', category: 'Inspection', description: 'Measure local Core Web Vitals plus navigation, resources, long tasks, and bounded Long Animation Frame script attribution for the current visit.' },
+  { name: 'browser_performance', category: 'Inspection', description: 'Measure local Core Web Vitals plus navigation, resources, long tasks, and bounded Long Animation Frame script attribution. Save a per-tab baseline and compare later measurements with explicit URL and environment compatibility checks.' },
   { name: 'browser_design_overview', category: 'Inspection', description: 'Summarize bounded computed colors, typography, media queries, and likely text-contrast issues without returning page text or CSS source.' },
   { name: 'browser_page_metadata', category: 'Inspection', description: 'Inspect bounded title, canonical, robots, social cards, alternates, icons, headings, and structured-data types without returning body content or full JSON-LD.' },
   { name: 'browser_security', category: 'Inspection', description: 'Inspect the current main document transport, TLS connection, and bounded certificate metadata without returning raw certificates.' },
@@ -1102,16 +1102,19 @@ function createBrowserMcpServer(
       description: toolDescription('browser_performance'),
       inputSchema: {
         tabId: z.string().optional(),
-        settleMs: z.number().int().min(0).max(2_000).optional()
+        settleMs: z.number().int().min(0).max(2_000).optional(),
+        action: z.enum(['measure', 'set-baseline', 'clear-baseline']).optional()
       }
     },
     tabTool('browser_performance', async ({
       tabId,
-      settleMs
+      settleMs,
+      action
     }: {
       tabId?: string
       settleMs?: number
-    }) => textResult(await manager.performanceReport({ tabId, settleMs })))
+      action?: 'measure' | 'set-baseline' | 'clear-baseline'
+    }) => textResult(await manager.performanceReport({ tabId, settleMs, action })))
   )
   registerGroupTool(
     'browser_design_overview',

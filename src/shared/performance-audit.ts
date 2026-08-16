@@ -1,6 +1,14 @@
 import { redactDiagnosticText } from './debug-report.js'
 import { redactNetworkUrl } from './network-details.js'
-import type { BrowserPerformanceOptions, BrowserPerformanceReport } from './types.js'
+import type {
+  BrowserPerformanceAction,
+  BrowserPerformanceBaselineSummary,
+  BrowserPerformanceComparison,
+  BrowserPerformanceComparisonMetric,
+  BrowserPerformanceEnvironment,
+  BrowserPerformanceOptions,
+  BrowserPerformanceReport
+} from './types.js'
 
 export const PERFORMANCE_AUDIT_LIMITS = {
   maxSettleMs: 2_000,
@@ -15,6 +23,7 @@ export const PERFORMANCE_AUDIT_LIMITS = {
 
 export interface NormalizedPerformanceOptions {
   settleMs: number
+  action: BrowserPerformanceAction
 }
 
 export function normalizePerformanceOptions(
@@ -24,7 +33,63 @@ export function normalizePerformanceOptions(
   if (!Number.isInteger(settleMs) || settleMs < 0 || settleMs > PERFORMANCE_AUDIT_LIMITS.maxSettleMs) {
     throw new Error(`settleMs must be an integer from 0 to ${PERFORMANCE_AUDIT_LIMITS.maxSettleMs}`)
   }
-  return { settleMs }
+  const action = options.action ?? 'measure'
+  if (!['measure', 'set-baseline', 'clear-baseline'].includes(action)) {
+    throw new Error('action must be measure, set-baseline, or clear-baseline')
+  }
+  return { settleMs, action }
+}
+
+const PERFORMANCE_COMPARISON_FIELDS = [
+  { name: 'LCP', label: 'Largest contentful paint', unit: 'ms', tolerance: 1, value: (report: BrowserPerformanceReport) => report.metrics.LCP?.value ?? null },
+  { name: 'INP', label: 'Interaction to next paint', unit: 'ms', tolerance: 1, value: (report: BrowserPerformanceReport) => report.metrics.INP?.value ?? null },
+  { name: 'CLS', label: 'Cumulative layout shift', unit: 'score', tolerance: 0.001, value: (report: BrowserPerformanceReport) => report.metrics.CLS?.value ?? null },
+  { name: 'FCP', label: 'First contentful paint', unit: 'ms', tolerance: 1, value: (report: BrowserPerformanceReport) => report.metrics.FCP?.value ?? null },
+  { name: 'TTFB', label: 'Time to first byte', unit: 'ms', tolerance: 1, value: (report: BrowserPerformanceReport) => report.metrics.TTFB?.value ?? null },
+  { name: 'LOAD', label: 'Load event', unit: 'ms', tolerance: 1, value: (report: BrowserPerformanceReport) => report.navigation?.loadMs ?? null },
+  { name: 'TRANSFER', label: 'Transferred resources', unit: 'bytes', tolerance: 1_024, value: (report: BrowserPerformanceReport) => report.resources.transferBytes },
+  { name: 'LONG_TASK_BLOCKING', label: 'Long-task blocking time', unit: 'ms', tolerance: 1, value: (report: BrowserPerformanceReport) => report.longTasks.blockingTimeMs },
+  { name: 'LOAF_BLOCKING', label: 'Long-animation-frame blocking', unit: 'ms', tolerance: 1, value: (report: BrowserPerformanceReport) => report.longAnimationFrames.blockingDurationMs }
+] as const
+
+function comparisonMetric(
+  definition: typeof PERFORMANCE_COMPARISON_FIELDS[number],
+  baseline: BrowserPerformanceReport,
+  current: BrowserPerformanceReport
+): BrowserPerformanceComparisonMetric {
+  const baselineValue = definition.value(baseline)
+  const currentValue = definition.value(current)
+  const metric = { name: definition.name, label: definition.label, unit: definition.unit }
+  if (baselineValue === null || currentValue === null) {
+    return { ...metric, baselineValue, currentValue, delta: null, direction: 'unavailable' }
+  }
+  const delta = Math.round((currentValue - baselineValue) * 1_000) / 1_000
+  const tolerance = Math.max(definition.tolerance, Math.abs(baselineValue) * 0.01)
+  const direction = Math.abs(delta) <= tolerance
+    ? 'unchanged'
+    : delta < 0 ? 'improved' : 'regressed'
+  return { ...metric, baselineValue, currentValue, delta, direction }
+}
+
+export function buildPerformanceComparison(
+  baseline: BrowserPerformanceReport,
+  current: BrowserPerformanceReport,
+  baselineEnvironment: BrowserPerformanceEnvironment,
+  currentEnvironment: BrowserPerformanceEnvironment,
+  sameEnvironment = JSON.stringify(baselineEnvironment) === JSON.stringify(currentEnvironment)
+): { baseline: BrowserPerformanceBaselineSummary; comparison: BrowserPerformanceComparison } {
+  return {
+    baseline: {
+      measuredAt: baseline.measuredAt,
+      url: baseline.url,
+      environment: baselineEnvironment
+    },
+    comparison: {
+      sameUrl: baseline.url === current.url,
+      sameEnvironment,
+      metrics: PERFORMANCE_COMPARISON_FIELDS.map((definition) => comparisonMetric(definition, baseline, current))
+    }
+  }
 }
 
 export function performanceAuditPageScript(

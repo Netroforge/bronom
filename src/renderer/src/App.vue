@@ -90,6 +90,9 @@ import {
   BrowserAccessibilityImpact,
   BrowserPerformanceMetric,
   BrowserPerformanceMetricName,
+  BrowserPerformanceAction,
+  BrowserPerformanceComparisonMetric,
+  BrowserPerformanceComparisonMetricName,
   BrowserPerformanceReport,
   BrowserPerformanceScriptContributor,
   BrowserDesignOverviewReport,
@@ -3199,6 +3202,27 @@ function formatPerformanceMetric(metric: BrowserPerformanceMetric | null): strin
   return metric.unit === 'score' ? metric.value.toFixed(3) : `${Math.round(metric.value)} ms`
 }
 
+function performanceComparisonMetric(name: BrowserPerformanceComparisonMetricName): BrowserPerformanceComparisonMetric | null {
+  return performanceReport.value?.comparison?.metrics.find((metric) => metric.name === name) ?? null
+}
+
+function formatPerformanceDelta(metric: BrowserPerformanceComparisonMetric | null): string {
+  if (!metric || metric.delta === null) return ''
+  const absolute = Math.abs(metric.delta)
+  const value = metric.unit === 'bytes'
+    ? formatBytes(absolute)
+    : metric.unit === 'score' ? absolute.toFixed(3) : `${Math.round(absolute)} ms`
+  const sign = metric.delta > 0 ? '+' : metric.delta < 0 ? '−' : '±'
+  return `${sign}${value} vs baseline`
+}
+
+function performanceBaselineTime(): string {
+  const measuredAt = performanceReport.value?.baseline?.measuredAt
+  if (!measuredAt) return ''
+  const date = new Date(measuredAt)
+  return Number.isNaN(date.valueOf()) ? measuredAt : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
 function performanceContributorTitle(contributor: BrowserPerformanceScriptContributor): string {
   return contributor.sourceFunctionName || contributor.invoker || 'Anonymous script work'
 }
@@ -3214,7 +3238,7 @@ function performanceContributorSource(contributor: BrowserPerformanceScriptContr
   }
 }
 
-async function runPerformanceReport(): Promise<void> {
+async function runPerformanceReport(action: BrowserPerformanceAction = 'measure'): Promise<void> {
   const tab = activeTab.value
   if (!tab || tab.url.startsWith('bronom://home')) return
   closeTransientPanels()
@@ -3222,7 +3246,7 @@ async function runPerformanceReport(): Promise<void> {
   performanceState.value = 'running'
   performanceError.value = ''
   try {
-    performanceReport.value = await browser.measurePerformance({ tabId: tab.id, settleMs: 800 })
+    performanceReport.value = await browser.measurePerformance({ tabId: tab.id, settleMs: 800, action })
     performanceState.value = 'complete'
   } catch (error) {
     performanceState.value = 'error'
@@ -6522,9 +6546,20 @@ onBeforeUnmount(() => {
         <IconError aria-hidden="true" />
         <strong>Performance report could not finish</strong>
         <span>{{ performanceError }}</span>
-        <button type="button" @click="runPerformanceReport">Try again</button>
+        <button type="button" @click="runPerformanceReport()">Try again</button>
       </div>
       <template v-else-if="performanceReport">
+        <div v-if="performanceReport.baseline" class="performance-baseline-status" :class="{ warning: performanceReport.comparison && (!performanceReport.comparison.sameUrl || !performanceReport.comparison.sameEnvironment) }">
+          <IconWarning v-if="performanceReport.comparison && (!performanceReport.comparison.sameUrl || !performanceReport.comparison.sameEnvironment)" aria-hidden="true" />
+          <IconDifference v-else aria-hidden="true" />
+          <span>
+            <strong>{{ performanceReport.comparison ? `Compared with baseline from ${performanceBaselineTime()}` : `Baseline saved at ${performanceBaselineTime()}` }}</strong>
+            <small v-if="performanceReport.comparison && !performanceReport.comparison.sameUrl">The page URL changed since the baseline.</small>
+            <small v-else-if="performanceReport.comparison && !performanceReport.comparison.sameEnvironment">Viewport or browser conditions changed since the baseline.</small>
+            <small v-else-if="performanceReport.comparison">Same page and browser conditions.</small>
+            <small v-else>Measure again after your change to see deltas.</small>
+          </span>
+        </div>
         <div class="performance-vitals">
           <article
             v-for="name in (['LCP', 'INP', 'CLS'] as BrowserPerformanceMetricName[])"
@@ -6539,32 +6574,37 @@ onBeforeUnmount(() => {
             <small v-if="name === 'LCP'">Good ≤ 2.5 s</small>
             <small v-else-if="name === 'INP'">Good ≤ 200 ms</small>
             <small v-else>Good ≤ 0.1</small>
+            <small
+              v-if="performanceComparisonMetric(name)?.direction !== 'unavailable' && performanceComparisonMetric(name)"
+              class="performance-delta"
+              :class="performanceComparisonMetric(name)?.direction"
+            >{{ formatPerformanceDelta(performanceComparisonMetric(name)) }}</small>
           </article>
         </div>
         <div class="performance-details">
           <section>
             <h3>Loading</h3>
             <dl>
-              <div><dt>TTFB</dt><dd>{{ formatPerformanceMetric(performanceMetric('TTFB')) }}</dd></div>
-              <div><dt>First contentful paint</dt><dd>{{ formatPerformanceMetric(performanceMetric('FCP')) }}</dd></div>
+              <div><dt>TTFB</dt><dd>{{ formatPerformanceMetric(performanceMetric('TTFB')) }}<small v-if="performanceComparisonMetric('TTFB')?.direction !== 'unavailable'" class="performance-inline-delta" :class="performanceComparisonMetric('TTFB')?.direction">{{ formatPerformanceDelta(performanceComparisonMetric('TTFB')) }}</small></dd></div>
+              <div><dt>First contentful paint</dt><dd>{{ formatPerformanceMetric(performanceMetric('FCP')) }}<small v-if="performanceComparisonMetric('FCP')?.direction !== 'unavailable'" class="performance-inline-delta" :class="performanceComparisonMetric('FCP')?.direction">{{ formatPerformanceDelta(performanceComparisonMetric('FCP')) }}</small></dd></div>
               <div><dt>DOM content loaded</dt><dd>{{ performanceReport.navigation?.domContentLoadedMs == null ? 'Unavailable' : `${Math.round(performanceReport.navigation.domContentLoadedMs)} ms` }}</dd></div>
-              <div><dt>Load event</dt><dd>{{ performanceReport.navigation?.loadMs == null ? 'Unavailable' : `${Math.round(performanceReport.navigation.loadMs)} ms` }}</dd></div>
+              <div><dt>Load event</dt><dd>{{ performanceReport.navigation?.loadMs == null ? 'Unavailable' : `${Math.round(performanceReport.navigation.loadMs)} ms` }}<small v-if="performanceComparisonMetric('LOAD')?.direction !== 'unavailable'" class="performance-inline-delta" :class="performanceComparisonMetric('LOAD')?.direction">{{ formatPerformanceDelta(performanceComparisonMetric('LOAD')) }}</small></dd></div>
             </dl>
           </section>
           <section>
             <h3>Page work</h3>
             <dl>
               <div><dt>Resources</dt><dd>{{ performanceReport.resources.count }}</dd></div>
-              <div><dt>Transferred</dt><dd>{{ formatBytes(performanceReport.resources.transferBytes ?? 0) }}</dd></div>
+              <div><dt>Transferred</dt><dd>{{ formatBytes(performanceReport.resources.transferBytes ?? 0) }}<small v-if="performanceComparisonMetric('TRANSFER')?.direction !== 'unavailable'" class="performance-inline-delta" :class="performanceComparisonMetric('TRANSFER')?.direction">{{ formatPerformanceDelta(performanceComparisonMetric('TRANSFER')) }}</small></dd></div>
               <div><dt>Long tasks</dt><dd>{{ performanceReport.longTasks.supported ? performanceReport.longTasks.count : 'Unsupported' }}</dd></div>
-              <div><dt>Observed blocking time</dt><dd>{{ performanceReport.longTasks.supported ? `${Math.round(performanceReport.longTasks.blockingTimeMs ?? 0)} ms` : 'Unavailable' }}</dd></div>
+              <div><dt>Observed blocking time</dt><dd>{{ performanceReport.longTasks.supported ? `${Math.round(performanceReport.longTasks.blockingTimeMs ?? 0)} ms` : 'Unavailable' }}<small v-if="performanceComparisonMetric('LONG_TASK_BLOCKING')?.direction !== 'unavailable'" class="performance-inline-delta" :class="performanceComparisonMetric('LONG_TASK_BLOCKING')?.direction">{{ formatPerformanceDelta(performanceComparisonMetric('LONG_TASK_BLOCKING')) }}</small></dd></div>
             </dl>
           </section>
           <section>
             <h3>Responsiveness</h3>
             <dl>
               <div><dt>Long animation frames</dt><dd>{{ performanceReport.longAnimationFrames.supported ? performanceReport.longAnimationFrames.count : 'Unsupported' }}</dd></div>
-              <div><dt>Blocking duration</dt><dd>{{ performanceReport.longAnimationFrames.supported ? `${Math.round(performanceReport.longAnimationFrames.blockingDurationMs ?? 0)} ms` : 'Unavailable' }}</dd></div>
+              <div><dt>Blocking duration</dt><dd>{{ performanceReport.longAnimationFrames.supported ? `${Math.round(performanceReport.longAnimationFrames.blockingDurationMs ?? 0)} ms` : 'Unavailable' }}<small v-if="performanceComparisonMetric('LOAF_BLOCKING')?.direction !== 'unavailable'" class="performance-inline-delta" :class="performanceComparisonMetric('LOAF_BLOCKING')?.direction">{{ formatPerformanceDelta(performanceComparisonMetric('LOAF_BLOCKING')) }}</small></dd></div>
               <div><dt>Longest frame</dt><dd>{{ performanceReport.longAnimationFrames.supported ? `${Math.round(performanceReport.longAnimationFrames.longestDurationMs ?? 0)} ms` : 'Unavailable' }}</dd></div>
               <div><dt>Style &amp; layout</dt><dd>{{ performanceReport.longAnimationFrames.supported ? `${Math.round(performanceReport.longAnimationFrames.styleAndLayoutDurationMs ?? 0)} ms` : 'Unavailable' }}</dd></div>
             </dl>
@@ -6590,7 +6630,11 @@ onBeforeUnmount(() => {
         </div>
         <footer>
           <span>{{ performanceReport.engine.name }} {{ performanceReport.engine.version }} · local sample</span>
-          <button type="button" @click="runPerformanceReport"><IconRefresh aria-hidden="true" /> Measure again</button>
+          <div>
+            <button v-if="performanceReport.baseline" type="button" @click="runPerformanceReport('clear-baseline')">Clear baseline</button>
+            <button type="button" @click="runPerformanceReport('set-baseline')"><IconDifference aria-hidden="true" /> {{ performanceReport.baseline ? 'Replace baseline' : 'Save baseline' }}</button>
+            <button type="button" @click="runPerformanceReport('measure')"><IconRefresh aria-hidden="true" /> Measure again</button>
+          </div>
         </footer>
       </template>
     </section>

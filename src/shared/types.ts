@@ -498,6 +498,14 @@ export interface BrowserAccessibilityAuditOptions {
 
 export type BrowserPerformanceMetricName = 'LCP' | 'INP' | 'CLS' | 'FCP' | 'TTFB'
 export type BrowserPerformanceRating = 'good' | 'needs-improvement' | 'poor'
+export type BrowserPerformanceAction = 'measure' | 'set-baseline' | 'clear-baseline'
+export type BrowserPerformanceComparisonDirection = 'improved' | 'regressed' | 'unchanged' | 'unavailable'
+export type BrowserPerformanceComparisonMetricName =
+  | BrowserPerformanceMetricName
+  | 'LOAD'
+  | 'TRANSFER'
+  | 'LONG_TASK_BLOCKING'
+  | 'LOAF_BLOCKING'
 
 export interface BrowserPerformanceMetric {
   name: BrowserPerformanceMetricName
@@ -527,6 +535,48 @@ export interface BrowserPerformanceScriptContributor {
   count: number
   totalDurationMs: number
   forcedStyleAndLayoutDurationMs: number
+}
+
+export interface BrowserPerformanceEnvironment {
+  network: BrowserNetworkEmulation
+  cacheDisabled: boolean
+  bypassServiceWorker: boolean
+  dataSaver: BrowserDataSaverEmulation
+  cpuThrottlingRate: number
+  viewport: {
+    width: number
+    height: number
+    deviceScaleFactor: number
+    mobile: boolean
+    touch: boolean
+  }
+  zoomPercent: number
+  userAgentOverridden: boolean
+  localeOverridden: boolean
+  timezoneOverridden: boolean
+  extraHttpHeaders: boolean
+}
+
+export interface BrowserPerformanceBaselineSummary {
+  measuredAt: string
+  url: string
+  environment: BrowserPerformanceEnvironment
+}
+
+export interface BrowserPerformanceComparisonMetric {
+  name: BrowserPerformanceComparisonMetricName
+  label: string
+  unit: 'ms' | 'score' | 'bytes'
+  baselineValue: number | null
+  currentValue: number | null
+  delta: number | null
+  direction: BrowserPerformanceComparisonDirection
+}
+
+export interface BrowserPerformanceComparison {
+  sameUrl: boolean
+  sameEnvironment: boolean
+  metrics: BrowserPerformanceComparisonMetric[]
 }
 
 export interface BrowserPerformanceReport {
@@ -574,11 +624,16 @@ export interface BrowserPerformanceReport {
     truncated: boolean
   }
   caveats: string[]
+  action?: BrowserPerformanceAction
+  baseline?: BrowserPerformanceBaselineSummary
+  comparison?: BrowserPerformanceComparison
+  baselineCleared?: boolean
 }
 
 export interface BrowserPerformanceOptions {
   tabId?: string
   settleMs?: number
+  action?: BrowserPerformanceAction
 }
 
 export interface BrowserDesignOverviewColor {

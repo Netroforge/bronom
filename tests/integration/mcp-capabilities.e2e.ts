@@ -622,9 +622,25 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
 
     const performanceWarmup = await client.callTool({
       name: 'browser_performance',
-      arguments: { tabId, settleMs: 0 }
+      arguments: { tabId, settleMs: 0, action: 'set-baseline' }
     }) as CallToolResult
     expect(performanceWarmup.isError, text(performanceWarmup)).not.toBe(true)
+    const performanceBaseline = JSON.parse(text(performanceWarmup))
+    expect(performanceBaseline).toMatchObject({
+      tabId,
+      action: 'set-baseline',
+      baseline: {
+        measuredAt: expect.any(String),
+        url: expect.stringContaining('127.0.0.1'),
+        environment: {
+          network: 'none',
+          cacheDisabled: false,
+          viewport: { width: expect.any(Number), height: expect.any(Number) },
+          zoomPercent: 100
+        }
+      }
+    })
+    expect(performanceBaseline.comparison).toBeUndefined()
     const longAnimationFrameProbe = await client.callTool({
       name: 'browser_evaluate',
       arguments: { tabId, script: 'window.runLongAnimationFrameProbe()' }
@@ -639,6 +655,7 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     const performanceReport = JSON.parse(text(performanceResult))
     expect(performanceReport).toMatchObject({
       tabId,
+      action: 'measure',
       scope: 'current-visit',
       engine: { name: 'web-vitals', version: '6.1.0' },
       resources: { count: expect.any(Number) },
@@ -648,11 +665,26 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
         count: expect.any(Number),
         frames: expect.any(Array),
         contributors: expect.any(Array)
+      },
+      baseline: { measuredAt: performanceBaseline.measuredAt },
+      comparison: {
+        sameUrl: true,
+        sameEnvironment: true,
+        metrics: expect.any(Array)
       }
     })
     expect(performanceReport.longAnimationFrames.count).toBeGreaterThan(0)
     expect(performanceReport.longAnimationFrames.longestDurationMs).toBeGreaterThanOrEqual(50)
     expect(performanceReport.longAnimationFrames.contributors.length).toBeGreaterThan(0)
+    expect(performanceReport.comparison.metrics.find((metric: { name: string }) => metric.name === 'LOAF_BLOCKING')).toMatchObject({
+      unit: 'ms',
+      direction: 'regressed',
+      baselineValue: expect.any(Number),
+      currentValue: expect.any(Number),
+      delta: expect.any(Number)
+    })
+    expect(performanceReport.comparison.metrics[0]).not.toHaveProperty('value')
+    expect(performanceReport.comparison.metrics[0]).not.toHaveProperty('tolerance')
     expect(performanceReport.caveats).toEqual(expect.arrayContaining([
       expect.stringContaining('local current-visit sample')
     ]))
@@ -671,6 +703,12 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     await expect(performancePanel).toContainText('Long animation frames')
     await expect(performancePanel).toContainText('Top script contributors')
     await expect(performancePanel).toContainText('local sample')
+    await expect(performancePanel).toContainText('Compared with baseline')
+    await expect(performancePanel.getByRole('button', { name: 'Clear baseline' })).toBeVisible()
+    await expect(performancePanel.getByRole('button', { name: 'Replace baseline' })).toBeVisible()
+    await performancePanel.getByRole('button', { name: 'Clear baseline' }).click()
+    await expect(performancePanel.getByRole('button', { name: 'Save baseline' })).toBeVisible()
+    await expect(performancePanel.getByRole('button', { name: 'Clear baseline' })).toBeHidden()
     await performancePanel.getByRole('button', { name: 'Close performance report' }).click()
     await expect(performancePanel).toBeHidden()
 
