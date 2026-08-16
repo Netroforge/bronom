@@ -1947,7 +1947,14 @@ function registerIpc(): void {
     const { tabId, action, collectGarbage } = value as Record<string, unknown>
     if (
       (tabId !== undefined && typeof tabId !== 'string')
-      || (action !== undefined && !['measure', 'set-baseline', 'clear-baseline'].includes(String(action)))
+      || (action !== undefined && ![
+        'measure',
+        'set-baseline',
+        'clear-baseline',
+        'start-allocation-sampling',
+        'stop-allocation-sampling',
+        'clear-allocation-sampling'
+      ].includes(String(action)))
       || (collectGarbage !== undefined && typeof collectGarbage !== 'boolean')
     ) {
       throw new TypeError('Invalid memory options')

@@ -211,7 +211,7 @@ export const BROWSER_TOOL_CATALOG: BrowserToolDefinition[] = [
   { name: 'browser_security', category: 'Inspection', description: 'Inspect the current main document transport, TLS connection, and bounded certificate metadata without returning raw certificates.' },
   { name: 'browser_code_coverage', category: 'Inspection', description: 'Record bounded JavaScript and CSS usage in one group tab and report unused bytes without returning source code.' },
   { name: 'browser_cpu_profile', category: 'Inspection', description: 'Record bounded JavaScript CPU samples in one group tab and report the hottest functions by direct self time without returning source code, arguments, or page content.' },
-  { name: 'browser_memory', category: 'Inspection', description: 'Compare bounded JavaScript heap and DOM counters against a per-tab runtime baseline, optionally after forced garbage collection.' },
+  { name: 'browser_memory', category: 'Inspection', description: 'Compare bounded JavaScript heap and DOM counters against a per-tab runtime baseline, or sample the functions retaining live allocations, without returning object values, source code, or page content.' },
   { name: 'browser_debug_report', category: 'Inspection', description: 'Summarize bounded console and network evidence for one group tab in a copy-ready, security-filtered report.' },
   { name: 'browser_repro', category: 'Inspection', description: 'Start, inspect, stop, clear, or export a privacy-safe human reproduction timeline for one group tab; typed values are never recorded, and Playwright exports require explicit safe test inputs.' },
   { name: 'browser_dom_changes', category: 'Inspection', description: 'Record bounded structural DOM mutations in one group tab without returning page text, markup, IDs, classes, or values.' },
@@ -1143,7 +1143,14 @@ function createBrowserMcpServer(
       description: toolDescription('browser_memory'),
       inputSchema: {
         tabId: z.string().optional(),
-        action: z.enum(['measure', 'set-baseline', 'clear-baseline']).default('measure'),
+        action: z.enum([
+          'measure',
+          'set-baseline',
+          'clear-baseline',
+          'start-allocation-sampling',
+          'stop-allocation-sampling',
+          'clear-allocation-sampling'
+        ]).default('measure'),
         collectGarbage: z.boolean().default(false)
       }
     },
@@ -1153,7 +1160,13 @@ function createBrowserMcpServer(
       collectGarbage
     }: {
       tabId?: string
-      action: 'measure' | 'set-baseline' | 'clear-baseline'
+      action:
+        | 'measure'
+        | 'set-baseline'
+        | 'clear-baseline'
+        | 'start-allocation-sampling'
+        | 'stop-allocation-sampling'
+        | 'clear-allocation-sampling'
       collectGarbage: boolean
     }) => textResult(await manager.memoryReport({ tabId, action, collectGarbage })))
   )

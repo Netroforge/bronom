@@ -206,6 +206,9 @@ export interface BrowserTabState {
   cpuProfileRecording?: {
     startedAt: string
   }
+  memoryAllocationRecording?: {
+    startedAt: string
+  }
   pageProblem?: BrowserPageProblem
   dialog?: BrowserJavaScriptDialog
   mcpGroupId?: string
@@ -944,7 +947,37 @@ export interface BrowserCpuProfileOptions {
   action?: BrowserCpuProfileAction
 }
 
-export type BrowserMemoryAction = 'measure' | 'set-baseline' | 'clear-baseline'
+export type BrowserMemoryAction =
+  | 'measure'
+  | 'set-baseline'
+  | 'clear-baseline'
+  | 'start-allocation-sampling'
+  | 'stop-allocation-sampling'
+  | 'clear-allocation-sampling'
+
+export type BrowserMemoryAllocationStatus = 'idle' | 'recording' | 'complete'
+
+export interface BrowserMemoryAllocationHotspot {
+  functionName: string
+  url?: string
+  lineNumber?: number
+  columnNumber?: number
+  selfBytes: number
+  selfPercent: number
+  samples: number
+}
+
+export interface BrowserMemoryAllocationProfile {
+  startedAt: string
+  stoppedAt: string
+  startedUrl: string
+  currentUrl: string
+  sampledBytes: number
+  sampleCount: number
+  hotspots: BrowserMemoryAllocationHotspot[]
+  truncated: boolean
+  caveats: string[]
+}
 
 export interface BrowserMemoryMeasurement {
   capturedAt: string
@@ -971,6 +1004,12 @@ export interface BrowserMemoryReport {
   baseline?: BrowserMemoryMeasurement
   current?: BrowserMemoryMeasurement
   delta?: BrowserMemoryDelta
+  allocationStatus: BrowserMemoryAllocationStatus
+  allocationRecording?: {
+    startedAt: string
+    startedUrl: string
+  }
+  allocationProfile?: BrowserMemoryAllocationProfile
   caveats: string[]
 }
 

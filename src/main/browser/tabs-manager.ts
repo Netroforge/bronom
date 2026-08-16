@@ -48,6 +48,7 @@ import {
   type CoverageRange
 } from '../../shared/code-coverage.js'
 import { summarizeCpuProfile, type CdpCpuProfile } from '../../shared/cpu-profile.js'
+import { summarizeAllocationProfile, type CdpSamplingHeapProfile } from '../../shared/allocation-profile.js'
 import {
   buildPerformanceComparison,
   normalizePerformanceOptions,
@@ -167,6 +168,7 @@ import type {
   BrowserCpuProfileReport,
   BrowserCpuProfileResult,
   BrowserMemoryDelta,
+  BrowserMemoryAllocationProfile,
   BrowserMemoryMeasurement,
   BrowserMemoryOptions,
   BrowserMemoryReport,
@@ -511,6 +513,7 @@ interface BrowserTab {
   }
   codeCoverage?: BrowserCodeCoverageInternal
   cpuProfile?: BrowserCpuProfileInternal
+  memoryAllocation?: BrowserMemoryAllocationInternal
   reproRecording?: BrowserReproRecordingInternal
   domChangesRecording?: {
     active: boolean
@@ -546,6 +549,14 @@ interface BrowserCpuProfileInternal {
     startedUrl: string
   }
   report?: BrowserCpuProfileReport
+}
+
+interface BrowserMemoryAllocationInternal {
+  recording?: {
+    startedAt: string
+    startedUrl: string
+  }
+  report?: BrowserMemoryAllocationProfile
 }
 
 interface BrowserTabGroup {
@@ -2585,6 +2596,7 @@ export class BrowserTabsManager {
     if (action === 'start') {
       if (tab.codeCoverage?.recording) throw new Error('Code coverage is already recording for this tab')
       if (tab.cpuProfile?.recording) throw new Error('Stop the JavaScript CPU profile before recording code coverage')
+      if (tab.memoryAllocation?.recording) throw new Error('Stop memory allocation sampling before recording code coverage')
       const mode = options.mode ?? 'function'
       if (mode !== 'function' && mode !== 'block') throw new Error('Code coverage mode must be function or block')
       const recording: NonNullable<BrowserCodeCoverageInternal['recording']> = {
@@ -2818,6 +2830,7 @@ export class BrowserTabsManager {
     if (action === 'start') {
       if (tab.cpuProfile?.recording) throw new Error('A JavaScript CPU profile is already recording for this tab')
       if (tab.codeCoverage?.recording) throw new Error('Stop code coverage before recording a JavaScript CPU profile')
+      if (tab.memoryAllocation?.recording) throw new Error('Stop memory allocation sampling before recording a JavaScript CPU profile')
       tab.cpuProfile = {
         recording: {
           startedAt: new Date().toISOString(),
@@ -2910,52 +2923,142 @@ export class BrowserTabsManager {
     const tab = this.getTab(options.tabId)
     if (isBronomHomeUrl(tab.url)) throw new Error('Open a website tab before measuring memory')
     const action = options.action ?? 'measure'
-    const caveats = [
-      'This is one process-local sample; growth alone does not prove a memory leak.',
-      'Compare repeated post-GC measurements after the same interaction for stronger evidence.',
-      'A full navigation clears the baseline because it creates a different document.'
-    ]
+    if (![
+      'measure',
+      'set-baseline',
+      'clear-baseline',
+      'start-allocation-sampling',
+      'stop-allocation-sampling',
+      'clear-allocation-sampling'
+    ].includes(action)) throw new Error('Unsupported memory action')
+
+    if (tab.memoryBaseline && tab.memoryBaseline.url !== tab.url) tab.memoryBaseline = undefined
     if (action === 'clear-baseline') {
       const cleared = Boolean(tab.memoryBaseline)
       tab.memoryBaseline = undefined
-      return {
-        tabId: tab.id,
-        url: tab.url,
-        title: tab.title,
-        action,
-        forcedGarbageCollection: false,
-        cleared,
-        caveats
+      return this.memoryReportResult(tab, action, false, cleared)
+    }
+
+    if (action === 'start-allocation-sampling') {
+      if (tab.memoryAllocation?.recording) throw new Error('Memory allocation sampling is already recording for this tab')
+      if (tab.codeCoverage?.recording) throw new Error('Stop code coverage before recording memory allocations')
+      if (tab.cpuProfile?.recording) throw new Error('Stop the JavaScript CPU profile before recording memory allocations')
+      const current = await this.captureMemoryMeasurement(tab, options.collectGarbage === true)
+      const recording: NonNullable<BrowserMemoryAllocationInternal['recording']> = {
+        startedAt: new Date().toISOString(),
+        startedUrl: tab.url
+      }
+      tab.memoryAllocation = { recording }
+      try {
+        await this.withDebugger(tab.view.webContents, async () => {
+          await tab.view.webContents.debugger.sendCommand('HeapProfiler.enable')
+          await tab.view.webContents.debugger.sendCommand('HeapProfiler.startSampling', {
+            samplingInterval: 32_768,
+            stackDepth: 64
+          })
+        })
+      } catch (error) {
+        tab.memoryAllocation = undefined
+        throw error
+      }
+      this.changed(false)
+      return this.memoryReportResult(tab, action, options.collectGarbage === true, false, current)
+    }
+
+    if (action === 'clear-allocation-sampling') {
+      const cleared = Boolean(tab.memoryAllocation?.recording || tab.memoryAllocation?.report)
+      if (tab.memoryAllocation?.recording) await this.discardMemoryAllocationRecording(tab)
+      tab.memoryAllocation = undefined
+      this.changed(false)
+      return this.memoryReportResult(tab, action, false, cleared)
+    }
+
+    if (action === 'stop-allocation-sampling') {
+      const recording = tab.memoryAllocation?.recording
+      if (!recording) throw new Error('Start memory allocation sampling before stopping it')
+      try {
+        const response = await this.withDebugger(tab.view.webContents, async () => {
+          try {
+            return await tab.view.webContents.debugger.sendCommand('HeapProfiler.stopSampling') as { profile: CdpSamplingHeapProfile }
+          } finally {
+            await tab.view.webContents.debugger.sendCommand('HeapProfiler.disable').catch(() => undefined)
+          }
+        })
+        const summary = summarizeAllocationProfile(response.profile, redactNetworkUrl)
+        tab.memoryAllocation = {
+          report: {
+            startedAt: recording.startedAt,
+            stoppedAt: new Date().toISOString(),
+            startedUrl: redactNetworkUrl(recording.startedUrl),
+            currentUrl: redactNetworkUrl(tab.url),
+            ...summary,
+            caveats: [
+              'Allocation sampling has low overhead but is statistical, so small or short-lived allocations may not appear.',
+              'By default Chromium reports sampled objects still alive when recording stops; repeat the same interaction to confirm a retention pattern.',
+              'Function names and sanitized locations are included, but object contents, values, source code, and page content are never returned.'
+            ]
+          }
+        }
+        const current = await this.captureMemoryMeasurement(tab, false)
+        this.changed(false)
+        return this.memoryReportResult(tab, action, false, false, current)
+      } catch (error) {
+        tab.memoryAllocation = undefined
+        this.changed(false)
+        throw error
       }
     }
-    if (tab.memoryBaseline && tab.memoryBaseline.url !== tab.url) tab.memoryBaseline = undefined
+
     const current = await this.captureMemoryMeasurement(tab, options.collectGarbage === true)
     if (action === 'set-baseline') {
       tab.memoryBaseline = { url: tab.url, measurement: current }
-      return {
-        tabId: tab.id,
-        url: tab.url,
-        title: tab.title,
-        action,
-        forcedGarbageCollection: options.collectGarbage === true,
-        cleared: false,
-        baseline: current,
-        current,
-        caveats
-      }
+      return this.memoryReportResult(tab, action, options.collectGarbage === true, false, current)
     }
-    const baseline = tab.memoryBaseline?.measurement
+    return this.memoryReportResult(tab, action, options.collectGarbage === true, false, current)
+  }
+
+  private memoryReportResult(
+    tab: BrowserTab,
+    action: BrowserMemoryReport['action'],
+    forcedGarbageCollection: boolean,
+    cleared: boolean,
+    current?: BrowserMemoryMeasurement
+  ): BrowserMemoryReport {
+    const baseline = tab.memoryBaseline?.url === tab.url ? tab.memoryBaseline.measurement : undefined
+    const allocationRecording = tab.memoryAllocation?.recording
+    const allocationProfile = tab.memoryAllocation?.report
     return {
       tabId: tab.id,
       url: tab.url,
       title: tab.title,
       action,
-      forcedGarbageCollection: options.collectGarbage === true,
-      cleared: false,
-      ...(baseline ? { baseline, delta: this.memoryDelta(baseline, current) } : {}),
-      current,
-      caveats
+      forcedGarbageCollection,
+      cleared,
+      ...(baseline ? { baseline } : {}),
+      ...(current ? { current } : {}),
+      ...(baseline && current ? { delta: this.memoryDelta(baseline, current) } : {}),
+      allocationStatus: allocationRecording ? 'recording' : allocationProfile ? 'complete' : 'idle',
+      ...(allocationRecording ? {
+        allocationRecording: {
+          startedAt: allocationRecording.startedAt,
+          startedUrl: redactNetworkUrl(allocationRecording.startedUrl)
+        }
+      } : {}),
+      ...(allocationProfile ? { allocationProfile } : {}),
+      caveats: [
+        'This is one process-local sample; growth alone does not prove a memory leak.',
+        'Compare repeated post-GC measurements after the same interaction for stronger evidence.',
+        'A full navigation clears the baseline because it creates a different document.'
+      ]
     }
+  }
+
+  private async discardMemoryAllocationRecording(tab: BrowserTab): Promise<void> {
+    await this.withDebugger(tab.view.webContents, async () => {
+      const webDebugger = tab.view.webContents.debugger
+      await webDebugger.sendCommand('HeapProfiler.stopSampling').catch(() => undefined)
+      await webDebugger.sendCommand('HeapProfiler.disable').catch(() => undefined)
+    }).catch(() => undefined)
   }
 
   private async captureMemoryMeasurement(tab: BrowserTab, collectGarbage: boolean): Promise<BrowserMemoryMeasurement> {
@@ -5004,6 +5107,7 @@ export class BrowserTabsManager {
       tab.networkDebuggerEnabled = false
       if (tab.codeCoverage?.recording) tab.codeCoverage = undefined
       if (tab.cpuProfile?.recording) tab.cpuProfile = undefined
+      if (tab.memoryAllocation?.recording) tab.memoryAllocation = undefined
       this.defaultExecutionContexts.delete(webContents.id)
       this.changed(false)
       if (
@@ -5482,6 +5586,7 @@ export class BrowserTabsManager {
     if (tab.domChangesRecording?.active) return 'A tab recording DOM changes stays active.'
     if (tab.codeCoverage?.recording) return 'A tab recording code coverage stays active.'
     if (tab.cpuProfile?.recording) return 'A tab recording a JavaScript CPU profile stays active.'
+    if (tab.memoryAllocation?.recording) return 'A tab recording memory allocations stays active.'
     if ((this.mcpActivitiesByTab.get(tab.id)?.size ?? 0) > 0) return 'A tab with an active MCP command stays active.'
     if ([...this.downloads.values()].some((download) => download.tabId === tab.id && download.state === 'progressing')) {
       return 'A tab with an active download stays active.'
@@ -5616,6 +5721,11 @@ export class BrowserTabsManager {
       ...(tab.cpuProfile?.recording ? {
         cpuProfileRecording: {
           startedAt: tab.cpuProfile.recording.startedAt
+        }
+      } : {}),
+      ...(tab.memoryAllocation?.recording ? {
+        memoryAllocationRecording: {
+          startedAt: tab.memoryAllocation.recording.startedAt
         }
       } : {}),
       ...(tab.pageProblem ? { pageProblem: { ...tab.pageProblem } } : {}),

@@ -1819,6 +1819,23 @@ button { color: inherit; }
 .memory-details dd { margin: 0; color: var(--text); font-size: 13px; font-weight: 750; font-variant-numeric: tabular-nums; }
 .memory-hint { display: flex; align-items: flex-start; gap: 7px; margin: 14px 0 0; padding: 10px; border-radius: 8px; color: var(--muted); background: var(--accent-soft); font-size: 12px; line-height: 1.45; }
 .memory-hint svg { width: 16px; height: 16px; flex: 0 0 auto; color: var(--accent-text); }
+.memory-allocation-section { margin-top: 14px; overflow: hidden; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--surface-raised); }
+.memory-allocation-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border-bottom: 1px solid var(--border-soft); }
+.memory-allocation-heading > div { display: grid; gap: 3px; }
+.memory-allocation-heading h3 { margin: 0; color: var(--text); font-size: 14px; }
+.memory-allocation-section button { display: inline-flex; min-height: 34px; align-items: center; justify-content: center; gap: 6px; padding: 7px 11px; border: 1px solid var(--border-soft); border-radius: 8px; color: var(--text); background: var(--surface-raised); font: inherit; font-size: 12px; font-weight: 750; cursor: pointer; }
+.memory-allocation-section button.primary { border-color: var(--accent); color: var(--button-text); background: var(--accent); }
+.memory-allocation-section button:hover { filter: brightness(1.04); }
+.memory-allocation-section button svg { width: 16px; height: 16px; }
+.memory-allocation-recording { min-height: 220px; }
+.memory-allocation-summary { padding: 10px; border-bottom: 1px solid var(--border-soft); }
+.memory-allocation-list { max-height: 280px; flex: none; }
+.memory-allocation-actions { display: flex; justify-content: flex-end; padding: 10px 12px; border-top: 1px solid var(--border-soft); }
+.memory-allocation-empty { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 16px 12px; }
+.memory-allocation-empty > svg { width: 26px; height: 26px; color: var(--accent-text); }
+.memory-allocation-empty > div { display: grid; gap: 4px; }
+.memory-allocation-empty strong { color: var(--text); font-size: 13px; }
+.memory-allocation-empty span { color: var(--muted); font-size: 12px; line-height: 1.45; }
 .memory-panel > footer { flex-wrap: wrap; }
 .memory-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 
@@ -2273,6 +2290,9 @@ button { color: inherit; }
 @media (max-width: 720px) {
   .memory-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .memory-details dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .memory-allocation-heading { align-items: stretch; flex-direction: column; }
+  .memory-allocation-empty { grid-template-columns: auto minmax(0, 1fr); }
+  .memory-allocation-empty button { grid-column: 1 / -1; }
   .debug-report-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .inspector-issues-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .network-monitor-tools { align-items: stretch; flex-direction: column; }

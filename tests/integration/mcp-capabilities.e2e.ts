@@ -1000,6 +1000,7 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       tabId,
       action: 'set-baseline',
       forcedGarbageCollection: true,
+      allocationStatus: 'idle',
       baseline: {
         jsHeapUsedBytes: expect.any(Number),
         nodes: expect.any(Number),
@@ -1007,11 +1008,35 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       }
     })
 
+    const allocationStartResult = await client.callTool({
+      name: 'browser_memory',
+      arguments: { tabId, action: 'start-allocation-sampling' }
+    }) as CallToolResult
+    expect(allocationStartResult.isError, text(allocationStartResult)).not.toBe(true)
+    expect(JSON.parse(text(allocationStartResult))).toMatchObject({
+      tabId,
+      action: 'start-allocation-sampling',
+      allocationStatus: 'recording',
+      allocationRecording: { startedAt: expect.any(String) }
+    })
+    const cpuDuringAllocation = await client.callTool({
+      name: 'browser_cpu_profile',
+      arguments: { tabId, action: 'start' }
+    }) as CallToolResult
+    expect(cpuDuringAllocation.isError).toBe(true)
+    expect(text(cpuDuringAllocation)).toContain('Stop memory allocation sampling')
+    const coverageDuringAllocation = await client.callTool({
+      name: 'browser_code_coverage',
+      arguments: { tabId, action: 'start', reload: false }
+    }) as CallToolResult
+    expect(coverageDuringAllocation.isError).toBe(true)
+    expect(text(coverageDuringAllocation)).toContain('Stop memory allocation sampling')
+
     const retainedMemory = await client.callTool({
       name: 'browser_evaluate',
       arguments: {
         tabId,
-        script: `(() => {
+        script: `(function retainMemoryForProfile() {
           const root = document.createElement('section')
           root.id = 'retained-memory-fixture'
           const records = []
@@ -1029,6 +1054,33 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       }
     }) as CallToolResult
     expect(JSON.parse(text(retainedMemory))).toEqual({ nodes: 800, records: 800 })
+
+    const allocationStopResult = await client.callTool({
+      name: 'browser_memory',
+      arguments: { tabId, action: 'stop-allocation-sampling' }
+    }) as CallToolResult
+    expect(allocationStopResult.isError, text(allocationStopResult)).not.toBe(true)
+    const allocationStop = JSON.parse(text(allocationStopResult))
+    expect(allocationStop).toMatchObject({
+      tabId,
+      action: 'stop-allocation-sampling',
+      allocationStatus: 'complete',
+      allocationProfile: {
+        sampledBytes: expect.any(Number),
+        sampleCount: expect.any(Number),
+        hotspots: expect.any(Array)
+      }
+    })
+    expect(allocationStop.allocationProfile.sampledBytes).toBeGreaterThan(0)
+    expect(allocationStop.allocationProfile.hotspots).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        functionName: 'retainMemoryForProfile',
+        selfBytes: expect.any(Number),
+        selfPercent: expect.any(Number)
+      })
+    ]))
+    expect(JSON.stringify(allocationStop.allocationProfile)).not.toContain('retained-memory-fixture')
+    expect(JSON.stringify(allocationStop.allocationProfile)).not.toContain('retained-0')
 
     const memoryMeasurementResult = await client.callTool({
       name: 'browser_memory',
@@ -1051,13 +1103,16 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     expect(memoryMeasurement.delta.eventListeners).toBeGreaterThanOrEqual(800)
     expect(JSON.stringify(memoryMeasurement)).not.toContain('retained-memory-fixture')
 
-    await openPageTool('Measure page memory')
+    await openPageTool(/Page memory:/)
     const memoryPanel = appWindow.getByRole('dialog', { name: 'Page memory' })
     await expect(memoryPanel).toBeVisible()
     await expect(memoryPanel).toContainText('Runtime baseline active')
     await expect(memoryPanel).toContainText('Growth is a clue, not proof of a leak')
+    await expect(memoryPanel).toContainText('Find retained allocations by function')
+    await expect(memoryPanel).toContainText('Sampled live bytes')
+    await expect(memoryPanel).toContainText('retainMemoryForProfile')
     await expect(memoryPanel.getByRole('button', { name: 'GC & measure' })).toBeVisible()
-    await memoryPanel.getByRole('button', { name: 'Clear' }).click()
+    await memoryPanel.getByRole('button', { name: 'Clear', exact: true }).click()
     await expect(memoryPanel).toContainText('Baseline cleared')
     await memoryPanel.getByRole('button', { name: 'Close memory report' }).click()
     await expect(memoryPanel).toBeHidden()

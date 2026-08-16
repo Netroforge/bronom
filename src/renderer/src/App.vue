@@ -891,8 +891,13 @@ const cpuProfileLabel = computed(() => {
 const memoryLabel = computed(() => {
   if (memoryState.value === 'running') return 'Measuring page memory'
   if (memoryState.value === 'error') return 'Memory report needs attention'
+  if (activeTab.value?.memoryAllocationRecording) return 'Sampling live JavaScript allocations'
+  if (memoryReport.value?.allocationProfile) {
+    const hotspot = memoryReport.value.allocationProfile.hotspots[0]
+    return hotspot ? `${hotspot.functionName}: ${formatBytes(hotspot.selfBytes)} retained` : 'Allocation profile complete'
+  }
   if (memoryPanelOpen.value) return 'Close page memory report'
-  return 'Measure page memory'
+  return 'Heap, DOM, and allocation diagnostics'
 })
 const debugReportLabel = computed(() => {
   if (debugReportState.value === 'running') return 'Collecting debug evidence'
@@ -2880,6 +2885,20 @@ watch(
 )
 
 watch(
+  () => activeTab.value?.memoryAllocationRecording?.startedAt,
+  (current, previous) => {
+    if (!current && previous && memoryPanelOpen.value && memoryReport.value?.allocationStatus === 'recording') {
+      memoryReport.value = {
+        ...memoryReport.value,
+        allocationStatus: 'idle',
+        allocationRecording: undefined,
+        allocationProfile: undefined
+      }
+    }
+  }
+)
+
+watch(
   () => [activeTab.value?.id, activeTab.value?.domChangesRecording?.active, activeTab.value?.domChangesRecording?.changeCount] as const,
   ([tabId]) => {
     if (tabId && domChangesPanelOpen.value) void manageDomChanges('get', true)
@@ -3481,6 +3500,28 @@ async function clearMemoryBaseline(): Promise<void> {
   memoryError.value = ''
   try {
     memoryReport.value = await browser.measureMemory({ tabId: tab.id, action: 'clear-baseline' })
+    memoryState.value = 'complete'
+  } catch (error) {
+    memoryState.value = 'error'
+    memoryError.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
+async function manageMemoryAllocation(action: 'start' | 'stop' | 'clear'): Promise<void> {
+  const tab = activeTab.value
+  if (!tab || tab.url.startsWith('bronom://home')) return
+  closeTransientPanels()
+  memoryPanelOpen.value = true
+  memoryState.value = 'running'
+  memoryError.value = ''
+  try {
+    const memoryAction = action === 'start'
+      ? 'start-allocation-sampling'
+      : action === 'stop'
+        ? 'stop-allocation-sampling'
+        : 'clear-allocation-sampling'
+    memoryReport.value = await browser.measureMemory({ tabId: tab.id, action: memoryAction })
+    if (action === 'clear') memoryReport.value = await browser.measureMemory({ tabId: tab.id, action: 'measure' })
     memoryState.value = 'complete'
   } catch (error) {
     memoryState.value = 'error'
@@ -6208,7 +6249,7 @@ onBeforeUnmount(() => {
               <button
                 :class="{ error: memoryState === 'error', running: memoryState === 'running' }"
                 type="button"
-                :aria-label="memoryLabel"
+                :aria-label="`Page memory: ${memoryLabel}`"
                 :disabled="memoryState === 'running'"
                 @click="toggleMemoryReport"
               >
@@ -7392,6 +7433,79 @@ onBeforeUnmount(() => {
             <div><dt>Sample</dt><dd>{{ memoryReport.forcedGarbageCollection ? 'After forced GC' : 'Current state' }}</dd></div>
           </dl>
           <p class="memory-hint"><IconInfo aria-hidden="true" /> Growth is a clue, not proof of a leak. Repeat the same interaction and compare post-GC samples.</p>
+          <section class="memory-allocation-section" aria-labelledby="memory-allocation-title">
+            <div class="memory-allocation-heading">
+              <div>
+                <span class="eyebrow">JavaScript allocation sampling</span>
+                <h3 id="memory-allocation-title">Find retained allocations by function</h3>
+              </div>
+              <button
+                v-if="memoryReport.allocationProfile"
+                type="button"
+                @click="manageMemoryAllocation('clear')"
+              ><IconDelete aria-hidden="true" /> Clear profile</button>
+            </div>
+            <div v-if="memoryReport.allocationStatus === 'recording'" class="coverage-recording memory-allocation-recording" role="status">
+              <IconRecord aria-hidden="true" />
+              <strong>Allocation sampling is recording</strong>
+              <span>Repeat the memory-heavy interaction, then stop to rank functions by sampled live bytes.</span>
+              <small>Started {{ debugTimestamp(memoryReport.allocationRecording?.startedAt || '') }}</small>
+              <button class="primary" type="button" @click="manageMemoryAllocation('stop')"><IconStop aria-hidden="true" /> Stop and show allocations</button>
+            </div>
+            <template v-else-if="memoryReport.allocationProfile">
+              <div class="coverage-summary memory-allocation-summary">
+                <article>
+                  <span>Sampled live bytes</span>
+                  <strong>{{ formatBytes(memoryReport.allocationProfile.sampledBytes) }}</strong>
+                  <small>{{ memoryReport.allocationProfile.sampleCount }} samples</small>
+                </article>
+                <article>
+                  <span>Hot functions</span>
+                  <strong>{{ memoryReport.allocationProfile.hotspots.length }}</strong>
+                  <small v-if="memoryReport.allocationProfile.truncated">Top bounded results</small>
+                  <small v-else>Ranked by retained bytes</small>
+                </article>
+                <article>
+                  <span>Top location</span>
+                  <strong>{{ memoryReport.allocationProfile.hotspots[0]?.selfPercent ?? 0 }}%</strong>
+                  <small>of sampled live bytes</small>
+                </article>
+              </div>
+              <div class="coverage-resource-list memory-allocation-list" role="list" aria-label="JavaScript allocation hotspots">
+                <article v-for="hotspot in memoryReport.allocationProfile.hotspots" :key="`${hotspot.functionName}:${hotspot.url}:${hotspot.lineNumber}:${hotspot.columnNumber}`" role="listitem">
+                  <div>
+                    <span class="coverage-type">JS</span>
+                    <strong>{{ hotspot.functionName }}</strong>
+                    <small v-if="hotspot.url" :title="hotspot.url">{{ hotspot.url }}<template v-if="hotspot.lineNumber">:{{ hotspot.lineNumber }}</template></small>
+                    <small v-else>Browser or anonymous runtime allocation</small>
+                    <small>{{ formatBytes(hotspot.selfBytes) }} sampled live · {{ hotspot.samples }} {{ hotspot.samples === 1 ? 'sample' : 'samples' }}</small>
+                  </div>
+                  <output>{{ hotspot.selfPercent }}%</output>
+                  <div class="coverage-bar" aria-hidden="true"><span :style="{ width: `${hotspot.selfPercent}%` }" /></div>
+                </article>
+                <div v-if="!memoryReport.allocationProfile.hotspots.length" class="network-monitor-empty compact">
+                  <IconMemory aria-hidden="true" />
+                  <strong>No retained allocation hotspot was sampled</strong>
+                  <span>Record a longer memory-heavy interaction and try again.</span>
+                </div>
+              </div>
+              <details class="coverage-caveats">
+                <summary>How to interpret allocation sampling</summary>
+                <ul><li v-for="caveat in memoryReport.allocationProfile.caveats" :key="caveat">{{ caveat }}</li></ul>
+              </details>
+              <div class="memory-allocation-actions">
+                <button class="primary" type="button" @click="manageMemoryAllocation('start')"><IconRecord aria-hidden="true" /> Record again</button>
+              </div>
+            </template>
+            <div v-else class="memory-allocation-empty">
+              <IconMemory aria-hidden="true" />
+              <div>
+                <strong>Locate functions retaining JavaScript memory</strong>
+                <span>Start sampling, reproduce one interaction, then stop. Object values and page content never leave the profiler.</span>
+              </div>
+              <button class="primary" type="button" @click="manageMemoryAllocation('start')"><IconRecord aria-hidden="true" /> Start sampling</button>
+            </div>
+          </section>
         </div>
       </template>
       <div v-else class="accessibility-audit-empty">
