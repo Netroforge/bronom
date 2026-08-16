@@ -595,6 +595,10 @@ const networkRouteStatus = ref(200)
 const networkRouteHeaders = ref('')
 const networkRouteBody = ref('')
 let networkContentSearchSequence = 0
+let networkMonitorRequestSequence = 0
+let networkRouteRequestSequence = 0
+let networkRouteMutationSequence = 0
+let networkRequestDetailsSequence = 0
 if (detachedPanelId === 'site-controls') siteControlsOpen.value = true
 else if (detachedPanelId === 'site-storage') siteStorageOpen.value = true
 else if (detachedPanelId === 'page-tools') pageToolsOpen.value = true
@@ -2503,8 +2507,12 @@ async function resetEnvironment(): Promise<void> {
 }
 
 async function clearActiveNetworkRoutes(): Promise<void> {
-  if (!activeTab.value?.networkRouteCount) return
-  await syncState(browser.clearNetworkRoutes(activeTab.value.id))
+  const tab = activeTab.value
+  if (!tab?.networkRouteCount) return
+  const requestSequence = ++networkRouteMutationSequence
+  const nextState = await browser.clearNetworkRoutes(tab.id)
+  if (requestSequence !== networkRouteMutationSequence || activeTab.value?.id !== tab.id) return
+  state.value = nextState
   networkRoutes.value = []
   networkRouteState.value = 'ready'
 }
@@ -2781,9 +2789,10 @@ watch(
     if (!isDetachedPanelWindow) memoryPanelOpen.value = false
     memoryReport.value = null
     memoryState.value = 'idle'
-    if (!isDetachedPanelWindow) consolePanelOpen.value = false
-    consoleMessages.value = []
-    consoleState.value = 'idle'
+    resetConsoleView(true)
+    if (isDetachedPanelWindow && consolePanelOpen.value && url && !url.startsWith('bronom://home')) {
+      void refreshConsole()
+    }
     if (!isDetachedPanelWindow) debugReportPanelOpen.value = false
     debugReport.value = null
     debugReportState.value = 'idle'
@@ -2799,19 +2808,7 @@ watch(
     if (!isDetachedPanelWindow) inspectorIssuesOpen.value = false
     inspectorIssuesReport.value = null
     inspectorIssuesState.value = 'idle'
-    if (!isDetachedPanelWindow) networkMonitorOpen.value = false
-    networkRequests.value = []
-    networkRequestDetails.value = null
-    networkSelectedRequestId.value = null
-    networkMonitorState.value = 'idle'
-    resetNetworkReplayFeedback()
-    networkContentSearchSequence += 1
-    networkContentSearchResult.value = null
-    networkContentSearchState.value = 'idle'
-    networkContentSearchError.value = ''
-    networkRoutes.value = []
-    networkRouteState.value = 'idle'
-    networkRouteError.value = ''
+    resetNetworkMonitorView(true)
     if (isDetachedPanelWindow && networkMonitorOpen.value && url && !url.startsWith('bronom://home')) {
       void Promise.all([refreshNetworkMonitor(), refreshNetworkRoutes()])
     }
@@ -2877,11 +2874,9 @@ watch(
     memoryReport.value = null
     memoryState.value = 'idle'
     memoryError.value = ''
-    if (consolePanelOpen.value) {
-      consoleMessages.value = []
-      consoleState.value = 'idle'
-      if (!isDetachedPanelWindow) consolePanelOpen.value = false
-      else void refreshConsole()
+    resetConsoleView(true)
+    if (isDetachedPanelWindow && consolePanelOpen.value && tab && !tab.url.startsWith('bronom://home')) {
+      void refreshConsole()
     }
     if (debugReportPanelOpen.value && debugReport.value?.tabId !== tabId) debugReportPanelOpen.value = false
     debugReport.value = null
@@ -2903,11 +2898,10 @@ watch(
     inspectorIssuesReport.value = null
     inspectorIssuesState.value = 'idle'
     inspectorIssuesError.value = ''
-    if (networkMonitorOpen.value && networkRequestDetails.value && networkRequestDetails.value.id !== networkSelectedRequestId.value) {
-      networkRequestDetails.value = null
+    resetNetworkMonitorView(true)
+    if (isDetachedPanelWindow && networkMonitorOpen.value && tab && !tab.url.startsWith('bronom://home')) {
+      void Promise.all([refreshNetworkMonitor(), refreshNetworkRoutes()])
     }
-    if (networkMonitorOpen.value) networkMonitorOpen.value = false
-    if (networkContentSearchOpen.value) closeNetworkContentSearch()
     if (responsivePanelOpen.value) responsivePanelOpen.value = false
     if (environmentPanelOpen.value) {
       if (!isDetachedPanelWindow) environmentPanelOpen.value = false
@@ -3775,9 +3769,48 @@ function networkTimingPercent(value: number, timing: BrowserNetworkRequestDetail
   return Math.max(value > 0 ? 2 : 0, Math.min(100, value / scale * 100))
 }
 
+function resetConsoleView(closePanel = false): void {
+  consoleRequestSequence += 1
+  if (closePanel && !isDetachedPanelWindow) consolePanelOpen.value = false
+  consoleMessages.value = []
+  consoleState.value = 'idle'
+  consoleError.value = ''
+  consoleCopied.value = null
+  consoleCopiedEntryKey.value = null
+}
+
+function resetNetworkMonitorView(closePanel = false): void {
+  networkMonitorRequestSequence += 1
+  networkRouteRequestSequence += 1
+  networkRouteMutationSequence += 1
+  networkRequestDetailsSequence += 1
+  networkContentSearchSequence += 1
+  if (closePanel && !isDetachedPanelWindow) networkMonitorOpen.value = false
+  networkRequests.value = []
+  networkMonitorState.value = 'idle'
+  networkMonitorError.value = ''
+  networkRequestDetails.value = null
+  networkSelectedRequestId.value = null
+  networkRequestDetailsLoading.value = false
+  networkDetailsCopied.value = null
+  resetNetworkReplayFeedback()
+  networkContentSearchOpen.value = false
+  networkContentSearchState.value = 'idle'
+  networkContentSearchResult.value = null
+  networkContentSearchError.value = ''
+  networkHarCopied.value = false
+  networkHarSaveState.value = 'idle'
+  networkHarExport.value = null
+  networkRoutes.value = []
+  networkRouteState.value = 'idle'
+  networkRouteError.value = ''
+  resetNetworkRouteDraft()
+}
+
 async function refreshNetworkMonitor(clear = false): Promise<void> {
   const tab = activeTab.value
   if (!tab || tab.url.startsWith('bronom://home')) return
+  const requestSequence = ++networkMonitorRequestSequence
   networkMonitorState.value = 'loading'
   networkMonitorError.value = ''
   networkHarCopied.value = false
@@ -3793,7 +3826,7 @@ async function refreshNetworkMonitor(clear = false): Promise<void> {
   }
   try {
     const requests = await browser.listNetworkRequests(tab.id, clear)
-    if (activeTab.value?.id !== tab.id) return
+    if (requestSequence !== networkMonitorRequestSequence || activeTab.value?.id !== tab.id) return
     networkRequests.value = requests
     networkMonitorState.value = 'ready'
     if (networkSelectedRequestId.value && !requests.some((request) => request.id === networkSelectedRequestId.value)) {
@@ -3801,6 +3834,7 @@ async function refreshNetworkMonitor(clear = false): Promise<void> {
       networkRequestDetails.value = null
     }
   } catch (error) {
+    if (requestSequence !== networkMonitorRequestSequence || activeTab.value?.id !== tab.id) return
     networkMonitorState.value = 'error'
     networkMonitorError.value = error instanceof Error ? error.message : String(error)
   }
@@ -3829,6 +3863,7 @@ async function refreshConsole(clear = false, silent = false): Promise<void> {
     consoleMessages.value = messages
     consoleState.value = 'ready'
   } catch (error) {
+    if (requestSequence !== consoleRequestSequence || activeTab.value?.id !== tab.id) return
     consoleState.value = 'error'
     consoleError.value = error instanceof Error ? error.message : String(error)
   }
@@ -3909,14 +3944,16 @@ function toggleNetworkMonitor(): void {
 async function refreshNetworkRoutes(silent = false): Promise<void> {
   const tab = activeTab.value
   if (!tab || tab.url.startsWith('bronom://home')) return
+  const requestSequence = ++networkRouteRequestSequence
   if (!silent) networkRouteState.value = 'loading'
   networkRouteError.value = ''
   try {
     const routes = await browser.listNetworkRoutes(tab.id)
-    if (activeTab.value?.id !== tab.id) return
+    if (requestSequence !== networkRouteRequestSequence || activeTab.value?.id !== tab.id) return
     networkRoutes.value = routes
     networkRouteState.value = 'ready'
   } catch (error) {
+    if (requestSequence !== networkRouteRequestSequence || activeTab.value?.id !== tab.id) return
     networkRouteState.value = 'error'
     networkRouteError.value = error instanceof Error ? error.message : String(error)
   }
@@ -3959,6 +3996,7 @@ function resetNetworkRouteDraft(): void {
 async function addNetworkRouteFromDraft(): Promise<void> {
   const tab = activeTab.value
   if (!tab) return
+  const requestSequence = ++networkRouteMutationSequence
   networkRouteState.value = 'saving'
   networkRouteError.value = ''
   try {
@@ -3980,12 +4018,16 @@ async function addNetworkRouteFromDraft(): Promise<void> {
             }
           } : {})
     }
-    networkRoutes.value = await browser.addNetworkRoute(tab.id, input)
-    if (activeTab.value?.id !== tab.id) return
-    await syncState(browser.getState())
+    const routes = await browser.addNetworkRoute(tab.id, input)
+    if (requestSequence !== networkRouteMutationSequence || activeTab.value?.id !== tab.id) return
+    const nextState = await browser.getState()
+    if (requestSequence !== networkRouteMutationSequence || activeTab.value?.id !== tab.id) return
+    networkRoutes.value = routes
+    state.value = nextState
     resetNetworkRouteDraft()
     networkRouteState.value = 'ready'
   } catch (error) {
+    if (requestSequence !== networkRouteMutationSequence || activeTab.value?.id !== tab.id) return
     networkRouteState.value = 'error'
     networkRouteError.value = error instanceof Error ? error.message : String(error)
   }
@@ -3994,14 +4036,19 @@ async function addNetworkRouteFromDraft(): Promise<void> {
 async function removeNetworkRoute(routeId: string): Promise<void> {
   const tab = activeTab.value
   if (!tab) return
+  const requestSequence = ++networkRouteMutationSequence
   networkRouteState.value = 'saving'
   networkRouteError.value = ''
   try {
-    networkRoutes.value = await browser.removeNetworkRoute(tab.id, routeId)
-    if (activeTab.value?.id !== tab.id) return
-    await syncState(browser.getState())
+    const routes = await browser.removeNetworkRoute(tab.id, routeId)
+    if (requestSequence !== networkRouteMutationSequence || activeTab.value?.id !== tab.id) return
+    const nextState = await browser.getState()
+    if (requestSequence !== networkRouteMutationSequence || activeTab.value?.id !== tab.id) return
+    networkRoutes.value = routes
+    state.value = nextState
     networkRouteState.value = 'ready'
   } catch (error) {
+    if (requestSequence !== networkRouteMutationSequence || activeTab.value?.id !== tab.id) return
     networkRouteState.value = 'error'
     networkRouteError.value = error instanceof Error ? error.message : String(error)
   }
@@ -4010,13 +4057,16 @@ async function removeNetworkRoute(routeId: string): Promise<void> {
 async function moveNetworkRoute(routeId: string, direction: 'up' | 'down'): Promise<void> {
   const tab = activeTab.value
   if (!tab) return
+  const requestSequence = ++networkRouteMutationSequence
   networkRouteState.value = 'saving'
   networkRouteError.value = ''
   try {
-    networkRoutes.value = await browser.moveNetworkRoute(tab.id, routeId, direction)
-    if (activeTab.value?.id !== tab.id) return
+    const routes = await browser.moveNetworkRoute(tab.id, routeId, direction)
+    if (requestSequence !== networkRouteMutationSequence || activeTab.value?.id !== tab.id) return
+    networkRoutes.value = routes
     networkRouteState.value = 'ready'
   } catch (error) {
+    if (requestSequence !== networkRouteMutationSequence || activeTab.value?.id !== tab.id) return
     networkRouteState.value = 'error'
     networkRouteError.value = error instanceof Error ? error.message : String(error)
   }
@@ -4025,6 +4075,7 @@ async function moveNetworkRoute(routeId: string, direction: 'up' | 'down'): Prom
 async function selectNetworkRequest(request: BrowserNetworkRequest): Promise<void> {
   const tab = activeTab.value
   if (!tab) return
+  const requestSequence = ++networkRequestDetailsSequence
   networkSelectedRequestId.value = request.id
   networkRequestDetails.value = null
   networkDetailsCopied.value = null
@@ -4033,13 +4084,20 @@ async function selectNetworkRequest(request: BrowserNetworkRequest): Promise<voi
   networkMonitorError.value = ''
   try {
     const details = await browser.getNetworkRequestDetails(tab.id, request.id, 20_000)
-    if (activeTab.value?.id === tab.id && networkSelectedRequestId.value === request.id) {
+    if (
+      requestSequence === networkRequestDetailsSequence
+      && activeTab.value?.id === tab.id
+      && networkSelectedRequestId.value === request.id
+    ) {
       networkRequestDetails.value = details
     }
   } catch (error) {
+    if (requestSequence !== networkRequestDetailsSequence || activeTab.value?.id !== tab.id) return
     networkMonitorError.value = error instanceof Error ? error.message : String(error)
   } finally {
-    networkRequestDetailsLoading.value = false
+    if (requestSequence === networkRequestDetailsSequence && activeTab.value?.id === tab.id) {
+      networkRequestDetailsLoading.value = false
+    }
   }
 }
 
@@ -4129,7 +4187,7 @@ async function runNetworkContentSearch(): Promise<void> {
     networkContentSearchResult.value = result
     networkContentSearchState.value = 'complete'
   } catch (error) {
-    if (sequence !== networkContentSearchSequence) return
+    if (sequence !== networkContentSearchSequence || activeTab.value?.id !== tab.id) return
     networkContentSearchState.value = 'error'
     networkContentSearchError.value = error instanceof Error ? error.message : String(error)
   }
@@ -4174,10 +4232,13 @@ async function copySanitizedNetworkHar(): Promise<void> {
       includeBodies: false,
       maxRequests: 100
     })
+    if (activeTab.value?.id !== tab.id) return
     if (!await copyAppText(JSON.stringify(har, null, 2))) return
+    if (activeTab.value?.id !== tab.id) return
     networkHarCopied.value = true
     window.setTimeout(() => (networkHarCopied.value = false), 1_500)
   } catch (error) {
+    if (activeTab.value?.id !== tab.id) return
     networkMonitorError.value = error instanceof Error ? error.message : String(error)
   }
 }
@@ -4189,7 +4250,7 @@ async function saveSanitizedNetworkHar(): Promise<void> {
   networkHarSaveState.value = 'saving'
   networkHarExport.value = null
   try {
-    networkHarExport.value = await browser.saveNetworkHar({
+    const exported = await browser.saveNetworkHar({
       tabId: tab.id,
       query: networkSearch.value,
       resourceType: networkResourceFilter.value || undefined,
@@ -4197,11 +4258,14 @@ async function saveSanitizedNetworkHar(): Promise<void> {
       includeBodies: false,
       maxRequests: 100
     })
+    if (activeTab.value?.id !== tab.id) return
+    networkHarExport.value = exported
     networkHarSaveState.value = 'saved'
     window.setTimeout(() => {
       if (networkHarSaveState.value === 'saved') networkHarSaveState.value = 'idle'
     }, 2_500)
   } catch (error) {
+    if (activeTab.value?.id !== tab.id) return
     networkHarSaveState.value = 'idle'
     networkMonitorError.value = error instanceof Error ? error.message : String(error)
   }

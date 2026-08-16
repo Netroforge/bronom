@@ -2256,6 +2256,32 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     expect(savedHarText).not.toContain('request-secret')
     await networkPanel.getByRole('button', { name: 'Close network monitor' }).click()
 
+    await client.callTool({
+      name: 'browser_evaluate',
+      arguments: { tabId, script: "console.error('first-tab-console-only')" }
+    })
+    await openPageTool('Open Console')
+    const isolatedConsolePanel = appWindow.getByRole('dialog', { name: 'Console' })
+    await expect(isolatedConsolePanel).toContainText('first-tab-console-only')
+    const diagnosticsIsolationTabResult = await client.callTool({
+      name: 'browser_new_tab',
+      arguments: { url: `http://127.0.0.1:${address.port}/`, active: true }
+    }) as CallToolResult
+    expect(diagnosticsIsolationTabResult.isError, text(diagnosticsIsolationTabResult)).not.toBe(true)
+    const diagnosticsIsolationTabId = JSON.parse(text(diagnosticsIsolationTabResult)).activeTabId as string
+    await client.callTool({ name: 'browser_wait', arguments: { tabId: diagnosticsIsolationTabId } })
+    await expect(isolatedConsolePanel).toBeHidden()
+    await openPageTool('Open Console')
+    await expect(isolatedConsolePanel).not.toContainText('first-tab-console-only')
+    await isolatedConsolePanel.getByRole('button', { name: 'Close Console' }).click()
+
+    await openPageTool('Open network monitor')
+    expect(await networkPanel.getByText('network-detail-42', { exact: true }).count()).toBe(0)
+    await expect(networkPanel).not.toContainText('network-detail-42')
+    await networkPanel.getByRole('button', { name: 'Close network monitor' }).click()
+    await client.callTool({ name: 'browser_close_tab', arguments: { tabId: diagnosticsIsolationTabId } })
+    await client.callTool({ name: 'browser_select_tab', arguments: { tabId } })
+
     const debugReportResult = await client.callTool({
       name: 'browser_debug_report',
       arguments: { tabId, maxConsoleMessages: 20, maxNetworkRequests: 20 }
