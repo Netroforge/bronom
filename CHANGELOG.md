@@ -4,12 +4,24 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-16
+
 ### Added
 
 - Save a volatile per-tab Page performance baseline from the human panel or `browser_performance`, then compare later local samples across Web Vitals, load time, transferred bytes, long-task blocking, and Long Animation Frame blocking with explicit URL and browser-environment compatibility warnings.
 - Surface the 50 most recent sanitized `performance.mark()` and `performance.measure()` entries in Page performance and `browser_performance`, including start time and duration while omitting arbitrary detail objects, stacks, and source code.
 - Explain CLS with the highest-scoring unexpected layout-shift events, timings, and bounded affected-element selectors in Page performance and MCP while separately counting shifts excluded after recent input.
 - Pause or slow document-timeline CSS transitions, CSS Animations, and Web Animations per tab from Environment or `browser_emulate`, with 10%, 25%, and normal playback controls that survive reloads.
+- Activate, validate, and deactivate Creem commercial licenses from Bronom Settings without embedding provider credentials in the desktop application.
+- Store the commercial license and installation identity in operating-system secure storage, with up to three active devices per named-user seat.
+
+### Changed
+
+- Validate commercial access periodically against the subscription entitlement and direct customers to the Creem Customer Portal for subscription management.
+
+### Fixed
+
+- Treat immediate cancellations as ending commercial access immediately while scheduled cancellations remain active only through Creem's stated effective date.
 
 ## [1.1.0] - 2026-08-16
 
