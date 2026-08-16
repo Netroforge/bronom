@@ -1757,6 +1757,17 @@ test('shows a native webpage context menu and suppresses it while human interact
     await expect(actionFailure).toContainText('The tab is no longer available')
     await expect(actionFailure).not.toContainText(staleTabId)
 
+    await electronApp.evaluate(() => {
+      const menu = (globalThis as typeof globalThis & { __bronomContextMenu?: Electron.Menu }).__bronomContextMenu
+      const item = menu?.getMenuItemById('save-link')
+      if (!item?.click) throw new Error('Save Link context action was not found')
+      ;(item.click as unknown as () => void)()
+    })
+    const saveFailure = appWindow.getByRole('alert', { name: 'Save link failed' })
+    await expect(saveFailure).toBeVisible()
+    await expect(saveFailure).toContainText('The tab is no longer available')
+    await expect(saveFailure).not.toContainText(staleTabId)
+
     await appWindow.evaluate(`window.bronom.newTab({ url: ${JSON.stringify(url)}, active: true })`)
     await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.find((tab) => tab.active)?.title)')).toBe('Context menu fixture')
 

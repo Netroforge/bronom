@@ -4886,8 +4886,20 @@ export class BrowserTabsManager {
     const webContents = tab.view.webContents
     if (webContents.isDestroyed()) return
     const groups: MenuItemConstructorOptions[][] = []
-    const withLiveContents = (action: () => void): (() => void) => () => {
-      if (!webContents.isDestroyed()) action()
+    const reportActionFailure = (action: string, error: unknown): void => {
+      console.error(`[browser] Could not ${action} from page context menu:`, error)
+      this.options.onActionFailed?.(action, error)
+    }
+    const withLiveContents = (actionName: string, action: () => void): (() => void) => () => {
+      if (webContents.isDestroyed()) {
+        reportActionFailure(actionName, new Error('The tab is no longer available.'))
+        return
+      }
+      try {
+        action()
+      } catch (error) {
+        reportActionFailure(actionName, error)
+      }
     }
     const openBackgroundTab = (url: string): void => {
       void this.createTab({ url, active: false, mcpGroupId: tab.mcpGroupId })
@@ -4926,7 +4938,7 @@ export class BrowserTabsManager {
           id: 'save-link',
           label: 'Save Link',
           enabled: webLink,
-          click: withLiveContents(() => webContents.downloadURL(params.linkURL))
+          click: withLiveContents('save link', () => webContents.downloadURL(params.linkURL))
         }
       ])
     }
@@ -4954,7 +4966,7 @@ export class BrowserTabsManager {
           id: 'save-image',
           label: 'Save Image',
           enabled: isWebUrl(params.srcURL),
-          click: withLiveContents(() => webContents.downloadURL(params.srcURL))
+          click: withLiveContents('save image', () => webContents.downloadURL(params.srcURL))
         }
       ])
     }
@@ -4964,29 +4976,29 @@ export class BrowserTabsManager {
         const spellingItems: MenuItemConstructorOptions[] = params.dictionarySuggestions.slice(0, 5).map((suggestion, index) => ({
           id: `spelling-suggestion-${index}`,
           label: suggestion,
-          click: withLiveContents(() => webContents.replaceMisspelling(suggestion))
+          click: withLiveContents('replace misspelling', () => webContents.replaceMisspelling(suggestion))
         }))
         spellingItems.push({
           id: 'add-to-dictionary',
           label: `Add “${params.misspelledWord}” to Dictionary`,
-          click: withLiveContents(() => { webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord) })
+          click: withLiveContents('add word to dictionary', () => { webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord) })
         })
         groups.push(spellingItems)
       }
       groups.push([
-        { id: 'undo', label: 'Undo', enabled: params.editFlags.canUndo, click: withLiveContents(() => webContents.undo()) },
-        { id: 'redo', label: 'Redo', enabled: params.editFlags.canRedo, click: withLiveContents(() => webContents.redo()) },
+        { id: 'undo', label: 'Undo', enabled: params.editFlags.canUndo, click: withLiveContents('undo', () => webContents.undo()) },
+        { id: 'redo', label: 'Redo', enabled: params.editFlags.canRedo, click: withLiveContents('redo', () => webContents.redo()) },
         { type: 'separator' },
-        { id: 'cut', label: 'Cut', enabled: params.editFlags.canCut, click: withLiveContents(() => webContents.cut()) },
-        { id: 'copy', label: 'Copy', enabled: params.editFlags.canCopy, click: withLiveContents(() => webContents.copy()) },
-        { id: 'paste', label: 'Paste', enabled: params.editFlags.canPaste, click: withLiveContents(() => webContents.paste()) },
-        { id: 'paste-and-match-style', label: 'Paste and Match Style', enabled: params.editFlags.canPaste, click: withLiveContents(() => webContents.pasteAndMatchStyle()) },
-        { id: 'delete', label: 'Delete', enabled: params.editFlags.canDelete, click: withLiveContents(() => webContents.delete()) },
+        { id: 'cut', label: 'Cut', enabled: params.editFlags.canCut, click: withLiveContents('cut', () => webContents.cut()) },
+        { id: 'copy', label: 'Copy', enabled: params.editFlags.canCopy, click: withLiveContents('copy', () => webContents.copy()) },
+        { id: 'paste', label: 'Paste', enabled: params.editFlags.canPaste, click: withLiveContents('paste', () => webContents.paste()) },
+        { id: 'paste-and-match-style', label: 'Paste and Match Style', enabled: params.editFlags.canPaste, click: withLiveContents('paste and match style', () => webContents.pasteAndMatchStyle()) },
+        { id: 'delete', label: 'Delete', enabled: params.editFlags.canDelete, click: withLiveContents('delete', () => webContents.delete()) },
         { type: 'separator' },
-        { id: 'select-all', label: 'Select All', enabled: params.editFlags.canSelectAll, click: withLiveContents(() => webContents.selectAll()) }
+        { id: 'select-all', label: 'Select All', enabled: params.editFlags.canSelectAll, click: withLiveContents('select all', () => webContents.selectAll()) }
       ])
     } else if (params.selectionText) {
-      groups.push([{ id: 'copy-selection', label: 'Copy', click: withLiveContents(() => webContents.copy()) }])
+      groups.push([{ id: 'copy-selection', label: 'Copy', click: withLiveContents('copy selection', () => webContents.copy()) }])
     }
 
     const navigation = webContents.navigationHistory
