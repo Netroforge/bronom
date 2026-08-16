@@ -1784,6 +1784,96 @@ test('shows a native webpage context menu and suppresses it while human interact
   }
 })
 
+test('preserves intercepted new-tab requests and background disposition', async ({ appWindow, electronApp }) => {
+  let received: { method?: string; body: string; contentType?: string; referrer?: string } | undefined
+  let backgroundReferrer: string | undefined
+  const server = createServer((request, response) => {
+    if (request.url === '/submit') {
+      const chunks: Buffer[] = []
+      request.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
+      request.on('end', () => {
+        received = {
+          method: request.method,
+          body: Buffer.concat(chunks).toString('utf8'),
+          contentType: request.headers['content-type'],
+          referrer: request.headers.referer
+        }
+        response.writeHead(200, { 'content-type': 'text/html' })
+        response.end('<!doctype html><title>POST received</title><h1>Submitted</h1>')
+      })
+      return
+    }
+    if (request.url === '/background') {
+      backgroundReferrer = request.headers.referer
+      response.writeHead(200, { 'content-type': 'text/html' })
+      response.end('<!doctype html><title>Background opened</title><h1>Background tab</h1>')
+      return
+    }
+    response.writeHead(200, { 'content-type': 'text/html' })
+    response.end(`<!doctype html>
+      <title>Target blank form</title>
+      <form id="post-form" method="post" action="/submit" target="_blank">
+        <input name="message" value="agent workspace">
+        <input name="count" value="2">
+        <button type="submit">Submit in new tab</button>
+      </form>
+      <a id="background-link" href="/background" target="_blank">Open in background</a>`)
+  })
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => resolve())
+  })
+
+  try {
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('Test server did not expose a TCP port')
+    const url = `http://127.0.0.1:${address.port}/form`
+    await appWindow.evaluate(`window.bronom.newTab({ url: ${JSON.stringify(url)}, active: true })`)
+    await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.find((tab) => tab.active)?.title)'))
+      .toBe('Target blank form')
+
+    await electronApp.evaluate(async ({ webContents }, requestedUrl) => {
+      const page = webContents.getAllWebContents().find((contents) => contents.getURL() === requestedUrl)
+      if (!page) throw new Error('Form fixture web contents was not found')
+      await page.executeJavaScript(`document.querySelector('#post-form').requestSubmit()`)
+    }, url)
+
+    await expect.poll(() => received).toMatchObject({
+      method: 'POST',
+      body: 'message=agent+workspace&count=2',
+      contentType: expect.stringContaining('application/x-www-form-urlencoded'),
+      referrer: url
+    })
+    await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.find((tab) => tab.active)?.title)'))
+      .toBe('POST received')
+
+    const formTabId = await appWindow.evaluate(`window.bronom.getState().then((state) => state.tabs.find((tab) => tab.url === ${JSON.stringify(url)})?.id)`) as string
+    await appWindow.evaluate(`window.bronom.selectTab(${JSON.stringify(formTabId)})`)
+    await electronApp.evaluate(async ({ webContents }, requestedUrl) => {
+      const page = webContents.getAllWebContents().find((contents) => contents.getURL() === requestedUrl)
+      if (!page) throw new Error('Form fixture web contents was not found')
+      const point = await page.executeJavaScript(`(() => {
+        const bounds = document.querySelector('#background-link').getBoundingClientRect()
+        return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }
+      })()`)
+      page.focus()
+      page.sendInputEvent({ type: 'mouseDown', button: 'middle', clickCount: 1, ...point })
+      page.sendInputEvent({ type: 'mouseUp', button: 'middle', clickCount: 1, ...point })
+    }, url)
+
+    const backgroundUrl = `http://127.0.0.1:${address.port}/background`
+    await expect.poll(() => appWindow.evaluate('window.bronom.getState()')).toMatchObject({
+      activeTabId: formTabId,
+      tabs: expect.arrayContaining([
+        expect.objectContaining({ url: backgroundUrl, title: 'Background opened', active: false })
+      ])
+    })
+    expect(backgroundReferrer).toBe(url)
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+})
+
 test('shows live download progress with cancel, clear, and reveal-in-folder actions', async ({
   appWindow,
   electronApp,

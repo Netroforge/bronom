@@ -14,9 +14,12 @@ import {
   WebContentsView,
   type ContextMenuParams,
   type DownloadItem,
+  type LoadURLOptions,
   type MenuItemConstructorOptions,
   type NavigationEntry,
+  type PostBody,
   type Rectangle,
+  type Referrer,
   type Session,
   type WebContents
 } from 'electron'
@@ -387,6 +390,20 @@ function isWebUrl(url: string): boolean {
   } catch {
     return false
   }
+}
+
+function interceptedWindowLoadOptions(postBody: PostBody | undefined, referrer: Referrer): LoadURLOptions | undefined {
+  const options: LoadURLOptions = {}
+  if (referrer.url) options.httpReferrer = referrer
+  if (postBody) {
+    const contentType = postBody.boundary
+      ? `${postBody.contentType}; boundary=${postBody.boundary}`
+      : postBody.contentType
+    validateHeaderValue('Content-Type', contentType)
+    options.postData = postBody.data
+    options.extraHeaders = `Content-Type: ${contentType}`
+  }
+  return Object.keys(options).length ? options : undefined
 }
 
 function headerValue(headers: Record<string, string | string[] | undefined> | undefined, name: string): string | undefined {
@@ -4404,6 +4421,7 @@ export class BrowserTabsManager {
     humanInteractionLocked?: boolean
     suppressInitialHistory?: boolean
     navigationHistory?: { entries: NavigationEntry[]; index: number }
+    loadOptions?: LoadURLOptions
     active: boolean
     mcpGroupId?: string
   }): Promise<BrowserTab> {
@@ -4464,7 +4482,7 @@ export class BrowserTabsManager {
     if (options.active || !this.activeTabId) this.selectTab(id)
     const loading = options.navigationHistory
       ? view.webContents.navigationHistory.restore(options.navigationHistory)
-      : view.webContents.loadURL(url)
+      : view.webContents.loadURL(url, options.loadOptions)
     void loading.catch((error: unknown) => {
       if (isAbortedLoad(error)) return
       tab.loading = false
@@ -4866,9 +4884,22 @@ export class BrowserTabsManager {
       tab.pageProblem = undefined
       this.changed(false)
     })
-    webContents.setWindowOpenHandler(({ url }) => {
+    webContents.setWindowOpenHandler(({ url, disposition, postBody, referrer }) => {
       if (tab.mcpGroupId && isBronomHomeUrl(url)) return { action: 'deny' }
-      void this.createTab({ url, active: true, mcpGroupId: tab.mcpGroupId })
+      let loadOptions: LoadURLOptions | undefined
+      try {
+        loadOptions = interceptedWindowLoadOptions(postBody, referrer)
+      } catch (error) {
+        console.error(`[browser] Could not preserve the requested page navigation to ${url}:`, error)
+        this.options.onActionFailed?.('open page in new tab', error)
+        return { action: 'deny' }
+      }
+      void this.createTab({
+        url,
+        active: disposition !== 'background-tab',
+        mcpGroupId: tab.mcpGroupId,
+        loadOptions
+      })
         .catch((error) => {
           console.error(`[browser] Could not open requested page ${url}:`, error)
           this.options.onActionFailed?.('open page in new tab', error)
