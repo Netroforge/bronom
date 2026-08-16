@@ -2,6 +2,7 @@ import type {
   BrowserColorSchemeEmulation,
   BrowserEmulationState,
   BrowserEnvironmentSettings,
+  BrowserAnimationPlaybackRate,
   BrowserDataSaverEmulation,
   BrowserNetworkEmulation,
   BrowserReducedMotionEmulation,
@@ -14,6 +15,7 @@ import type {
 
 const NETWORK_VALUES: readonly BrowserNetworkEmulation[] = ['none', 'offline', 'slow-3g', 'slow-4g', 'fast-4g']
 const DATA_SAVER_VALUES: readonly BrowserDataSaverEmulation[] = ['auto', 'enabled', 'disabled']
+const ANIMATION_PLAYBACK_RATES: readonly BrowserAnimationPlaybackRate[] = [0, 0.1, 0.25, 1]
 const COLOR_SCHEME_VALUES: readonly BrowserColorSchemeEmulation[] = ['auto', 'light', 'dark']
 const REDUCED_MOTION_VALUES: readonly BrowserReducedMotionEmulation[] = ['auto', 'reduce', 'no-preference']
 const MEDIA_TYPE_VALUES: readonly BrowserMediaTypeEmulation[] = ['auto', 'screen', 'print']
@@ -36,6 +38,7 @@ export const DEFAULT_BROWSER_ENVIRONMENT: BrowserEnvironmentSettings = {
   bypassServiceWorker: false,
   dataSaver: 'auto',
   cpuThrottlingRate: 1,
+  animationPlaybackRate: 1,
   colorScheme: 'auto',
   reducedMotion: 'auto',
   mediaType: 'auto',
@@ -59,6 +62,7 @@ export function browserEnvironmentFromEmulation(emulation?: BrowserEmulationStat
     bypassServiceWorker: emulation.bypassServiceWorker,
     dataSaver: emulation.dataSaver,
     cpuThrottlingRate: emulation.cpuThrottlingRate,
+    animationPlaybackRate: emulation.animationPlaybackRate ?? 1,
     colorScheme: emulation.colorScheme,
     reducedMotion: emulation.reducedMotion,
     mediaType: emulation.mediaType,
@@ -82,6 +86,7 @@ export function browserEnvironmentOverrideCount(environment: BrowserEnvironmentS
     environment.bypassServiceWorker,
     environment.dataSaver !== 'auto',
     environment.cpuThrottlingRate !== 1,
+    environment.animationPlaybackRate !== 1,
     environment.colorScheme !== 'auto',
     environment.reducedMotion !== 'auto',
     environment.mediaType !== 'auto',
@@ -113,6 +118,7 @@ export function isBrowserEnvironmentSettings(value: unknown): value is BrowserEn
     || !Number.isFinite(candidate.cpuThrottlingRate)
     || candidate.cpuThrottlingRate < 1
     || candidate.cpuThrottlingRate > 20) return false
+  if (!ANIMATION_PLAYBACK_RATES.includes(candidate.animationPlaybackRate as BrowserAnimationPlaybackRate)) return false
   if (!COLOR_SCHEME_VALUES.includes(candidate.colorScheme as BrowserColorSchemeEmulation)) return false
   if (!REDUCED_MOTION_VALUES.includes(candidate.reducedMotion as BrowserReducedMotionEmulation)) return false
   if (!MEDIA_TYPE_VALUES.includes(candidate.mediaType as BrowserMediaTypeEmulation)) return false

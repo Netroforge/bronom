@@ -232,6 +232,8 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       <style>
         body { color: rgb(34, 34, 34); background: rgb(250, 250, 250); font: 16px/1.5 sans-serif; }
         .contrast-probe { color: rgb(125, 125, 125); background: rgb(135, 135, 135); }
+        #animation-probe { width: 20px; height: 20px; background: rebeccapurple; animation: bronom-probe 60s linear infinite; }
+        @keyframes bronom-probe { from { transform: translateX(0); } to { transform: translateX(200px); } }
         @media (max-width: 900px) { .contrast-probe { font-weight: 700; } }
       </style>
       </head><body>
@@ -249,6 +251,7 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       <div id="drop" ondragover="event.preventDefault()" ondrop="event.preventDefault(); this.textContent=event.dataTransfer.getData('text/plain')">Drop here</div>
       <input id="upload" aria-label="Upload" type="file">
       <a id="download" href="/download" download="capability.txt">Download</a>
+      <div id="animation-probe" aria-label="Animation probe"></div>
       <div style="height:2200px">Tall page</div>
       <button id="capture-target" value="element-inspection-secret" style="box-sizing:border-box;width:240px;height:120px;background:rgb(103,87,232);color:rgb(255,255,255)">Capture this area</button>
       <script>
@@ -2755,6 +2758,7 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
         network: 'slow-4g',
         dataSaver: 'enabled',
         cpuThrottlingRate: 4,
+        animationPlaybackRate: 0,
         colorScheme: 'dark',
         reducedMotion: 'reduce',
         mediaType: 'print',
@@ -2791,6 +2795,7 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       bypassServiceWorker: false,
       dataSaver: 'enabled',
       cpuThrottlingRate: 4,
+      animationPlaybackRate: 0,
       colorScheme: 'dark',
       reducedMotion: 'reduce',
       mediaType: 'print',
@@ -2819,6 +2824,20 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       },
       extraHttpHeaderNames: ['X-Bronom-Test']
     })
+    const pausedAnimation = await client.callTool({
+      name: 'browser_evaluate',
+      arguments: {
+        tabId,
+        script: `(async () => {
+          const animation = document.querySelector('#animation-probe').getAnimations()[0];
+          const before = animation.currentTime;
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          return { before, after: animation.currentTime };
+        })()`
+      }
+    }) as CallToolResult
+    const pausedAnimationTimes = JSON.parse(text(pausedAnimation)) as { before: number; after: number }
+    expect(Math.abs(pausedAnimationTimes.after - pausedAnimationTimes.before)).toBeLessThan(1)
     const emulationState = await client.callTool({
       name: 'browser_emulate',
       arguments: { tabId }
@@ -2938,6 +2957,20 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       touchPoints: 5,
       header: { marker: 'device-emulation', language: expect.stringContaining('fr-CA') }
     })
+    const pausedAnimationAfterReload = await client.callTool({
+      name: 'browser_evaluate',
+      arguments: {
+        tabId,
+        script: `(async () => {
+          const animation = document.querySelector('#animation-probe').getAnimations()[0];
+          const before = animation.currentTime;
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          return { before, after: animation.currentTime };
+        })()`
+      }
+    }) as CallToolResult
+    const pausedAfterReloadTimes = JSON.parse(text(pausedAnimationAfterReload)) as { before: number; after: number }
+    expect(Math.abs(pausedAfterReloadTimes.after - pausedAfterReloadTimes.before)).toBeLessThan(1)
 
     await client.callTool({
       name: 'browser_network_routes',
@@ -2985,13 +3018,14 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       return text(result)
     }).toBe('Bronom Emulation Test/1.0|true')
 
-    await openPageTool(/Environment: 19 active conditions/)
+    await openPageTool(/Environment: 20 active conditions/)
     const environmentPanel = appWindow.getByRole('dialog', { name: 'Environment' })
     await expect(environmentPanel).toBeVisible()
     await expect(environmentPanel.getByRole('combobox', { name: 'Dock Environment' })).toHaveValue('right')
     await expect(environmentPanel.getByLabel('Network', { exact: true })).toHaveValue('slow-4g')
     await expect(environmentPanel.getByLabel('Data Saver')).toHaveValue('enabled')
     await expect(environmentPanel.getByLabel('CPU')).toHaveValue('4')
+    await expect(environmentPanel.getByLabel('Animation playback')).toHaveValue('0')
     await expect(environmentPanel.getByLabel('Color scheme')).toHaveValue('dark')
     await expect(environmentPanel.getByLabel('Motion')).toHaveValue('reduce')
     await expect(environmentPanel.getByLabel('Media type')).toHaveValue('print')
@@ -3017,6 +3051,7 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     await environmentPanel.getByLabel('Network', { exact: true }).selectOption('fast-4g')
     await environmentPanel.getByLabel('Data Saver').selectOption('disabled')
     await environmentPanel.getByLabel('CPU').selectOption('6')
+    await environmentPanel.getByLabel('Animation playback').selectOption('0.25')
     await environmentPanel.getByLabel('Color scheme').selectOption('light')
     await environmentPanel.getByLabel('Motion').selectOption('no-preference')
     await environmentPanel.getByLabel('Media type').selectOption('screen')
@@ -3043,6 +3078,7 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       network: 'fast-4g',
       dataSaver: 'disabled',
       cpuThrottlingRate: 6,
+      animationPlaybackRate: 0.25,
       colorScheme: 'light',
       reducedMotion: 'no-preference',
       mediaType: 'screen',
@@ -3112,6 +3148,7 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       bypassServiceWorker: false,
       dataSaver: 'auto',
       cpuThrottlingRate: 1,
+      animationPlaybackRate: 1,
       colorScheme: 'auto',
       reducedMotion: 'auto',
       mediaType: 'auto',
@@ -3193,6 +3230,7 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       bypassServiceWorker: false,
       dataSaver: 'auto',
       cpuThrottlingRate: 1,
+      animationPlaybackRate: 1,
       colorScheme: 'auto',
       reducedMotion: 'auto',
       mediaType: 'auto',

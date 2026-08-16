@@ -14,6 +14,7 @@ describe('browser environment settings', () => {
       bypassServiceWorker: true,
       dataSaver: 'enabled',
       cpuThrottlingRate: 4,
+      animationPlaybackRate: 0.25,
       colorScheme: 'dark',
       reducedMotion: 'reduce',
       mediaType: 'print',
@@ -42,6 +43,7 @@ describe('browser environment settings', () => {
       bypassServiceWorker: true,
       dataSaver: 'enabled',
       cpuThrottlingRate: 4,
+      animationPlaybackRate: 0.25,
       colorScheme: 'dark',
       reducedMotion: 'reduce',
       mediaType: 'print',
@@ -62,7 +64,7 @@ describe('browser environment settings', () => {
         scrollBottlenecks: true
       }
     })
-    expect(browserEnvironmentOverrideCount(environment)).toBe(22)
+    expect(browserEnvironmentOverrideCount(environment)).toBe(23)
   })
 
   it('returns independent defaults and counts no overrides', () => {
@@ -78,6 +80,7 @@ describe('browser environment settings', () => {
     expect(isBrowserEnvironmentSettings({ ...DEFAULT_BROWSER_ENVIRONMENT, bypassServiceWorker: 1 })).toBe(false)
     expect(isBrowserEnvironmentSettings({ ...DEFAULT_BROWSER_ENVIRONMENT, dataSaver: 'sometimes' })).toBe(false)
     expect(isBrowserEnvironmentSettings({ ...DEFAULT_BROWSER_ENVIRONMENT, cpuThrottlingRate: 21 })).toBe(false)
+    expect(isBrowserEnvironmentSettings({ ...DEFAULT_BROWSER_ENVIRONMENT, animationPlaybackRate: 0.5 })).toBe(false)
     expect(isBrowserEnvironmentSettings({ ...DEFAULT_BROWSER_ENVIRONMENT, userAgent: 'bad\nagent' })).toBe(false)
     expect(isBrowserEnvironmentSettings({ ...DEFAULT_BROWSER_ENVIRONMENT, mediaType: 'speech' })).toBe(false)
     expect(isBrowserEnvironmentSettings({ ...DEFAULT_BROWSER_ENVIRONMENT, visionDeficiency: 'unknown' })).toBe(false)

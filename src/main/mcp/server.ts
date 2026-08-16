@@ -198,7 +198,7 @@ export const BROWSER_TOOL_CATALOG: BrowserToolDefinition[] = [
   { name: 'browser_press', category: 'Interaction', description: 'Send a keyboard key to the active page.' },
   { name: 'browser_file_upload', category: 'Interaction', description: 'Attach local files to a file input.' },
   { name: 'browser_wait', category: 'Navigation', description: 'Wait for navigation or visible page text.' },
-  { name: 'browser_emulate', category: 'Inspection', description: 'Reproduce responsive, network, cache, service-worker, Data Saver, CPU, CSS media, vision, locale, time-zone, JavaScript-disabled, location, request-header, and user-agent conditions, or show paint, layout-shift, layer, frame, and scrolling diagnostics in one tab.' },
+  { name: 'browser_emulate', category: 'Inspection', description: 'Reproduce responsive, network, cache, service-worker, Data Saver, CPU, animation-playback, CSS media, vision, locale, time-zone, JavaScript-disabled, location, request-header, and user-agent conditions, or show paint, layout-shift, layer, frame, and scrolling diagnostics in one tab.' },
   { name: 'browser_resize', category: 'Inspection', description: 'Set or reset the page viewport for responsive UI testing.' },
   { name: 'browser_zoom', category: 'Inspection', description: 'Inspect or change page zoom from 50% to 300% without resizing the browser chrome.' },
   { name: 'browser_audio', category: 'Interaction', description: 'Mute or unmute one browser tab without changing site-wide sound permissions.' },
@@ -919,6 +919,8 @@ function createBrowserMcpServer(
         dataSaver: z.enum(['auto', 'enabled', 'disabled']).optional()
           .describe('Override navigator.connection.saveData. Use auto to restore the system value; this does not throttle bandwidth.'),
         cpuThrottlingRate: z.number().min(1).max(20).optional(),
+        animationPlaybackRate: z.union([z.literal(0), z.literal(0.1), z.literal(0.25), z.literal(1)]).optional()
+          .describe('Pause document-timeline CSS/Web Animations at 0, slow them to 10% or 25%, or restore normal playback at 1. requestAnimationFrame loops are unaffected.'),
         colorScheme: z.enum(['auto', 'light', 'dark']).optional(),
         reducedMotion: z.enum(['auto', 'reduce', 'no-preference']).optional(),
         mediaType: z.enum(['auto', 'screen', 'print']).optional(),

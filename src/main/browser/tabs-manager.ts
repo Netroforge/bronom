@@ -306,6 +306,7 @@ const DEFAULT_EMULATION: BrowserEmulationState = {
   bypassServiceWorker: false,
   dataSaver: 'auto',
   cpuThrottlingRate: 1,
+  animationPlaybackRate: 1,
   colorScheme: 'auto',
   reducedMotion: 'auto',
   mediaType: 'auto',
@@ -3180,6 +3181,7 @@ export class BrowserTabsManager {
       || options.bypassServiceWorker !== undefined
       || options.dataSaver !== undefined
       || options.cpuThrottlingRate !== undefined
+      || options.animationPlaybackRate !== undefined
       || options.colorScheme !== undefined
       || options.reducedMotion !== undefined
       || options.mediaType !== undefined
@@ -3203,6 +3205,10 @@ export class BrowserTabsManager {
       || options.cpuThrottlingRate < 1
       || options.cpuThrottlingRate > 20
     )) throw new Error('cpuThrottlingRate must be between 1 and 20')
+    if (options.animationPlaybackRate !== undefined
+      && ![0, 0.1, 0.25, 1].includes(options.animationPlaybackRate)) {
+      throw new Error('animationPlaybackRate must be 0, 0.1, 0.25, or 1')
+    }
     if (options.userAgent !== undefined && /[\u0000-\u001f\u007f]/.test(options.userAgent)) {
       throw new Error('userAgent cannot contain control characters')
     }
@@ -3261,6 +3267,7 @@ export class BrowserTabsManager {
           ...(options.bypassServiceWorker !== undefined ? { bypassServiceWorker: options.bypassServiceWorker } : {}),
           ...(options.dataSaver !== undefined ? { dataSaver: options.dataSaver } : {}),
           ...(options.cpuThrottlingRate !== undefined ? { cpuThrottlingRate: options.cpuThrottlingRate } : {}),
+          ...(options.animationPlaybackRate !== undefined ? { animationPlaybackRate: options.animationPlaybackRate } : {}),
           ...(options.colorScheme !== undefined ? { colorScheme: options.colorScheme } : {}),
           ...(options.reducedMotion !== undefined ? { reducedMotion: options.reducedMotion } : {}),
           ...(options.mediaType !== undefined ? { mediaType: options.mediaType } : {}),
@@ -6084,6 +6091,7 @@ export class BrowserTabsManager {
       || state.bypassServiceWorker
       || state.dataSaver !== 'auto'
       || state.cpuThrottlingRate !== 1
+      || (state.animationPlaybackRate ?? 1) !== 1
       || state.colorScheme !== 'auto'
       || state.reducedMotion !== 'auto'
       || state.mediaType !== 'auto'
@@ -6120,6 +6128,7 @@ export class BrowserTabsManager {
       bypassServiceWorker: tab.emulation.bypassServiceWorker,
       dataSaver: tab.emulation.dataSaver,
       cpuThrottlingRate: tab.emulation.cpuThrottlingRate,
+      animationPlaybackRate: tab.emulation.animationPlaybackRate ?? 1,
       viewport: viewport
         ? {
             width: viewport.width,
@@ -6196,6 +6205,10 @@ export class BrowserTabsManager {
     await webContents.debugger.sendCommand('Network.setExtraHTTPHeaders', { headers: extraHttpHeaders })
     await webContents.debugger.sendCommand('Emulation.setCPUThrottlingRate', {
       rate: state.cpuThrottlingRate
+    })
+    await webContents.debugger.sendCommand('Animation.enable')
+    await webContents.debugger.sendCommand('Animation.setPlaybackRate', {
+      playbackRate: state.animationPlaybackRate ?? 1
     })
     const features: Array<{ name: string; value: string }> = []
     if (state.colorScheme !== 'auto') {

@@ -818,7 +818,7 @@ const environmentLabel = computed(() => {
   if (activeEnvironmentOverrideCount.value) {
     return `${activeEnvironmentOverrideCount.value} active ${activeEnvironmentOverrideCount.value === 1 ? 'condition' : 'conditions'}`
   }
-  return 'Network, cache, service workers, CPU, rendering, runtime, region, identity, and location'
+  return 'Network, cache, service workers, CPU, animations, rendering, runtime, region, identity, and location'
 })
 const activeNetworkRouteCount = computed(() => activeTab.value?.networkRouteCount ?? 0)
 const accessibilityAuditLabel = computed(() => {
