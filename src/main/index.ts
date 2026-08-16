@@ -24,7 +24,7 @@ import {
 } from 'electron'
 import electronUpdater from 'electron-updater'
 import { updateErrorMessage, type UpdateOperation } from '../shared/update-errors.js'
-import { replacedPackageVersion } from '../shared/update-runtime.js'
+import { canStartUpdateOperation, replacedPackageVersion } from '../shared/update-runtime.js'
 import { sanitizeConsoleMessages } from '../shared/debug-report.js'
 import trayIconPath from '../../build/icons/24x24.png?asset'
 import trayAttentionIconPath from '../../build/icons/tray-attention.png?asset'
@@ -164,7 +164,6 @@ let credentialStorageStatus: CredentialStorageStatus = { available: false, reaso
 let settings: AppSettings = { ...DEFAULT_SETTINGS }
 let updateState: AppUpdateState = { status: 'idle', currentVersion: app.getVersion() }
 let updaterConfigured = false
-let updateCheckInProgress = false
 let updateInstallationInProgress = false
 let updateOperation: UpdateOperation | null = null
 let runtimeShutdown: Promise<void> | null = null
@@ -562,32 +561,32 @@ function publishCommercialLicenseState(): CommercialLicenseState {
 
 function commercialLicenseFriendlyMessage(reason: string): string {
   const messages: Record<string, string> = {
-    activation_limit_reached: 'This license has reached its device activation limit.',
-    commercial_inactive: 'The commercial subscription for this license is not active.',
+    activation_limit_reached: 'This supporter key has reached its device activation limit.',
+    commercial_inactive: 'The supporter subscription for this key is not active.',
     entitlement_pending: 'This purchase is still being synchronized. Try again in a moment.',
     instance_conflict: 'This device activation is no longer available.',
-    license_inactive: 'This commercial license is no longer active.',
-    license_not_found: 'The license key was not found.',
-    invalid_license: 'The license key could not be validated.',
-    invalid_license_key: 'Enter the complete license key from your Creem receipt.',
-    provider_unavailable: 'The licensing service is temporarily unavailable.',
-    provider_invalid_response: 'The licensing service returned an invalid response.',
-    service_unavailable: 'The licensing service is temporarily unavailable.',
-    wrong_product: 'This license key is not for Bronom.'
+    license_inactive: 'This supporter key is no longer active.',
+    license_not_found: 'The supporter key was not found.',
+    invalid_license: 'The supporter key could not be validated.',
+    invalid_license_key: 'Enter the complete supporter key from your Creem receipt.',
+    provider_unavailable: 'The supporter service is temporarily unavailable.',
+    provider_invalid_response: 'The supporter service returned an invalid response.',
+    service_unavailable: 'The supporter service is temporarily unavailable.',
+    wrong_product: 'This supporter key is not for Bronom.'
   }
-  return messages[reason] ?? 'The commercial license could not be validated.'
+  return messages[reason] ?? 'The supporter key could not be validated.'
 }
 
 async function activateCommercialLicense(value: unknown): Promise<CommercialLicenseState> {
-  if (typeof value !== 'string') throw new TypeError('License key must be a string')
+  if (typeof value !== 'string') throw new TypeError('Supporter key must be a string')
   const licenseKey = value.trim().toUpperCase()
-  if (!/^[A-Z0-9][A-Z0-9-]{15,127}$/.test(licenseKey)) throw new TypeError('Enter the complete license key from your Creem receipt')
+  if (!/^[A-Z0-9][A-Z0-9-]{15,127}$/.test(licenseKey)) throw new TypeError('Enter the complete supporter key from your Creem receipt')
   if (!commercialLicenseStore || !commercialLicenseClient) throw new Error('Secure license storage is unavailable')
   try {
     const result = await commercialLicenseClient.activate(licenseKey, commercialLicenseStore.installationName())
     if (!result.valid || result.status !== 'active') throw new CommercialLicenseError('license_inactive')
     await commercialLicenseStore.saveActivation(licenseKey, result)
-    commercialLicenseMessage = 'Commercial license activated for this device.'
+    commercialLicenseMessage = 'Supporter key activated for this device.'
     return publishCommercialLicenseState()
   } catch (error) {
     const reason = error instanceof CommercialLicenseError ? error.reason : 'service_unavailable'
@@ -605,7 +604,7 @@ async function refreshCommercialLicense(): Promise<CommercialLicenseState> {
     const result = await commercialLicenseClient.validate(credentials.licenseKey, credentials.instanceId)
     await commercialLicenseStore.saveValidation(result)
     commercialLicenseMessage = result.valid && result.status === 'active'
-      ? 'Commercial license is active.'
+      ? 'Supporter key is active.'
       : commercialLicenseFriendlyMessage('license_inactive')
     return publishCommercialLicenseState()
   } catch (error) {
@@ -614,7 +613,7 @@ async function refreshCommercialLicense(): Promise<CommercialLicenseState> {
       await commercialLicenseStore.markInactive()
     }
     commercialLicenseMessage = reason === 'service_unavailable' || reason === 'provider_unavailable'
-      ? 'Could not reach the licensing service. The last successful validation remains stored on this device.'
+      ? 'Could not reach the supporter service. The last successful validation remains stored on this device.'
       : commercialLicenseFriendlyMessage(reason)
     return publishCommercialLicenseState()
   }
@@ -635,7 +634,7 @@ async function deactivateCommercialLicense(): Promise<CommercialLicenseState> {
     }
   }
   await commercialLicenseStore.clear()
-  commercialLicenseMessage = 'Commercial license removed from this device.'
+  commercialLicenseMessage = 'Supporter key removed from this device.'
   return publishCommercialLicenseState()
 }
 
@@ -731,8 +730,7 @@ async function checkForUpdates(): Promise<AppUpdateState> {
   if (unavailable) return unavailable
   if (updateInstallationInProgress) return { ...updateState }
   if (await restartAfterPackageReplacement()) return { ...updateState }
-  if (updateCheckInProgress) return { ...updateState }
-  updateCheckInProgress = true
+  if (!canStartUpdateOperation(updateState.status, updateOperation, 'check')) return { ...updateState }
   updateOperation = 'check'
   publishUpdateState({ status: 'checking', percent: undefined, message: undefined })
   try {
@@ -742,7 +740,6 @@ async function checkForUpdates(): Promise<AppUpdateState> {
     publishUpdateState({ status: 'error', percent: undefined, message: updateErrorMessage(error, updateOperation, process.platform) })
   } finally {
     updateOperation = null
-    updateCheckInProgress = false
   }
   return { ...updateState }
 }
@@ -751,7 +748,7 @@ async function downloadUpdate(): Promise<AppUpdateState> {
   const unavailable = updatesUnavailableInThisBuild()
   if (unavailable) return unavailable
   if (updateInstallationInProgress) return { ...updateState }
-  if (updateState.status !== 'available' && updateState.status !== 'error') return { ...updateState }
+  if (!canStartUpdateOperation(updateState.status, updateOperation, 'download')) return { ...updateState }
   updateOperation = 'download'
   publishUpdateState({ status: 'downloading', percent: 0, message: undefined })
   try {
@@ -1157,7 +1154,7 @@ function installApplicationMenu(): void {
             click: () => requestHelp('shortcuts')
           },
           { label: 'About Bronom', click: () => requestHelp('about') },
-          { label: 'Commercial Licensing', click: () => requestHelp('support') },
+          { label: 'Support Bronom', click: () => requestHelp('support') },
           { type: 'separator' },
           { label: 'GitHub Repository', click: openRepository },
           {
@@ -2636,7 +2633,8 @@ async function releaseRuntimeResources(): Promise<void> {
 
 async function installDownloadedUpdate(): Promise<boolean> {
   if (updateInstallationInProgress) return false
-  if ((updateState.status !== 'downloaded' && updateState.status !== 'install-error') || updatesUnavailableInThisBuild()) return false
+  if (updatesUnavailableInThisBuild()) return false
+  if (!canStartUpdateOperation(updateState.status, updateOperation, 'install')) return false
   updateInstallationInProgress = true
   updateOperation = 'install'
   publishUpdateState({

@@ -688,7 +688,7 @@ test('puts Help in the native application menu and opens shell dialogs above eve
   expect(menuItems.Help).toEqual([
     'Keyboard Shortcuts',
     'About Bronom',
-    'Commercial Licensing',
+    'Support Bronom',
     'separator',
     'GitHub Repository',
     'Check for Updates'
@@ -738,7 +738,7 @@ test('puts Help in the native application menu and opens shell dialogs above eve
   await expect(aboutDialog.getByRole('button', { name: 'Contribute' })).toBeVisible()
   await aboutDialog.getByRole('button', { name: 'Close help' }).click()
 
-  await clickMenuItem('Help', 'Commercial Licensing')
+  await clickMenuItem('Help', 'Support Bronom')
   await expect(appWindow.locator('.settings-dialog')).toContainText('Support Bronom')
   await appWindow.locator('.settings-dialog').getByRole('button', { name: 'Close', exact: true }).click()
 

@@ -5287,7 +5287,7 @@ async function loadCommercialLicenseState(): Promise<void> {
 async function activateCommercialLicense(): Promise<void> {
   const key = commercialLicenseKey.value.trim()
   if (!key) {
-    commercialLicenseError.value = 'Enter the license key from your Creem receipt.'
+    commercialLicenseError.value = 'Enter the supporter key from your Creem receipt.'
     return
   }
   commercialLicenseAction.value = 'activating'

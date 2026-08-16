@@ -101,7 +101,7 @@ Use the database button in the website toolbar to inspect, filter, add, edit, or
 
 ## Get help from the application menu
 
-Use the native **Help** menu beside Bronom, Edit, and View below the window title. It follows Textonom's familiar structure: Keyboard Shortcuts, About Bronom, Commercial Licensing, GitHub Repository, and Check for Updates. Because the menu is owned by the operating system rather than drawn inside the browser toolbar, it remains visible above Home, websites, and native page views on every tab.
+Use the native **Help** menu beside Bronom, Edit, and View below the window title. It follows Textonom's familiar structure: Keyboard Shortcuts, About Bronom, Support Bronom, GitHub Repository, and Check for Updates. Because the menu is owned by the operating system rather than drawn inside the browser toolbar, it remains visible above Home, websites, and native page views on every tab.
 
 ## Debug a website with Chromium Developer Tools
 

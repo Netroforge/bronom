@@ -16,7 +16,7 @@ function normalizeBaseUrl(value: string): string {
   const url = new URL(value)
   const localDevelopment = url.protocol === 'http:' && (url.hostname === '127.0.0.1' || url.hostname === 'localhost')
   if (url.protocol !== 'https:' && !localDevelopment) {
-    throw new Error('Commercial license API must use HTTPS outside local development')
+    throw new Error('Supporter service API must use HTTPS outside local development')
   }
   return url.toString().replace(/\/$/, '')
 }
