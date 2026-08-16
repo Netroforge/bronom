@@ -1616,6 +1616,7 @@ test('shows a native webpage context menu and suppresses it while human interact
     })
     const rightClick = async (selector: string): Promise<void> => {
       await electronApp.evaluate(async ({ webContents }, input: { requestedUrl: string; selector: string }) => {
+        ;(globalThis as typeof globalThis & { __bronomContextMenu?: Electron.Menu }).__bronomContextMenu = undefined
         const page = webContents.getAllWebContents().find((contents) => contents.getURL() === input.requestedUrl)
         if (!page) throw new Error('Context menu fixture web contents was not found')
         const point = await page.executeJavaScript(`(() => {
@@ -1642,14 +1643,42 @@ test('shows a native webpage context menu and suppresses it while human interact
       expect.objectContaining({ id: 'inspect-element', label: 'Inspect' })
     ]))
 
-    const copiedLink = await electronApp.evaluate(({ clipboard }) => {
+    await electronApp.evaluate(({ clipboard }) => {
+      clipboard.clear()
       const menu = (globalThis as typeof globalThis & { __bronomContextMenu?: Electron.Menu }).__bronomContextMenu
       const item = menu?.getMenuItemById('copy-link-address')
       if (!item?.click) throw new Error('Copy Link Address context action was not found')
       ;(item.click as unknown as () => void)()
-      return clipboard.readText()
     })
-    expect(copiedLink).toBe(`http://127.0.0.1:${address.port}/target`)
+    await expect.poll(() => electronApp.evaluate(({ clipboard }) => clipboard.readText()))
+      .toBe(`http://127.0.0.1:${address.port}/target`)
+
+    await electronApp.evaluate(({ clipboard }) => {
+      clipboard.clear()
+      const menu = (globalThis as typeof globalThis & { __bronomContextMenu?: Electron.Menu }).__bronomContextMenu
+      const item = menu?.getMenuItemById('copy-page-address')
+      if (!item?.click) throw new Error('Copy Page Address context action was not found')
+      ;(item.click as unknown as () => void)()
+    })
+    await expect.poll(() => electronApp.evaluate(({ clipboard }) => clipboard.readText())).toBe(url)
+
+    await rightClick('#link')
+    await expect.poll(contextMenuItems).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'copy-link-address', label: 'Copy Link Address' })
+    ]))
+    await electronApp.evaluate(({ clipboard }) => {
+      const menu = (globalThis as typeof globalThis & { __bronomContextMenu?: Electron.Menu }).__bronomContextMenu
+      const item = menu?.getMenuItemById('copy-link-address')
+      if (!item?.click) throw new Error('Copy Link Address context action was not found')
+      const originalReadText = clipboard.readText
+      clipboard.readText = () => ''
+      ;(item.click as unknown as () => void)()
+      setTimeout(() => { clipboard.readText = originalReadText }, 500)
+    })
+    const copyFailure = appWindow.getByRole('alert', { name: 'Copy failed' })
+    await expect(copyFailure).toBeVisible()
+    await expect(copyFailure).toContainText('system clipboard did not accept it')
+    await new Promise((resolve) => setTimeout(resolve, 600))
 
     await electronApp.evaluate(() => {
       const menu = (globalThis as typeof globalThis & { __bronomContextMenu?: Electron.Menu }).__bronomContextMenu
@@ -1674,6 +1703,15 @@ test('shows a native webpage context menu and suppresses it while human interact
       expect.objectContaining({ id: 'copy-image-address', label: 'Copy Image Address' }),
       expect.objectContaining({ id: 'save-image', label: 'Save Image', enabled: true })
     ]))
+    await electronApp.evaluate(({ clipboard }) => {
+      clipboard.clear()
+      const menu = (globalThis as typeof globalThis & { __bronomContextMenu?: Electron.Menu }).__bronomContextMenu
+      const item = menu?.getMenuItemById('copy-image-address')
+      if (!item?.click) throw new Error('Copy Image Address context action was not found')
+      ;(item.click as unknown as () => void)()
+    })
+    await expect.poll(() => electronApp.evaluate(({ clipboard }) => clipboard.readText()))
+      .toBe(`http://127.0.0.1:${address.port}/image.png`)
 
     const activeTabId = await appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)') as string
     await appWindow.evaluate(`window.bronom.setTabHumanInteractionLocked(${JSON.stringify(activeTabId)}, true)`)

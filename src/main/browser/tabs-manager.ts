@@ -8,7 +8,6 @@ import axe from 'axe-core'
 import {
   app,
   BrowserWindow,
-  clipboard,
   Menu,
   nativeImage,
   shell,
@@ -642,6 +641,8 @@ export interface TabsManagerOptions {
   onUserInteraction?: () => void
   onCredentialSubmitted?: (candidate: BrowserCredentialCandidate) => void
   onShortcutRequested?: (action: BrowserShortcutAction) => void
+  copyText: (text: string) => Promise<void>
+  onClipboardCopyFailed?: (error: unknown) => void
   onPageVisited?: (visit: { url: string; title: string }) => void
   onStateChanged?: (state: BrowserState) => void
   onDownloadsChanged?: (downloads: BrowserDownloadState[]) => void
@@ -4883,6 +4884,12 @@ export class BrowserTabsManager {
     const openBackgroundTab = (url: string): void => {
       void this.createTab({ url, active: false, mcpGroupId: tab.mcpGroupId }).catch((error) => console.error(`[browser] Could not open context-menu URL ${url}:`, error))
     }
+    const copyText = (text: string): void => {
+      void this.options.copyText(text).catch((error) => {
+        console.error('[browser] Could not copy context-menu text:', error)
+        this.options.onClipboardCopyFailed?.(error)
+      })
+    }
 
     if (params.linkURL) {
       const webLink = isWebUrl(params.linkURL)
@@ -4896,7 +4903,7 @@ export class BrowserTabsManager {
         {
           id: 'copy-link-address',
           label: 'Copy Link Address',
-          click: () => clipboard.writeText(params.linkURL)
+          click: () => copyText(params.linkURL)
         },
         {
           id: 'save-link',
@@ -4924,7 +4931,7 @@ export class BrowserTabsManager {
         {
           id: 'copy-image-address',
           label: 'Copy Image Address',
-          click: () => clipboard.writeText(params.srcURL)
+          click: () => copyText(params.srcURL)
         },
         {
           id: 'save-image',
@@ -4992,7 +4999,7 @@ export class BrowserTabsManager {
       {
         id: 'copy-page-address',
         label: 'Copy Page Address',
-        click: () => clipboard.writeText(tab.url)
+        click: () => copyText(tab.url)
       },
       {
         id: 'inspect-element',

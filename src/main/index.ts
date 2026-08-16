@@ -169,10 +169,22 @@ let trayAttentionIcon: NativeImage | null = null
 // wrapper being retained by the Linux clipboard backend.
 let lastScreenshotClipboardImage: NativeImage | null = null
 let lastCopiedText = ''
+let clipboardTextWriteQueue: Promise<void> = Promise.resolve()
 
 async function copyTextToClipboard(text: string): Promise<void> {
-  lastCopiedText = text
-  await writeVerifiedClipboardText(lastCopiedText, clipboard)
+  const operation = clipboardTextWriteQueue.then(async () => {
+    await writeVerifiedClipboardText(text, clipboard)
+    lastCopiedText = text
+  })
+  clipboardTextWriteQueue = operation.catch(() => undefined)
+  await operation
+}
+
+function reportClipboardFailure(error: unknown): void {
+  const message = error instanceof Error ? error.message : 'The system clipboard did not accept the text.'
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+    mainWindow.webContents.send('clipboard:failed', message)
+  }
 }
 
 async function copyPngToClipboard(data: Buffer): Promise<{ width: number; height: number }> {
@@ -1239,10 +1251,7 @@ function registerIpc(): void {
     try {
       await copyTextToClipboard(value)
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'The system clipboard did not accept the text.'
-      if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
-        mainWindow.webContents.send('clipboard:failed', message)
-      }
+      reportClipboardFailure(error)
       throw error
     }
   })
@@ -2234,6 +2243,8 @@ async function createWindow(): Promise<void> {
     onShortcutRequested: (action) => {
       if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('browser:shortcut-requested', action)
     },
+    copyText: copyTextToClipboard,
+    onClipboardCopyFailed: reportClipboardFailure,
     onStateChanged: (state) => sendToPanelWindow('browser:state-changed', state),
     onDownloadsChanged: (downloads) => sendToPanelWindow('browser:downloads-changed', downloads),
     onPageVisited: ({ url, title }) => {
