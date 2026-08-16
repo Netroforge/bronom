@@ -57,6 +57,7 @@ import {
 } from '../../shared/performance-audit.js'
 import { designOverviewPageScript } from '../../shared/design-overview.js'
 import { pageMetadataScript } from '../../shared/page-metadata.js'
+import { buildBrowserQualityAudit } from '../../shared/quality-audit.js'
 import { indexedDbPageScript, normalizeBrowserIndexedDbOptions } from '../../shared/indexeddb.js'
 import {
   normalizeBrowserPwaOptions,
@@ -159,6 +160,7 @@ import type {
   BrowserDesignOverviewReport,
   BrowserPageMetadataReport,
   BrowserSecurityReport,
+  BrowserQualityAudit,
   BrowserCodeCoverageMode,
   BrowserCodeCoverageOptions,
   BrowserCodeCoverageReport,
@@ -2584,6 +2586,24 @@ export class BrowserTabsManager {
       protocol: snapshot?.protocol,
       details: snapshot?.details
     })
+  }
+
+  async qualityAudit(tabId?: string): Promise<BrowserQualityAudit> {
+    const tab = this.getTab(tabId)
+    if (isBronomHomeUrl(tab.url)) throw new Error('Open a website tab before running a quality audit')
+    const auditedUrl = tab.url
+    const [accessibility, performance, metadata] = await Promise.all([
+      this.accessibilityAudit({ tabId: tab.id, standard: 'wcag-aa', maxViolations: 50, maxNodesPerViolation: 1 }),
+      this.performanceReport({ tabId: tab.id, settleMs: 800, action: 'measure' }),
+      this.pageMetadata(tab.id)
+    ])
+    const security = this.securityReport(tab.id)
+    const pwa = await this.inspectPwa({ tabId: tab.id, limit: 1 })
+    const browserIssues = await this.inspectorIssues(tab.id)
+    if (tab.url !== auditedUrl) {
+      throw new Error('The page navigated before the quality audit finished; run it again on the current document.')
+    }
+    return buildBrowserQualityAudit({ accessibility, performance, metadata, security, pwa, browserIssues })
   }
 
   async codeCoverage(options: BrowserCodeCoverageOptions = {}): Promise<BrowserCodeCoverageResult> {

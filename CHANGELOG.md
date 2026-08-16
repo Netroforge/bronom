@@ -4,6 +4,12 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-08-17
+
+### Added
+
+- Run one bounded, copy-ready Quality audit from Page tools, the Command Palette, or `browser_quality_audit`, combining accessibility, observed Web Vitals, metadata and SEO, transport security, PWA readiness, and retained Chromium issues without inventing a synthetic score or uploading page content.
+
 ## [1.4.1] - 2026-08-17
 
 ### Fixed

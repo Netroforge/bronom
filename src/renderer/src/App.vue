@@ -25,6 +25,7 @@ import IconDownloadDone from '~icons/material-symbols/download-done-rounded'
 import IconEdit from '~icons/material-symbols/edit-rounded'
 import IconError from '~icons/material-symbols/error-outline-rounded'
 import IconFavorite from '~icons/material-symbols/favorite-rounded'
+import IconFactCheck from '~icons/material-symbols/fact-check-rounded'
 import IconFolderOpen from '~icons/material-symbols/folder-open-rounded'
 import IconInfo from '~icons/material-symbols/info-rounded'
 import IconHistory from '~icons/material-symbols/history-rounded'
@@ -88,6 +89,7 @@ import {
   AppUpdateState,
   BrowserAccessibilityAudit,
   BrowserAccessibilityImpact,
+  BrowserQualityAudit,
   BrowserPerformanceMetric,
   BrowserPerformanceMetricName,
   BrowserPerformanceAction,
@@ -249,6 +251,7 @@ function detachedPanelLabel(panel: DetachablePanelId): string {
     'responsive-preview': 'Responsive preview',
     environment: 'Environment',
     accessibility: 'Accessibility',
+    'quality-audit': 'Quality audit',
     performance: 'Performance',
     'design-overview': 'Design overview',
     'page-metadata': 'Page metadata',
@@ -502,6 +505,11 @@ const accessibilityAuditState = ref<'idle' | 'running' | 'complete' | 'error'>('
 const accessibilityAudit = ref<BrowserAccessibilityAudit | null>(null)
 const accessibilityAuditError = ref('')
 const accessibilityPanelOpen = ref(false)
+const qualityAuditState = ref<'idle' | 'running' | 'complete' | 'error'>('idle')
+const qualityAuditReport = ref<BrowserQualityAudit | null>(null)
+const qualityAuditError = ref('')
+const qualityAuditPanelOpen = ref(false)
+const qualityAuditCopied = ref(false)
 const performanceState = ref<'idle' | 'running' | 'complete' | 'error'>('idle')
 const performanceReport = ref<BrowserPerformanceReport | null>(null)
 const performanceError = ref('')
@@ -614,6 +622,7 @@ else if (detachedPanelId === 'page-tools') pageToolsOpen.value = true
 else if (detachedPanelId === 'responsive-preview') responsivePanelOpen.value = true
 else if (detachedPanelId === 'environment') environmentPanelOpen.value = true
 else if (detachedPanelId === 'accessibility') accessibilityPanelOpen.value = true
+else if (detachedPanelId === 'quality-audit') qualityAuditPanelOpen.value = true
 else if (detachedPanelId === 'performance') performancePanelOpen.value = true
 else if (detachedPanelId === 'design-overview') designOverviewPanelOpen.value = true
 else if (detachedPanelId === 'page-metadata') pageMetadataPanelOpen.value = true
@@ -752,6 +761,7 @@ const dockedPanelOpen = computed(() => bookmarksOpen.value
   || responsivePanelOpen.value
   || environmentPanelOpen.value
   || accessibilityPanelOpen.value
+  || qualityAuditPanelOpen.value
   || performancePanelOpen.value
   || designOverviewPanelOpen.value
   || pageMetadataPanelOpen.value
@@ -773,6 +783,7 @@ const activePanelId = computed<DetachablePanelId | null>(() => {
   if (responsivePanelOpen.value) return 'responsive-preview'
   if (environmentPanelOpen.value) return 'environment'
   if (accessibilityPanelOpen.value) return 'accessibility'
+  if (qualityAuditPanelOpen.value) return 'quality-audit'
   if (performancePanelOpen.value) return 'performance'
   if (designOverviewPanelOpen.value) return 'design-overview'
   if (pageMetadataPanelOpen.value) return 'page-metadata'
@@ -854,6 +865,16 @@ const accessibilityAuditLabel = computed(() => {
     return `Accessibility audit: ${count} ${count === 1 ? 'violation' : 'violations'}`
   }
   return 'Run accessibility audit'
+})
+const qualityAuditLabel = computed(() => {
+  if (qualityAuditState.value === 'running') return 'Checking six evidence categories'
+  if (qualityAuditState.value === 'error') return 'Quality audit needs attention'
+  if (qualityAuditReport.value) {
+    if (qualityAuditReport.value.status === 'pass') return 'All applicable categories clear'
+    const { errors, warnings } = qualityAuditReport.value.totals
+    return `${errors} ${errors === 1 ? 'error' : 'errors'} · ${warnings} ${warnings === 1 ? 'warning' : 'warnings'}`
+  }
+  return 'Accessibility, speed, SEO, security, PWA, and browser issues'
 })
 const performanceLabel = computed(() => {
   if (performanceState.value === 'running') return 'Measuring page performance'
@@ -2136,6 +2157,7 @@ async function runCommandPaletteCommand(commandId: CommandPaletteCommandId): Pro
     case 'repro-recorder': return toggleReproRecorder()
     case 'dom-changes': return toggleDomChanges()
     case 'visual-compare': return toggleVisualCompare()
+    case 'quality-audit': return toggleQualityAudit()
     case 'accessibility': return toggleAccessibilityAudit()
     case 'performance': return togglePerformanceReport()
     case 'design-overview': return toggleDesignOverview()
@@ -2638,6 +2660,7 @@ watch(
     responsivePanelOpen,
     environmentPanelOpen,
     accessibilityPanelOpen,
+    qualityAuditPanelOpen,
     performancePanelOpen,
     designOverviewPanelOpen,
     pageMetadataPanelOpen,
@@ -2699,6 +2722,7 @@ watch(
       pageToolsOpen.value = false
       environmentPanelOpen.value = false
       accessibilityPanelOpen.value = false
+      qualityAuditPanelOpen.value = false
       performancePanelOpen.value = false
       designOverviewPanelOpen.value = false
       pageMetadataPanelOpen.value = false
@@ -2815,6 +2839,7 @@ watch(
       responsivePanelOpen.value = false
       environmentPanelOpen.value = false
       accessibilityPanelOpen.value = false
+      qualityAuditPanelOpen.value = false
       performancePanelOpen.value = false
       designOverviewPanelOpen.value = false
       pageMetadataPanelOpen.value = false
@@ -2845,6 +2870,10 @@ watch(
     accessibilityAudit.value = null
     accessibilityAuditState.value = 'idle'
     accessibilityAuditError.value = ''
+    qualityAuditReport.value = null
+    qualityAuditState.value = 'idle'
+    qualityAuditError.value = ''
+    qualityAuditCopied.value = false
     performanceReport.value = null
     performanceState.value = 'idle'
     performanceError.value = ''
@@ -2921,6 +2950,11 @@ watch(
     accessibilityAudit.value = null
     accessibilityAuditState.value = 'idle'
     accessibilityAuditError.value = ''
+    if (!keepPanelOpen && qualityAuditPanelOpen.value && qualityAuditReport.value?.tabId !== tabId) qualityAuditPanelOpen.value = false
+    qualityAuditReport.value = null
+    qualityAuditState.value = 'idle'
+    qualityAuditError.value = ''
+    qualityAuditCopied.value = false
     if (!keepPanelOpen && performancePanelOpen.value && performanceReport.value?.tabId !== tabId) performancePanelOpen.value = false
     performanceReport.value = null
     performanceState.value = 'idle'
@@ -4653,6 +4687,42 @@ function toggleAccessibilityAudit(): void {
   void runAccessibilityAudit()
 }
 
+async function runQualityAudit(): Promise<void> {
+  const tab = activeTab.value
+  if (!tab || tab.url.startsWith('bronom://home')) return
+  closeTransientPanels()
+  qualityAuditPanelOpen.value = true
+  qualityAuditState.value = 'running'
+  qualityAuditError.value = ''
+  qualityAuditReport.value = null
+  qualityAuditCopied.value = false
+  try {
+    const report = await browser.runQualityAudit(tab.id)
+    if (activeTab.value?.id !== tab.id) return
+    qualityAuditReport.value = report
+    qualityAuditState.value = 'complete'
+  } catch (error) {
+    if (activeTab.value?.id !== tab.id) return
+    qualityAuditState.value = 'error'
+    qualityAuditError.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
+function toggleQualityAudit(): void {
+  if (qualityAuditPanelOpen.value) {
+    qualityAuditPanelOpen.value = false
+    return
+  }
+  void runQualityAudit()
+}
+
+async function copyQualityAudit(): Promise<void> {
+  if (!qualityAuditReport.value) return
+  if (!await copyAppText(JSON.stringify(qualityAuditReport.value, null, 2))) return
+  qualityAuditCopied.value = true
+  window.setTimeout(() => (qualityAuditCopied.value = false), 1_500)
+}
+
 function dismissAppToast(id: number): void {
   const timer = appToastTimers.get(id)
   if (timer !== undefined) window.clearTimeout(timer)
@@ -5159,6 +5229,7 @@ function closeDockedPanels(): void {
   responsivePanelOpen.value = false
   environmentPanelOpen.value = false
   accessibilityPanelOpen.value = false
+  qualityAuditPanelOpen.value = false
   performancePanelOpen.value = false
   designOverviewPanelOpen.value = false
   pageMetadataPanelOpen.value = false
@@ -5185,6 +5256,7 @@ function activatePanel(panel: DetachablePanelId): void {
   else if (panel === 'responsive-preview') responsivePanelOpen.value = true
   else if (panel === 'environment') environmentPanelOpen.value = true
   else if (panel === 'accessibility') accessibilityPanelOpen.value = true
+  else if (panel === 'quality-audit') qualityAuditPanelOpen.value = true
   else if (panel === 'performance') performancePanelOpen.value = true
   else if (panel === 'design-overview') designOverviewPanelOpen.value = true
   else if (panel === 'page-metadata') pageMetadataPanelOpen.value = true
@@ -5208,6 +5280,7 @@ async function refreshDetachedPanel(panel: DetachablePanelId): Promise<void> {
   else if (panel === 'responsive-preview') loadResponsiveDraft()
   else if (panel === 'environment') loadEnvironmentDraft()
   else if (panel === 'accessibility') await runAccessibilityAudit()
+  else if (panel === 'quality-audit') await runQualityAudit()
   else if (panel === 'performance') await runPerformanceReport()
   else if (panel === 'design-overview') await runDesignOverview()
   else if (panel === 'page-metadata') await runPageMetadata()
@@ -5424,6 +5497,7 @@ function handleKeyDown(event: KeyboardEvent): void {
   else if (historyOpen.value) historyOpen.value = false
   else if (pageToolsOpen.value) pageToolsOpen.value = false
   else if (accessibilityPanelOpen.value) accessibilityPanelOpen.value = false
+  else if (qualityAuditPanelOpen.value) qualityAuditPanelOpen.value = false
   else if (performancePanelOpen.value) performancePanelOpen.value = false
   else if (designOverviewPanelOpen.value) designOverviewPanelOpen.value = false
   else if (pageMetadataPanelOpen.value) pageMetadataPanelOpen.value = false
@@ -6465,6 +6539,24 @@ onBeforeUnmount(() => {
             <div class="page-tools-grid">
               <button
                 :class="{
+                  complete: qualityAuditState === 'complete' && qualityAuditReport?.status === 'pass',
+                  warning: qualityAuditState === 'complete' && qualityAuditReport?.status === 'warning',
+                  error: qualityAuditState === 'error' || qualityAuditReport?.status === 'error',
+                  running: qualityAuditState === 'running'
+                }"
+                type="button"
+                :aria-label="`Quality audit: ${qualityAuditLabel}`"
+                :disabled="qualityAuditState === 'running'"
+                @click="toggleQualityAudit"
+              >
+                <IconProgress v-if="qualityAuditState === 'running'" class="state-spinner" aria-hidden="true" />
+                <IconCheck v-else-if="qualityAuditReport?.status === 'pass'" aria-hidden="true" />
+                <IconError v-else-if="qualityAuditState === 'error' || qualityAuditReport?.status === 'error'" aria-hidden="true" />
+                <IconFactCheck v-else aria-hidden="true" />
+                <span><strong>Quality audit</strong><small>{{ qualityAuditLabel }}</small></span>
+              </button>
+              <button
+                :class="{
                   complete: accessibilityAuditState === 'complete' && accessibilityAudit?.violationCount === 0,
                   warning: accessibilityAuditState === 'complete' && Boolean(accessibilityAudit?.violationCount),
                   error: accessibilityAuditState === 'error',
@@ -6961,6 +7053,81 @@ onBeforeUnmount(() => {
           </div>
         </footer>
       </form>
+    </section>
+    <section
+      v-if="qualityAuditPanelOpen"
+      class="accessibility-panel quality-audit-panel"
+      data-shell-docked-panel
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby="quality-audit-panel-title"
+      :aria-busy="qualityAuditState === 'running'"
+    >
+      <header>
+        <div>
+          <span class="eyebrow">Local evidence review</span>
+          <h2 id="quality-audit-panel-title">Quality audit</h2>
+        </div>
+        <div class="panel-header-actions">
+          <PanelDockPicker v-model="panelDock" label="Dock quality audit" />
+          <button class="panel-close" type="button" aria-label="Close quality audit" @click="qualityAuditPanelOpen = false"><IconClose aria-hidden="true" /></button>
+        </div>
+      </header>
+      <div v-if="qualityAuditState === 'running'" class="accessibility-audit-loading" role="status">
+        <IconProgress class="state-spinner" aria-hidden="true" />
+        <strong>Checking six quality categories…</strong>
+        <span>Bronom combines bounded local evidence without uploading page content or inventing a score.</span>
+      </div>
+      <div v-else-if="qualityAuditState === 'error'" class="accessibility-audit-error" role="alert">
+        <IconError aria-hidden="true" />
+        <strong>Quality audit could not finish</strong>
+        <span>{{ qualityAuditError }}</span>
+        <button type="button" @click="runQualityAudit">Try again</button>
+      </div>
+      <template v-else-if="qualityAuditReport">
+        <div class="quality-audit-summary" :class="qualityAuditReport.status">
+          <IconCheck v-if="qualityAuditReport.status === 'pass'" aria-hidden="true" />
+          <IconWarning v-else-if="qualityAuditReport.status === 'warning'" aria-hidden="true" />
+          <IconError v-else aria-hidden="true" />
+          <span>
+            <strong>{{ qualityAuditReport.status === 'pass' ? 'No automated blockers found' : qualityAuditReport.status === 'warning' ? 'Review the warnings' : 'Quality issues need attention' }}</strong>
+            <small>{{ qualityAuditReport.totals.errors }} errors · {{ qualityAuditReport.totals.warnings }} warnings · {{ qualityAuditReport.totals.info }} informational</small>
+          </span>
+        </div>
+        <div class="quality-audit-content">
+          <section class="quality-audit-categories" aria-label="Quality categories">
+            <article v-for="category in qualityAuditReport.categories" :key="category.id" :class="category.status">
+              <header>
+                <strong>{{ category.label }}</strong>
+                <span>{{ category.status.replace('-', ' ') }}</span>
+              </header>
+              <p>{{ category.summary }}</p>
+              <ul>
+                <li v-for="item in category.evidence" :key="item">{{ item }}</li>
+              </ul>
+            </article>
+          </section>
+          <section v-if="qualityAuditReport.findings.length" class="quality-audit-findings" aria-labelledby="quality-audit-findings-title">
+            <h3 id="quality-audit-findings-title">Findings</h3>
+            <article v-for="(finding, index) in qualityAuditReport.findings" :key="`${finding.category}-${finding.code}-${index}`" :class="finding.severity">
+              <header><span>{{ finding.severity }}</span><strong>{{ finding.code }}</strong><small>{{ finding.category }}</small></header>
+              <p>{{ finding.message }}</p>
+            </article>
+            <p v-if="qualityAuditReport.truncated" class="quality-audit-truncated">Only the first 40 findings are shown and copied; category totals remain complete.</p>
+          </section>
+          <details class="quality-audit-caveats">
+            <summary>Scope and limitations</summary>
+            <ul><li v-for="caveat in qualityAuditReport.caveats" :key="caveat">{{ caveat }}</li></ul>
+          </details>
+        </div>
+        <footer>
+          <span>{{ qualityAuditReport.categories.length }} categories · {{ new Date(qualityAuditReport.auditedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }}</span>
+          <div>
+            <button type="button" @click="copyQualityAudit"><IconCheck v-if="qualityAuditCopied" aria-hidden="true" /><IconCopy v-else aria-hidden="true" /> {{ qualityAuditCopied ? 'Copied' : 'Copy report' }}</button>
+            <button type="button" @click="runQualityAudit"><IconRefresh aria-hidden="true" /> Run again</button>
+          </div>
+        </footer>
+      </template>
     </section>
     <section
       v-if="accessibilityPanelOpen"

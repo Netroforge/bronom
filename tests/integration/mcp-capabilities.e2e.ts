@@ -610,6 +610,36 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     await expect(storageAction).not.toHaveClass(/warning|complete|error|running/)
     await pageToolsAfterAudit.getByRole('button', { name: 'Close page tools' }).click()
 
+    const qualityResult = await client.callTool({
+      name: 'browser_quality_audit',
+      arguments: { tabId }
+    }) as CallToolResult
+    expect(qualityResult.isError, text(qualityResult)).not.toBe(true)
+    const qualityAudit = JSON.parse(text(qualityResult))
+    expect(qualityAudit).toMatchObject({
+      tabId,
+      status: 'error',
+      categories: expect.arrayContaining([
+        expect.objectContaining({ id: 'accessibility' }),
+        expect.objectContaining({ id: 'performance' }),
+        expect.objectContaining({ id: 'metadata' }),
+        expect.objectContaining({ id: 'security', status: 'error' }),
+        expect.objectContaining({ id: 'pwa' }),
+        expect.objectContaining({ id: 'browser-issues' })
+      ]),
+      caveats: expect.arrayContaining([expect.stringContaining('not a Lighthouse score')])
+    })
+    expect(qualityAudit.categories).toHaveLength(6)
+    expect(JSON.stringify(qualityAudit)).not.toContain('element-inspection-secret')
+
+    await openPageTool(/Quality audit:/)
+    const qualityPanel = appWindow.getByRole('dialog', { name: 'Quality audit' })
+    await expect(qualityPanel).toBeVisible()
+    await expect(qualityPanel).toContainText('Accessibility')
+    await expect(qualityPanel).toContainText('Metadata & SEO')
+    await expect(qualityPanel.getByRole('button', { name: 'Copy report' })).toBeVisible()
+    await qualityPanel.getByRole('button', { name: 'Close quality audit' }).click()
+
     const performanceWarmup = await client.callTool({
       name: 'browser_performance',
       arguments: { tabId, settleMs: 0, action: 'set-baseline' }

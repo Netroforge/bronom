@@ -28,6 +28,7 @@ export type CommandPaletteCommandId =
   | 'repro-recorder'
   | 'dom-changes'
   | 'visual-compare'
+  | 'quality-audit'
   | 'accessibility'
   | 'performance'
   | 'design-overview'
@@ -83,6 +84,7 @@ export const COMMAND_PALETTE_COMMANDS: readonly CommandPaletteCommand[] = [
   { id: 'repro-recorder', label: 'Open repro recorder', description: 'Record safe steps for reproducing a problem', category: 'Current website', keywords: ['steps', 'record'], websiteOnly: true },
   { id: 'dom-changes', label: 'Record DOM changes', description: 'See which page structures change after an action', category: 'Current website', keywords: ['mutation', 'html', 'attribute', 'node', 'diff'], websiteOnly: true },
   { id: 'visual-compare', label: 'Open visual compare', description: 'Compare the current page with a baseline', category: 'Current website', keywords: ['diff', 'screenshot'], websiteOnly: true },
+  { id: 'quality-audit', label: 'Run quality audit', description: 'Check accessibility, Web Vitals, metadata, security, PWA readiness, and Chromium issues together', category: 'Current website', keywords: ['quality', 'audit', 'seo', 'pwa', 'accessibility', 'performance', 'security'], websiteOnly: true },
   { id: 'accessibility', label: 'Run accessibility audit', description: 'Check the current website against WCAG AA', category: 'Current website', keywords: ['a11y', 'wcag'], websiteOnly: true },
   { id: 'performance', label: 'Measure page performance', description: 'Collect current navigation and rendering metrics', category: 'Current website', keywords: ['speed', 'web vitals'], websiteOnly: true },
   { id: 'design-overview', label: 'Capture design overview', description: 'Review computed colors, typography, and contrast', category: 'Current website', keywords: ['css', 'fonts', 'palette', 'style'], websiteOnly: true },

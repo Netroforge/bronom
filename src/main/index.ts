@@ -1198,6 +1198,7 @@ function detachedPanelTitle(panel: DetachablePanelId): string {
     'responsive-preview': 'Responsive preview',
     environment: 'Environment',
     accessibility: 'Accessibility',
+    'quality-audit': 'Quality audit',
     performance: 'Performance',
     'design-overview': 'Design overview',
     'page-metadata': 'Page metadata',
@@ -1892,6 +1893,11 @@ function registerIpc(): void {
       throw new TypeError('Invalid accessibility audit options')
     }
     return tabsManager!.accessibilityAudit(value as BrowserAccessibilityAuditOptions)
+  })
+  ipcMain.handle('browser:quality-audit', (event, tabId: unknown) => {
+    assertTrustedShellSender(event)
+    if (tabId !== undefined && typeof tabId !== 'string') throw new TypeError('Invalid quality audit tab')
+    return tabsManager!.qualityAudit(tabId)
   })
   ipcMain.handle('browser:performance', (event, value: unknown) => {
     assertTrustedShellSender(event)

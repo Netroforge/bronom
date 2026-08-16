@@ -856,6 +856,49 @@ export interface BrowserSecurityReport {
   caveats: string[]
 }
 
+export type BrowserQualityAuditStatus = 'pass' | 'warning' | 'error'
+export type BrowserQualityAuditCategoryStatus = BrowserQualityAuditStatus | 'info' | 'not-applicable'
+export type BrowserQualityAuditCategoryId =
+  | 'accessibility'
+  | 'performance'
+  | 'metadata'
+  | 'security'
+  | 'pwa'
+  | 'browser-issues'
+
+export interface BrowserQualityAuditFinding {
+  category: BrowserQualityAuditCategoryId
+  severity: 'error' | 'warning' | 'info'
+  code: string
+  message: string
+}
+
+export interface BrowserQualityAuditCategory {
+  id: BrowserQualityAuditCategoryId
+  label: string
+  status: BrowserQualityAuditCategoryStatus
+  summary: string
+  findingCount: number
+  evidence: string[]
+}
+
+export interface BrowserQualityAudit {
+  tabId: string
+  url: string
+  title: string
+  auditedAt: string
+  status: BrowserQualityAuditStatus
+  totals: {
+    errors: number
+    warnings: number
+    info: number
+  }
+  categories: BrowserQualityAuditCategory[]
+  findings: BrowserQualityAuditFinding[]
+  truncated: boolean
+  caveats: string[]
+}
+
 export type BrowserCodeCoverageMode = 'function' | 'block'
 export type BrowserCodeCoverageAction = 'get' | 'start' | 'stop' | 'clear'
 export type BrowserCodeCoverageStatus = 'idle' | 'recording' | 'complete'
@@ -2096,6 +2139,7 @@ export interface BronomApi {
   inspectDesign(tabId?: string): Promise<BrowserDesignOverviewReport>
   inspectPageMetadata(tabId?: string): Promise<BrowserPageMetadataReport>
   inspectSecurity(tabId?: string): Promise<BrowserSecurityReport>
+  runQualityAudit(tabId?: string): Promise<BrowserQualityAudit>
   manageCodeCoverage(options?: BrowserCodeCoverageOptions): Promise<BrowserCodeCoverageResult>
   manageCpuProfile(options?: BrowserCpuProfileOptions): Promise<BrowserCpuProfileResult>
   measureMemory(options?: BrowserMemoryOptions): Promise<BrowserMemoryReport>
@@ -2134,6 +2178,7 @@ export const DETACHABLE_PANEL_IDS = [
   'responsive-preview',
   'environment',
   'accessibility',
+  'quality-audit',
   'performance',
   'design-overview',
   'page-metadata',

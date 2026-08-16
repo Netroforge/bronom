@@ -127,6 +127,7 @@ const api: BronomApi = {
   cancelElementPicker: (tabId?: string) => ipcRenderer.invoke('browser:cancel-element-picker', tabId),
   runAccessibilityAudit: (options: BrowserAccessibilityAuditOptions = {}) =>
     ipcRenderer.invoke('browser:accessibility-audit', options),
+  runQualityAudit: (tabId?: string) => ipcRenderer.invoke('browser:quality-audit', tabId),
   measurePerformance: (options: BrowserPerformanceOptions = {}) =>
     ipcRenderer.invoke('browser:performance', options),
   inspectDesign: (tabId?: string) => ipcRenderer.invoke('browser:design-overview', tabId),
