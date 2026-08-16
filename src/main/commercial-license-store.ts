@@ -25,6 +25,13 @@ function validDate(value: unknown): value is string {
   return typeof value === 'string' && Number.isFinite(Date.parse(value))
 }
 
+function licenseGrantIsActive(status: string | undefined, expiresAt: string | null | undefined): boolean {
+  if (status !== 'active') return false
+  if (expiresAt == null) return true
+  const expiration = Date.parse(expiresAt)
+  return Number.isFinite(expiration) && expiration > Date.now()
+}
+
 function parsedState(value: unknown): PersistedCommercialLicense | null {
   if (!value || typeof value !== 'object') return null
   const entry = value as Partial<PersistedCommercialLicense>
@@ -91,7 +98,7 @@ export class CommercialLicenseStore {
   async saveValidation(result: CommercialLicenseProviderResult): Promise<void> {
     this.value = {
       ...this.value,
-      status: result.status,
+      status: result.valid ? result.status : 'inactive',
       activations: result.activations,
       activationLimit: result.activationLimit,
       expiresAt: result.expiresAt,
@@ -115,9 +122,11 @@ export class CommercialLicenseStore {
   }
 
   summary(secureStorageAvailable: boolean, message?: string): CommercialLicenseState {
-    const active = this.value.status === 'active' && this.hasActivation()
+    const hasActivation = this.hasActivation()
+    const active = hasActivation && licenseGrantIsActive(this.value.status, this.value.expiresAt)
+    const status = this.value.status === 'active' && !active && hasActivation ? 'expired' : this.value.status
     return {
-      status: this.hasActivation() ? (this.value.status ?? 'validation-required') : 'not-activated',
+      status: hasActivation ? (status ?? 'validation-required') : 'not-activated',
       active,
       secureStorageAvailable,
       maskedKey: this.value.keySuffix ? `••••-${this.value.keySuffix}` : undefined,

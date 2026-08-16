@@ -72,4 +72,36 @@ describe('CommercialLicenseStore', () => {
     expect(store.summary(true)).toMatchObject({ active: false, status: 'inactive', maskedKey: '••••-MNOP' })
     expect(await store.credentials()).toEqual({ licenseKey: 'ABCD-EFGH-IJKL-MNOP', instanceId: 'inst_abcdefgh1234' })
   })
+
+  it('does not retain an active grant when validation says the license is invalid', async () => {
+    const { store } = await createStore()
+    await store.saveActivation('ABCD-EFGH-IJKL-MNOP', {
+      valid: true,
+      status: 'active',
+      productId: 'prod_bronom',
+      instanceId: 'inst_abcdefgh1234'
+    })
+
+    await store.saveValidation({
+      valid: false,
+      status: 'active',
+      productId: 'prod_bronom'
+    })
+
+    expect(store.summary(true)).toMatchObject({ active: false, status: 'inactive', maskedKey: '••••-MNOP' })
+  })
+
+  it('stops granting offline access after the stored subscription expiration', async () => {
+    const { store } = await createStore()
+    await store.saveActivation('ABCD-EFGH-IJKL-MNOP', {
+      valid: true,
+      status: 'active',
+      productId: 'prod_bronom',
+      instanceId: 'inst_abcdefgh1234',
+      expiresAt: '2000-01-01T00:00:00.000Z'
+    })
+
+    expect(store.summary(true)).toMatchObject({ active: false, status: 'expired', maskedKey: '••••-MNOP' })
+    expect(await store.credentials()).toEqual({ licenseKey: 'ABCD-EFGH-IJKL-MNOP', instanceId: 'inst_abcdefgh1234' })
+  })
 })
