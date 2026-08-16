@@ -537,6 +537,13 @@ export interface BrowserPerformanceScriptContributor {
   forcedStyleAndLayoutDurationMs: number
 }
 
+export interface BrowserPerformanceUserTiming {
+  type: 'mark' | 'measure'
+  name: string
+  startTimeMs: number
+  durationMs: number
+}
+
 export interface BrowserPerformanceEnvironment {
   network: BrowserNetworkEmulation
   cacheDisabled: boolean
@@ -621,6 +628,11 @@ export interface BrowserPerformanceReport {
     styleAndLayoutDurationMs: number | null
     frames: BrowserPerformanceLongAnimationFrame[]
     contributors: BrowserPerformanceScriptContributor[]
+    truncated: boolean
+  }
+  userTimings: {
+    count: number
+    entries: BrowserPerformanceUserTiming[]
     truncated: boolean
   }
   caveats: string[]

@@ -6620,6 +6620,18 @@ onBeforeUnmount(() => {
             </div>
             <p v-else-if="performanceReport.longAnimationFrames.supported && performanceReport.longAnimationFrames.count" class="performance-hint"><IconInfo aria-hidden="true" /> Long frames were observed, but Chromium did not attribute them to a same-origin main-thread script.</p>
           </section>
+          <section v-if="performanceReport.userTimings.count">
+            <h3>User timing</h3>
+            <div class="performance-contributors performance-user-timings">
+              <ol>
+                <li v-for="(entry, index) in performanceReport.userTimings.entries" :key="`${entry.type}-${entry.startTimeMs}-${index}`">
+                  <span><strong>{{ entry.name }}</strong><small>{{ entry.type }} · {{ Math.round(entry.startTimeMs) }} ms after navigation</small></span>
+                  <output>{{ entry.type === 'measure' ? `${Math.round(entry.durationMs)} ms` : 'mark' }}</output>
+                </li>
+              </ol>
+              <p v-if="performanceReport.userTimings.truncated" class="performance-attribution-note">Showing the {{ performanceReport.userTimings.entries.length }} most recent of {{ performanceReport.userTimings.count }} marks and measures.</p>
+            </div>
+          </section>
           <p v-if="!performanceMetric('INP')" class="performance-hint"><IconInfo aria-hidden="true" /> Interact with the page, then measure again to collect INP.</p>
           <details>
             <summary>How to interpret this report</summary>

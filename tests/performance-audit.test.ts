@@ -71,6 +71,7 @@ function sampleReport(values: {
       contributors: [],
       truncated: false
     },
+    userTimings: { count: 0, entries: [], truncated: false },
     caveats: []
   }
 }
@@ -169,9 +170,12 @@ describe('performance audit', () => {
     expect(script).toContain("scope: 'current-visit'")
     expect(script).toContain("getEntriesByType('resource')")
     expect(script).toContain("includes('long-animation-frame')")
+    expect(script).toContain("getEntriesByType('mark')")
+    expect(script).toContain("getEntriesByType('measure')")
+    expect(script).toContain('slice(-config.maxUserTimings)')
     expect(script).toContain('forcedStyleAndLayoutDurationMs')
     expect(script).not.toContain('outerHTML')
-    expect(script).not.toContain('entry.name')
+    expect(script).not.toContain('entry.detail')
   })
 
   it('redacts page-authored performance attribution before returning it', () => {
@@ -234,6 +238,14 @@ describe('performance audit', () => {
         }],
         truncated: false
       },
+      userTimings: {
+        count: 2,
+        entries: [
+          { type: 'mark', name: 'login-start token=user-timing-secret', startTimeMs: 10, durationMs: 0 },
+          { type: 'measure', name: 'login-duration kept', startTimeMs: 10, durationMs: 25 }
+        ],
+        truncated: false
+      },
       caveats: []
     } satisfies BrowserPerformanceReport)
 
@@ -242,7 +254,9 @@ describe('performance audit', () => {
     expect(JSON.stringify(report)).not.toContain('script-secret')
     expect(JSON.stringify(report)).not.toContain('function-secret')
     expect(JSON.stringify(report)).not.toContain('invoker-secret')
+    expect(JSON.stringify(report)).not.toContain('user-timing-secret')
     expect(report.url).toContain('view=kept')
     expect(report.longAnimationFrames.contributors[0]?.sourceUrl).toContain('variant=kept')
+    expect(report.userTimings.entries[1]?.name).toContain('kept')
   })
 })

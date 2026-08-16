@@ -1589,7 +1589,7 @@ button { color: inherit; }
 .performance-details dt { color: var(--muted); font-size: 12px; }
 .performance-details dd { margin: 0; color: var(--text); font-size: 13px; font-weight: 750; font-variant-numeric: tabular-nums; }
 .performance-details dd:has(.performance-inline-delta) { display: grid; gap: 2px; }
-.performance-inline-delta { color: var(--muted); font-size: 10px; font-weight: 750; }
+.performance-inline-delta { color: var(--muted); font-size: 11px; font-weight: 750; }
 .performance-inline-delta.improved { color: var(--success); }
 .performance-inline-delta.regressed { color: #b62828; }
 .performance-contributors { margin-top: 10px; }
@@ -1603,6 +1603,8 @@ button { color: inherit; }
 .performance-contributors small { color: var(--muted); font-size: 11px; }
 .performance-contributors output { flex: 0 0 auto; display: grid; gap: 2px; color: var(--text); font-size: 12px; font-weight: 750; text-align: right; font-variant-numeric: tabular-nums; }
 .performance-contributors output small { font-weight: 500; }
+.performance-user-timings { margin-top: 0; }
+.performance-user-timings output { min-width: 46px; }
 .performance-attribution-note { margin: 7px 0 0; color: var(--muted); font-size: 11px; }
 .performance-hint { display: flex; align-items: flex-start; gap: 7px; margin: 14px 0 0; padding: 10px; border-radius: 8px; color: var(--muted); background: var(--accent-soft); font-size: 12px; line-height: 1.45; }
 .performance-hint svg { width: 16px; height: 16px; flex: 0 0 auto; color: var(--accent-text); }

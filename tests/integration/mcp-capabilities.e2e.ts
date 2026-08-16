@@ -338,6 +338,7 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
           outerConsoleAssert();
         };
         window.runLongAnimationFrameProbe = () => new Promise((resolve) => {
+          performance.mark('probe-start token=user-timing-secret');
           requestAnimationFrame(() => {
             const probe = document.querySelector('#capture-target');
             const deadline = performance.now() + 90;
@@ -347,7 +348,11 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
               void probe.offsetWidth;
               iteration += 1;
             }
-            requestAnimationFrame(() => resolve(iteration));
+            requestAnimationFrame(() => {
+              performance.mark('probe-finished');
+              performance.measure('Long frame probe kept', 'probe-start token=user-timing-secret', 'probe-finished');
+              resolve(iteration);
+            });
           });
         });
         window.startMemorySaverProbe = () => setInterval(() => fetch('/memory-saver-tick'), 40);
@@ -666,6 +671,11 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
         frames: expect.any(Array),
         contributors: expect.any(Array)
       },
+      userTimings: {
+        count: expect.any(Number),
+        entries: expect.any(Array),
+        truncated: false
+      },
       baseline: { measuredAt: performanceBaseline.measuredAt },
       comparison: {
         sameUrl: true,
@@ -676,6 +686,11 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     expect(performanceReport.longAnimationFrames.count).toBeGreaterThan(0)
     expect(performanceReport.longAnimationFrames.longestDurationMs).toBeGreaterThanOrEqual(50)
     expect(performanceReport.longAnimationFrames.contributors.length).toBeGreaterThan(0)
+    expect(performanceReport.userTimings.count).toBeGreaterThanOrEqual(3)
+    expect(performanceReport.userTimings.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'measure', name: 'Long frame probe kept', durationMs: expect.any(Number) })
+    ]))
+    expect(JSON.stringify(performanceReport.userTimings)).not.toContain('user-timing-secret')
     expect(performanceReport.comparison.metrics.find((metric: { name: string }) => metric.name === 'LOAF_BLOCKING')).toMatchObject({
       unit: 'ms',
       direction: 'regressed',
@@ -702,6 +717,8 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     await expect(performancePanel).toContainText('Resources')
     await expect(performancePanel).toContainText('Long animation frames')
     await expect(performancePanel).toContainText('Top script contributors')
+    await expect(performancePanel).toContainText('User timing')
+    await expect(performancePanel).toContainText('Long frame probe kept')
     await expect(performancePanel).toContainText('local sample')
     await expect(performancePanel).toContainText('Compared with baseline')
     await expect(performancePanel.getByRole('button', { name: 'Clear baseline' })).toBeVisible()

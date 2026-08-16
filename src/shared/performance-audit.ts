@@ -18,7 +18,9 @@ export const PERFORMANCE_AUDIT_LIMITS = {
   maxReportedLongAnimationFrames: 10,
   maxScriptContributors: 10,
   maxAttributionChars: 300,
-  maxSourceUrlChars: 2_048
+  maxSourceUrlChars: 2_048,
+  maxUserTimings: 50,
+  maxUserTimingNameChars: 200
 } as const
 
 export interface NormalizedPerformanceOptions {
@@ -106,7 +108,9 @@ export function performanceAuditPageScript(
     maxReportedLongAnimationFrames: PERFORMANCE_AUDIT_LIMITS.maxReportedLongAnimationFrames,
     maxScriptContributors: PERFORMANCE_AUDIT_LIMITS.maxScriptContributors,
     maxAttributionChars: PERFORMANCE_AUDIT_LIMITS.maxAttributionChars,
-    maxSourceUrlChars: PERFORMANCE_AUDIT_LIMITS.maxSourceUrlChars
+    maxSourceUrlChars: PERFORMANCE_AUDIT_LIMITS.maxSourceUrlChars,
+    maxUserTimings: PERFORMANCE_AUDIT_LIMITS.maxUserTimings,
+    maxUserTimingNameChars: PERFORMANCE_AUDIT_LIMITS.maxUserTimingNameChars
   })
   return `(() => {
     const config = ${config};
@@ -268,6 +272,23 @@ export function performanceAuditPageScript(
       }
       const longTaskDurations = collector.longTasks.map((entry) => finite(entry.duration) || 0);
       const longFrames = collector.longAnimationFrames || [];
+      const userMarks = performance.getEntriesByType('mark');
+      const userMeasures = performance.getEntriesByType('measure');
+      const allUserTimingCount = userMarks.length + userMeasures.length;
+      const allUserTimings = [
+        ...userMarks.slice(-config.maxUserTimings).map((entry) => ({
+          type: 'mark',
+          name: boundedText(entry.name, config.maxUserTimingNameChars) || '(unnamed)',
+          startTimeMs: finite(entry.startTime) || 0,
+          durationMs: 0
+        })),
+        ...userMeasures.slice(-config.maxUserTimings).map((entry) => ({
+          type: 'measure',
+          name: boundedText(entry.name, config.maxUserTimingNameChars) || '(unnamed)',
+          startTimeMs: finite(entry.startTime) || 0,
+          durationMs: finite(entry.duration) || 0
+        }))
+      ].sort((left, right) => left.startTimeMs - right.startTimeMs);
       const contributorMap = new Map();
       for (const frame of longFrames) {
         for (const script of frame.scripts || []) {
@@ -359,11 +380,17 @@ export function performanceAuditPageScript(
             })),
           truncated: collector.longAnimationFramesTruncated || longFrames.length > config.maxReportedLongAnimationFrames
         },
+        userTimings: {
+          count: allUserTimingCount,
+          entries: allUserTimings.slice(-config.maxUserTimings),
+          truncated: allUserTimingCount > config.maxUserTimings
+        },
         caveats: [
           'This is one local current-visit sample, not field data or a 75th-percentile CrUX result.',
           'INP is unavailable until the page receives a qualifying interaction; some metrics are unavailable for background or short-lived visits.',
           'Long animation frame attribution identifies script entry points rather than necessarily the slowest internal function.',
-          'Cross-origin frames, workers, service workers, and isolated-world code may contribute work without script attribution.'
+          'Cross-origin frames, workers, service workers, and isolated-world code may contribute work without script attribution.',
+          'User Timing names are page-authored and sanitized; arbitrary detail objects, stack traces, and source code are omitted.'
         ]
       });
     }, config.settleMs));
@@ -416,6 +443,13 @@ export function sanitizePerformanceReport(report: BrowserPerformanceReport): Bro
           forcedStyleAndLayoutDurationMs: contributor.forcedStyleAndLayoutDurationMs
         }
       })
+    },
+    userTimings: {
+      ...report.userTimings,
+      entries: report.userTimings.entries.map((entry) => ({
+        ...entry,
+        name: safePerformanceText(entry.name, PERFORMANCE_AUDIT_LIMITS.maxUserTimingNameChars) ?? '(unnamed)'
+      }))
     }
   }
 }

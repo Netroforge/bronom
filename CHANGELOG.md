@@ -7,6 +7,7 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 ### Added
 
 - Save a volatile per-tab Page performance baseline from the human panel or `browser_performance`, then compare later local samples across Web Vitals, load time, transferred bytes, long-task blocking, and Long Animation Frame blocking with explicit URL and browser-environment compatibility warnings.
+- Surface the 50 most recent sanitized `performance.mark()` and `performance.measure()` entries in Page performance and `browser_performance`, including start time and duration while omitting arbitrary detail objects, stacks, and source code.
 
 ## [1.1.0] - 2026-08-16
 
