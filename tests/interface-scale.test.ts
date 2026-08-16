@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_INTERFACE_SCALE,
@@ -23,5 +24,22 @@ describe('interface scale', () => {
     expect(scaleShellMetric(Number.NaN, 1.1)).toBe(0)
     expect(scaleShellMetric(-10, 1.1)).toBe(0)
     expect(scaleShellMetric(105, 0)).toBe(0)
+  })
+
+  it('keeps application text at readable compact-label sizes', () => {
+    const sources = [
+      readFileSync(new URL('../src/renderer/src/styles.css', import.meta.url), 'utf8'),
+      readFileSync(new URL('../src/main/home-page.ts', import.meta.url), 'utf8'),
+      readFileSync(new URL('../src/main/browser/page-scripts.ts', import.meta.url), 'utf8')
+    ]
+
+    for (const source of sources) {
+      const explicitSizes = [...source.matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)]
+        .map((match) => Number(match[1]))
+      const shorthandSizes = [...source.matchAll(/\bfont:\s*['"]?(?:\d+\s+)?(\d+(?:\.\d+)?)px(?:\/|\s)/g)]
+        .map((match) => Number(match[1]))
+
+      expect([...explicitSizes, ...shorthandSizes].filter((size) => size < 11)).toEqual([])
+    }
   })
 })

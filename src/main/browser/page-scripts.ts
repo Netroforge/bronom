@@ -275,7 +275,7 @@ export function elementPickerScript(): string {
       color: '#fff',
       background: '#5747d6',
       boxShadow: '0 3px 12px rgba(0, 0, 0, 0.28)',
-      font: '600 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      font: '600 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
       whiteSpace: 'pre-line',
       overflow: 'hidden',
       textOverflow: 'ellipsis',
@@ -581,7 +581,7 @@ export function screenshotAreaScript(): string {
       borderRadius: '5px',
       color: '#fff',
       background: '#17142d',
-      font: '600 11px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      font: '600 12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
       whiteSpace: 'nowrap'
     });
     document.documentElement.append(shade, selection, hint, size);

@@ -45,6 +45,27 @@ test('offers System, Light, Dark, and Cyberpunk themes in Settings', async ({ ap
   await expect(appWindow.locator('html')).toHaveAttribute('data-theme', 'light')
 })
 
+test('keeps supporting text readable in Settings and page tools', async ({ appWindow }) => {
+  await appWindow.getByRole('button', { name: 'Settings' }).click()
+  await appWindow.getByRole('button', { name: /Privacy & data/ }).click()
+
+  const settingsSizes = await appWindow.evaluate(`(() => ({
+    navigation: Number.parseFloat(getComputedStyle(document.querySelector('.settings-nav-item small')).fontSize),
+    description: Number.parseFloat(getComputedStyle(document.querySelector('.setting-copy p')).fontSize),
+    privacyChoice: Number.parseFloat(getComputedStyle(document.querySelector('.privacy-category-options small')).fontSize)
+  }))()`)
+  expect(settingsSizes).toEqual({ navigation: 12, description: 14, privacyChoice: 12 })
+
+  await appWindow.getByRole('button', { name: 'Close', exact: true }).click()
+  await appWindow.getByRole('button', { name: 'New tab' }).click()
+  await appWindow.getByRole('button', { name: 'Page tools' }).click()
+  await expect(appWindow.getByRole('dialog', { name: 'Page tools' })).toBeVisible()
+  const pageToolDescription = await appWindow.evaluate(
+    "Number.parseFloat(getComputedStyle(document.querySelector('.page-tools-grid small')).fontSize)"
+  )
+  expect(pageToolDescription).toBe(12)
+})
+
 test('explains commercial licensing without interrupting the user', async ({ appWindow }) => {
   await appWindow.getByRole('button', { name: 'Settings' }).click()
   await appWindow.getByRole('button', { name: /Commercial licensing/ }).click()
