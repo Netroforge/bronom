@@ -8,6 +8,7 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 - Serialize update checks, downloads, and installation so native menu or tray actions cannot race an active updater operation, and never start a download from a generic check-error state without fresh update metadata.
 - Replace the remaining paid-use wording in the native Help menu and supporter-key feedback after the Apache 2.0 transition.
+- Keep the public website's MCP tool count and feature numbering aligned with the application, offer the Linux ARM64 AppImage already produced by releases, and collapse the long capability catalog behind an accessible progressive control.
 
 ## [1.4.0] - 2026-08-16
 

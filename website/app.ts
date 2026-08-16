@@ -1,3 +1,5 @@
+import { isReleaseAssetTarget, matchingReleaseAsset } from '../src/shared/release-assets'
+
 interface ClientConfiguration {
   location: string
   code: string
@@ -53,6 +55,24 @@ document.querySelectorAll<HTMLButtonElement>('[data-client]').forEach((button) =
   button.addEventListener('click', () => selectClient(button.dataset.client ?? 'codex'))
 })
 
+const featureGrid = document.querySelector<HTMLElement>('#feature-grid')
+const featureToggle = document.querySelector<HTMLButtonElement>('#feature-toggle')
+
+if (featureGrid && featureToggle) {
+  const capabilityCount = featureGrid.querySelectorAll(':scope > article').length
+  const setFeaturesExpanded = (expanded: boolean): void => {
+    featureGrid.classList.toggle('features-collapsed', !expanded)
+    featureToggle.setAttribute('aria-expanded', String(expanded))
+    featureToggle.textContent = expanded ? 'Show fewer capabilities' : `Show all ${capabilityCount} capabilities`
+  }
+
+  featureToggle.hidden = false
+  setFeaturesExpanded(false)
+  featureToggle.addEventListener('click', () => {
+    setFeaturesExpanded(featureToggle.getAttribute('aria-expanded') !== 'true')
+  })
+}
+
 copyConfig?.addEventListener('click', async () => {
   if (!configCode) return
   await navigator.clipboard.writeText(configCode.textContent ?? '')
@@ -62,26 +82,19 @@ copyConfig?.addEventListener('click', async () => {
 })
 
 const releaseApi = 'https://api.github.com/repos/Netroforge/bronom/releases/latest'
-const matchers: Record<string, RegExp> = {
-  windows: /x64-setup\.exe$/i,
-  'mac-arm': /arm64\.dmg$/i,
-  'mac-x64': /x64\.dmg$/i,
-  linux: /x86_64\.AppImage$/i
-}
-
 document.querySelectorAll<HTMLAnchorElement>('[data-download]').forEach((link) => {
   link.addEventListener('click', async (event) => {
     event.preventDefault()
     const fallback = link.href
     const status = document.querySelector<HTMLElement>('#download-status')
-    const matcher = matchers[link.dataset.download ?? '']
+    const target = link.dataset.download
     link.setAttribute('aria-busy', 'true')
     if (status) status.textContent = 'Finding the latest release asset on GitHub…'
     try {
       const response = await fetch(releaseApi, { headers: { Accept: 'application/vnd.github+json' } })
       if (!response.ok) throw new Error(`GitHub returned ${response.status}`)
       const release = (await response.json()) as GitHubRelease
-      const asset = matcher ? release.assets.find((candidate) => matcher.test(candidate.name)) : undefined
+      const asset = isReleaseAssetTarget(target) ? matchingReleaseAsset(release.assets, target) : undefined
       if (!asset) throw new Error('No matching release asset was found')
       window.location.assign(asset.browser_download_url)
     } catch {

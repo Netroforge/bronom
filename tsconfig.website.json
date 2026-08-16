@@ -10,5 +10,5 @@
     "noUncheckedIndexedAccess": true,
     "skipLibCheck": true
   },
-  "include": ["website/**/*.ts"]
+  "include": ["website/**/*.ts", "src/shared/release-assets.ts"]
 }
