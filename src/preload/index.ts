@@ -25,6 +25,7 @@ import type {
   BrowserDomChangesAction,
   BrowserVisualCompareOptions,
   BrowserNetworkHarOptions,
+  BrowserNetworkHarSaveOptions,
   BrowserNetworkSearchOptions,
   BrowserNetworkRouteInput,
   BrowserNetworkRouteMoveDirection,
@@ -157,6 +158,8 @@ const api: BronomApi = {
     ipcRenderer.invoke('browser:network-search', options),
   createNetworkHar: (options: BrowserNetworkHarOptions = {}) =>
     ipcRenderer.invoke('browser:network-har', options),
+  saveNetworkHar: (options: BrowserNetworkHarSaveOptions = {}) =>
+    ipcRenderer.invoke('browser:save-network-har', options),
   captureArea: (tabId?: string) => ipcRenderer.invoke('browser:capture-area', tabId),
   cancelAreaCapture: (tabId?: string) => ipcRenderer.invoke('browser:cancel-area-capture', tabId),
   show: () => ipcRenderer.invoke('browser:show'),

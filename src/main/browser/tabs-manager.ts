@@ -83,6 +83,7 @@ import {
 import {
   buildSanitizedNetworkHar,
   filterNetworkRequests,
+  networkHarFilename,
   normalizeNetworkHarOptions
 } from '../../shared/network-har.js'
 import { normalizeNetworkSearchOptions, searchNetworkDetails } from '../../shared/network-search.js'
@@ -197,7 +198,9 @@ import type {
   BrowserNetworkSearchResult,
   BrowserWebSocketMessage,
   BrowserNetworkHar,
+  BrowserNetworkHarExport,
   BrowserNetworkHarOptions,
+  BrowserNetworkHarSaveOptions,
   BrowserNetworkAbortReason,
   BrowserNetworkRouteInput,
   BrowserNetworkRouteMoveDirection,
@@ -3452,6 +3455,21 @@ export class BrowserTabsManager {
       includeBodies: normalized.includeBodies,
       truncated: filtered.length > selected.length
     })
+  }
+
+  async saveNetworkHar(options: BrowserNetworkHarSaveOptions = {}): Promise<BrowserNetworkHarExport> {
+    const tab = this.getTab(options.tabId)
+    const har = await this.networkHar(options)
+    const data = Buffer.from(`${JSON.stringify(har, null, 2)}\n`, 'utf8')
+    const path = await this.writeUniqueDownload(networkHarFilename(options.filename, tab.title), data)
+    return {
+      filename: basename(path),
+      path,
+      bytes: data.length,
+      requestCount: har._bronom.requestCount,
+      sanitized: true,
+      includesBodies: har._bronom.includesBodies
+    }
   }
 
   debugReport(options: BrowserDebugReportOptions = {}): BrowserDebugReport {

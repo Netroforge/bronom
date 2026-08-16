@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { buildSanitizedNetworkHar, filterNetworkRequests, normalizeNetworkHarOptions } from '../src/shared/network-har.js'
+import {
+  buildSanitizedNetworkHar,
+  filterNetworkRequests,
+  networkHarFilename,
+  normalizeNetworkHarOptions
+} from '../src/shared/network-har.js'
 import type { BrowserNetworkRequestDetails } from '../src/shared/types.js'
 
 const details: BrowserNetworkRequestDetails = {
@@ -72,6 +77,16 @@ const details: BrowserNetworkRequestDetails = {
 }
 
 describe('sanitized network HAR', () => {
+  it('creates portable sanitized filenames and rejects paths', () => {
+    expect(networkHarFilename(undefined, 'Example: account / overview.')).toBe('Example- account - overview.sanitized.har')
+    expect(networkHarFilename(undefined, '  ...  ')).toBe('network.sanitized.har')
+    expect(networkHarFilename('debug-session', 'Ignored')).toBe('debug-session.har')
+    expect(networkHarFilename('debug-session.HAR', 'Ignored')).toBe('debug-session.HAR')
+    for (const filename of ['', '.', '..', '../private', 'folder\\private', 'bad?.har', 'trailing.']) {
+      expect(() => networkHarFilename(filename, 'Ignored')).toThrow('portable file name')
+    }
+  })
+
   it('exports standard request metadata without sensitive headers or cookie collections', () => {
     const har = buildSanitizedNetworkHar({
       appVersion: '2.6.0',

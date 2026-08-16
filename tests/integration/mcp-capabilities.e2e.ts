@@ -1720,6 +1720,35 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     expect(text(networkHarResult)).not.toContain('request-secret')
     expect(text(networkHarResult)).not.toContain('response-secret')
 
+    const savedNetworkHarResult = await client.callTool({
+      name: 'browser_network_har',
+      arguments: {
+        tabId,
+        query: 'api-details',
+        resourceType: 'fetch/xhr',
+        maxRequests: 10,
+        saveToDownloads: true,
+        filename: 'fixture-network.har'
+      }
+    }) as CallToolResult
+    expect(savedNetworkHarResult.isError, text(savedNetworkHarResult)).not.toBe(true)
+    const savedNetworkHar = JSON.parse(text(savedNetworkHarResult))
+    expect(savedNetworkHar).toMatchObject({
+      filename: 'fixture-network.har',
+      path: join(profileDirectory, 'fixture-network.har'),
+      bytes: expect.any(Number),
+      requestCount: expect.any(Number),
+      sanitized: true,
+      includesBodies: false
+    })
+    const savedNetworkHarText = await readFile(savedNetworkHar.path, 'utf8')
+    expect(JSON.parse(savedNetworkHarText)).toMatchObject({
+      log: { version: '1.2' },
+      _bronom: { tabId, sanitized: true, includesBodies: false }
+    })
+    expect(savedNetworkHarText).not.toContain('request-secret')
+    expect(savedNetworkHarText).not.toContain('response-secret')
+
     await openPageTool('Open network monitor')
     const networkPanel = appWindow.getByRole('dialog', { name: 'Network' })
     await expect(networkPanel).toBeVisible()
@@ -1824,6 +1853,17 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       _bronom: { tabId, sanitized: true, includesBodies: false }
     })
     expect(copiedHar).not.toContain('request-secret')
+    await networkPanel.getByRole('button', { name: 'Save sanitized HAR' }).click()
+    const savedHarButton = networkPanel.locator('footer').getByRole('button', { name: 'Saved' })
+    await expect(savedHarButton).toBeVisible()
+    const savedHarPath = await savedHarButton.getAttribute('title')
+    expect(savedHarPath).toBeTruthy()
+    const savedHarText = await readFile(savedHarPath!, 'utf8')
+    expect(JSON.parse(savedHarText)).toMatchObject({
+      log: { version: '1.2' },
+      _bronom: { tabId, sanitized: true, includesBodies: false }
+    })
+    expect(savedHarText).not.toContain('request-secret')
     await networkPanel.getByRole('button', { name: 'Close network monitor' }).click()
 
     const debugReportResult = await client.callTool({

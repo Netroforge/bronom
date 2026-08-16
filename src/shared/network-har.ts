@@ -16,6 +16,30 @@ export const MAX_NETWORK_HAR_REQUESTS = 200
 export const DEFAULT_NETWORK_HAR_BODY_CHARS = 5_000
 export const MAX_NETWORK_HAR_BODY_CHARS = 20_000
 
+export function networkHarFilename(requested: string | undefined, title: string): string {
+  if (requested !== undefined) {
+    const filename = requested.trim()
+    if (
+      !filename
+      || filename === '.'
+      || filename === '..'
+      || filename.includes('/')
+      || filename.includes('\\')
+      || filename.length > 180
+      || /[\u0000-\u001f<>:"|?*]/.test(filename)
+      || /[. ]$/.test(filename)
+    ) throw new Error('HAR filename must be a portable file name without a directory path')
+    return filename.toLowerCase().endsWith('.har') ? filename : `${filename}.har`
+  }
+  const stem = title
+    .replace(/[\u0000-\u001f<>:"/\\|?*]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/[. ]+$/g, '')
+    .trim()
+    .slice(0, 150) || 'network'
+  return `${stem}.sanitized.har`
+}
+
 export interface NormalizedNetworkHarOptions {
   query: string
   resourceType?: string

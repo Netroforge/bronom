@@ -223,7 +223,7 @@ export const BROWSER_TOOL_CATALOG: BrowserToolDefinition[] = [
   { name: 'browser_network_search', category: 'Inspection', description: 'Search bounded sanitized URLs, headers, payloads, responses, and retained WebSocket text across recent requests; returns request IDs and short matching snippets for follow-up inspection.' },
   { name: 'browser_network_request', category: 'Inspection', description: 'Inspect one HTTP or WebSocket request with bounded bodies or messages, redacted secrets, response source, service-worker and Cache Storage provenance, initiator frames, redirect and Chromium-reported request relationships, browser timing, and parsed Server-Timing metrics; for HTTP(S), optionally return a sanitized cURL or fetch reproduction that must be reviewed before sharing or running.' },
   { name: 'browser_network_replay', category: 'Interaction', description: 'Replay one retained XMLHttpRequest inside its original tab and session without exposing its original credentials, headers, or body. GET and HEAD replay directly; every other method requires confirmSideEffects: true because it can repeat writes or other side effects.' },
-  { name: 'browser_network_har', category: 'Inspection', description: 'Export a filtered, bounded, sanitized HAR 1.2 network log with bodies omitted by default.' },
+  { name: 'browser_network_har', category: 'Inspection', description: 'Return or save a filtered, bounded, sanitized HAR 1.2 network log with bodies omitted by default; saved files use collision-safe names in Downloads.' },
   { name: 'browser_network_routes', category: 'Inspection', description: 'List, add, prioritize, remove, or clear temporary per-tab request mocks, failures, and individual network throttles.' },
   { name: 'browser_downloads', category: 'Inspection', description: 'List, cancel, or clear tracked downloads.' },
   { name: 'browser_evaluate', category: 'Inspection', description: 'Evaluate JavaScript and return a JSON-safe result.' }
@@ -1459,10 +1459,12 @@ function createBrowserMcpServer(
         errorsOnly: z.boolean().optional(),
         includeBodies: z.boolean().optional(),
         maxRequests: z.number().int().min(1).max(200).optional(),
-        maxBodyChars: z.number().int().min(1_000).max(20_000).optional()
+        maxBodyChars: z.number().int().min(1_000).max(20_000).optional(),
+        saveToDownloads: z.boolean().optional(),
+        filename: z.string().min(1).max(180).optional()
       }
     },
-    tabTool('browser_network_har', async (options: {
+    tabTool('browser_network_har', async ({ saveToDownloads, filename, ...options }: {
       tabId?: string
       query?: string
       resourceType?: string
@@ -1470,7 +1472,11 @@ function createBrowserMcpServer(
       includeBodies?: boolean
       maxRequests?: number
       maxBodyChars?: number
-    }) => textResult(await manager.networkHar(options)))
+      saveToDownloads?: boolean
+      filename?: string
+    }) => textResult(saveToDownloads
+      ? await manager.saveNetworkHar({ ...options, filename })
+      : await manager.networkHar(options)))
   )
   registerGroupTool(
     'browser_network_routes',

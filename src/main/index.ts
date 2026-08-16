@@ -80,6 +80,7 @@ import {
   type BrowserDomChangesAction,
   type BrowserVisualCompareOptions,
   type BrowserNetworkHarOptions,
+  type BrowserNetworkHarSaveOptions,
   type BrowserNetworkSearchOptions,
   type BrowserNetworkRouteInput,
   type BrowserBookmark,
@@ -1974,6 +1975,24 @@ function registerIpc(): void {
       throw new TypeError('Invalid network HAR options')
     }
     return tabsManager!.networkHar(value as BrowserNetworkHarOptions)
+  })
+  ipcMain.handle('browser:save-network-har', (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Invalid network HAR save options')
+    const { tabId, query, resourceType, errorsOnly, includeBodies, maxRequests, maxBodyChars, filename } = value as Record<string, unknown>
+    if (
+      (tabId !== undefined && typeof tabId !== 'string')
+      || (query !== undefined && typeof query !== 'string')
+      || (resourceType !== undefined && typeof resourceType !== 'string')
+      || (errorsOnly !== undefined && typeof errorsOnly !== 'boolean')
+      || (includeBodies !== undefined && typeof includeBodies !== 'boolean')
+      || (maxRequests !== undefined && typeof maxRequests !== 'number')
+      || (maxBodyChars !== undefined && typeof maxBodyChars !== 'number')
+      || (filename !== undefined && typeof filename !== 'string')
+    ) {
+      throw new TypeError('Invalid network HAR save options')
+    }
+    return tabsManager!.saveNetworkHar(value as BrowserNetworkHarSaveOptions)
   })
   ipcMain.handle('browser:capture-area', async (event, tabId) => {
     assertTrustedShellSender(event)

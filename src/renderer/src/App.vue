@@ -107,6 +107,7 @@ import {
   BrowserEnvironmentSettings,
   BrowserInspectorIssuesReport,
   BrowserNetworkHar,
+  BrowserNetworkHarExport,
   BrowserNetworkSearchMatch,
   BrowserNetworkSearchResult,
   BrowserNetworkAbortReason,
@@ -560,6 +561,8 @@ const networkFailuresOnly = ref(false)
 const networkSortBy = ref<BrowserNetworkRequestSortBy>('start-time')
 const networkSortDirection = ref<BrowserNetworkRequestSortDirection>('asc')
 const networkHarCopied = ref(false)
+const networkHarSaveState = ref<'idle' | 'saving' | 'saved'>('idle')
+const networkHarExport = ref<BrowserNetworkHarExport | null>(null)
 const requestConditionsExpanded = ref(false)
 const networkRoutes = ref<BrowserNetworkRouteSummary[]>([])
 const networkRouteState = ref<'idle' | 'loading' | 'ready' | 'saving' | 'error'>('idle')
@@ -3541,6 +3544,8 @@ async function refreshNetworkMonitor(clear = false): Promise<void> {
   networkMonitorState.value = 'loading'
   networkMonitorError.value = ''
   networkHarCopied.value = false
+  networkHarSaveState.value = 'idle'
+  networkHarExport.value = null
   if (clear) {
     networkRequestDetails.value = null
     networkSelectedRequestId.value = null
@@ -3936,6 +3941,31 @@ async function copySanitizedNetworkHar(): Promise<void> {
     networkHarCopied.value = true
     window.setTimeout(() => (networkHarCopied.value = false), 1_500)
   } catch (error) {
+    networkMonitorError.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
+async function saveSanitizedNetworkHar(): Promise<void> {
+  const tab = activeTab.value
+  if (!tab || networkHarSaveState.value === 'saving') return
+  networkMonitorError.value = ''
+  networkHarSaveState.value = 'saving'
+  networkHarExport.value = null
+  try {
+    networkHarExport.value = await browser.saveNetworkHar({
+      tabId: tab.id,
+      query: networkSearch.value,
+      resourceType: networkResourceFilter.value || undefined,
+      errorsOnly: networkFailuresOnly.value,
+      includeBodies: false,
+      maxRequests: 100
+    })
+    networkHarSaveState.value = 'saved'
+    window.setTimeout(() => {
+      if (networkHarSaveState.value === 'saved') networkHarSaveState.value = 'idle'
+    }, 2_500)
+  } catch (error) {
+    networkHarSaveState.value = 'idle'
     networkMonitorError.value = error instanceof Error ? error.message : String(error)
   }
 }
@@ -7757,10 +7787,22 @@ onBeforeUnmount(() => {
         <span>{{ filteredNetworkRequests.length }} of {{ networkRequests.length }} requests · {{ formatBytes(networkResponseBytes) }} captured</span>
         <div class="network-monitor-actions">
           <button type="button" :disabled="!networkRequests.length" @click="refreshNetworkMonitor(true)"><IconDelete aria-hidden="true" /> Clear</button>
-          <button type="button" class="primary" :disabled="!filteredNetworkRequests.length" @click="copySanitizedNetworkHar">
+          <button type="button" :disabled="!filteredNetworkRequests.length" @click="copySanitizedNetworkHar">
             <IconCheck v-if="networkHarCopied" aria-hidden="true" />
-            <IconDownload v-else aria-hidden="true" />
+            <IconCopy v-else aria-hidden="true" />
             {{ networkHarCopied ? 'Copied' : 'Copy sanitized HAR' }}
+          </button>
+          <button
+            type="button"
+            class="primary"
+            :title="networkHarExport?.path"
+            :disabled="!filteredNetworkRequests.length || networkHarSaveState === 'saving'"
+            @click="saveSanitizedNetworkHar"
+          >
+            <IconProgress v-if="networkHarSaveState === 'saving'" class="state-spinner" aria-hidden="true" />
+            <IconDownloadDone v-else-if="networkHarSaveState === 'saved'" aria-hidden="true" />
+            <IconDownload v-else aria-hidden="true" />
+            {{ networkHarSaveState === 'saving' ? 'Saving…' : networkHarSaveState === 'saved' ? 'Saved' : 'Save sanitized HAR' }}
           </button>
         </div>
       </footer>

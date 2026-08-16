@@ -1116,6 +1116,19 @@ export interface BrowserNetworkHarOptions {
   maxBodyChars?: number
 }
 
+export interface BrowserNetworkHarSaveOptions extends BrowserNetworkHarOptions {
+  filename?: string
+}
+
+export interface BrowserNetworkHarExport {
+  filename: string
+  path: string
+  bytes: number
+  requestCount: number
+  sanitized: true
+  includesBodies: boolean
+}
+
 export interface BrowserNetworkHarHeader {
   name: string
   value: string
@@ -1876,6 +1889,7 @@ export interface BronomApi {
   replayNetworkRequest(tabId: string, requestId: string, confirmSideEffects?: boolean): Promise<BrowserNetworkReplayResult>
   searchNetwork(options: BrowserNetworkSearchOptions): Promise<BrowserNetworkSearchResult>
   createNetworkHar(options?: BrowserNetworkHarOptions): Promise<BrowserNetworkHar>
+  saveNetworkHar(options?: BrowserNetworkHarSaveOptions): Promise<BrowserNetworkHarExport>
   captureArea(tabId?: string): Promise<BrowserAreaCaptureResult>
   cancelAreaCapture(tabId?: string): Promise<boolean>
   show(): Promise<void>
