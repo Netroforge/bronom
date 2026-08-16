@@ -56,4 +56,20 @@ describe('CommercialLicenseStore', () => {
     expect(store.installationName()).toBe(name)
     expect(store.summary(true)).toMatchObject({ active: false, status: 'not-activated' })
   })
+
+  it('marks a retained activation inactive when the subscription no longer grants access', async () => {
+    const { store } = await createStore()
+    await store.saveActivation('ABCD-EFGH-IJKL-MNOP', {
+      valid: true,
+      status: 'active',
+      productId: 'prod_bronom',
+      instanceId: 'inst_abcdefgh1234',
+      activationLimit: 3
+    })
+
+    await store.markInactive()
+
+    expect(store.summary(true)).toMatchObject({ active: false, status: 'inactive', maskedKey: '••••-MNOP' })
+    expect(await store.credentials()).toEqual({ licenseKey: 'ABCD-EFGH-IJKL-MNOP', instanceId: 'inst_abcdefgh1234' })
+  })
 })

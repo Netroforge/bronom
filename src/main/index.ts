@@ -562,12 +562,15 @@ function publishCommercialLicenseState(): CommercialLicenseState {
 function commercialLicenseFriendlyMessage(reason: string): string {
   const messages: Record<string, string> = {
     activation_limit_reached: 'This license has reached its device activation limit.',
+    commercial_inactive: 'The commercial subscription for this license is not active.',
+    entitlement_pending: 'This purchase is still being synchronized. Try again in a moment.',
     instance_conflict: 'This device activation is no longer available.',
     license_inactive: 'This commercial license is no longer active.',
     license_not_found: 'The license key was not found.',
     invalid_license: 'The license key could not be validated.',
     invalid_license_key: 'Enter the complete license key from your Creem receipt.',
     provider_unavailable: 'The licensing service is temporarily unavailable.',
+    provider_invalid_response: 'The licensing service returned an invalid response.',
     service_unavailable: 'The licensing service is temporarily unavailable.',
     wrong_product: 'This license key is not for Bronom.'
   }
@@ -606,6 +609,9 @@ async function refreshCommercialLicense(): Promise<CommercialLicenseState> {
     return publishCommercialLicenseState()
   } catch (error) {
     const reason = error instanceof CommercialLicenseError ? error.reason : 'service_unavailable'
+    if (reason === 'commercial_inactive' || reason === 'license_inactive' || reason === 'license_not_found') {
+      await commercialLicenseStore.markInactive()
+    }
     commercialLicenseMessage = reason === 'service_unavailable' || reason === 'provider_unavailable'
       ? 'Could not reach the licensing service. The last successful validation remains stored on this device.'
       : commercialLicenseFriendlyMessage(reason)

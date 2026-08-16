@@ -100,6 +100,15 @@ export class CommercialLicenseStore {
     await this.persist()
   }
 
+  async markInactive(): Promise<void> {
+    this.value = {
+      ...this.value,
+      status: 'inactive',
+      lastValidatedAt: new Date().toISOString()
+    }
+    await this.persist()
+  }
+
   async clear(): Promise<void> {
     this.value = { version: 1, installationId: this.value.installationId }
     await this.persist()
