@@ -9830,8 +9830,8 @@ onBeforeUnmount(() => {
             >
               <span class="settings-nav-icon" aria-hidden="true"><IconFavorite /></span>
               <span>
-                <strong>Commercial licensing</strong>
-                <small>Use Bronom in paid work</small>
+                <strong>Support Bronom</strong>
+                <small>Open source and contributions</small>
               </span>
             </button>
           </nav>
@@ -10344,13 +10344,13 @@ onBeforeUnmount(() => {
           </main>
           <main v-else class="settings-content support-settings">
             <div class="setting-copy">
-              <span class="support-kicker">Commercial licensing</span>
-              <h3>{{ commercialLicense.active ? 'Commercial license active' : 'License Bronom for paid work' }}</h3>
-              <p>Bronom is source-available under PolyForm Noncommercial 1.0.0. Businesses can evaluate it internally for 30 days; ongoing paid work requires one active license per named user.</p>
+              <span class="support-kicker">Open source</span>
+              <h3>{{ commercialLicense.active ? 'Thank you for supporting Bronom' : 'Support Bronom development' }}</h3>
+              <p>Bronom is open source under Apache 2.0. Personal and commercial use do not require activation; an optional supporter subscription helps fund continued development.</p>
             </div>
             <div v-if="commercialLicense.active" class="support-card commercial-license-card active">
               <span class="support-heart" aria-hidden="true"><IconCheck /></span>
-              <strong>{{ commercialLicense.maskedKey }} is active on this device.</strong>
+              <strong>Supporter key {{ commercialLicense.maskedKey }} is active on this device.</strong>
               <small>
                 {{ commercialLicense.activations ?? '—' }} of {{ commercialLicense.activationLimit ?? 'unlimited' }} device activations used.
                 <template v-if="commercialLicense.lastValidatedAt"> Last checked {{ new Date(commercialLicense.lastValidatedAt).toLocaleString() }}.</template>
@@ -10369,11 +10369,11 @@ onBeforeUnmount(() => {
             </div>
             <div v-else class="support-card commercial-license-card">
               <span class="support-heart" aria-hidden="true"><IconFavorite /></span>
-              <strong>Activate the key from your Creem receipt.</strong>
+              <strong>Activate an optional supporter key from your Creem receipt.</strong>
               <small v-if="commercialLicense.secureStorageAvailable">The key is encrypted with your operating system secure storage and is used only for Creem license validation.</small>
               <small v-else>License activation requires an operating-system secure storage backend.</small>
               <form class="commercial-license-form" @submit.prevent="activateCommercialLicense">
-                <label for="commercial-license-key">License key</label>
+                <label for="commercial-license-key">Supporter key</label>
                 <input
                   id="commercial-license-key"
                   v-model="commercialLicenseKey"
@@ -10384,18 +10384,18 @@ onBeforeUnmount(() => {
                   :disabled="!commercialLicense.secureStorageAvailable || commercialLicenseAction !== 'idle'"
                 />
                 <button class="primary-button support-primary" type="submit" :disabled="!commercialLicense.secureStorageAvailable || commercialLicenseAction !== 'idle'">
-                  {{ commercialLicenseAction === 'activating' ? 'Activating…' : 'Activate license' }}
+                  {{ commercialLicenseAction === 'activating' ? 'Activating…' : 'Activate supporter key' }}
                 </button>
               </form>
               <small v-if="commercialLicense.message">{{ commercialLicense.message }}</small>
               <small v-if="commercialLicenseError" class="commercial-license-error" role="alert">{{ commercialLicenseError }}</small>
-              <button class="secondary-button" type="button" @click="openSupport('https://bronom.pages.dev')">Buy a commercial license ↗</button>
+              <button class="secondary-button" type="button" @click="openSupport('https://bronom.pages.dev')">Support Bronom ↗</button>
             </div>
             <div class="support-alternatives">
-              <span>Review the terms</span>
-              <button type="button" @click="openSupport('https://github.com/Netroforge/bronom/blob/main/COMMERCIAL-LICENSE.md')">Commercial terms ↗</button>
-              <button type="button" @click="openSupport('https://github.com/Netroforge/bronom/blob/main/LICENSE')">PolyForm license ↗</button>
-              <button type="button" @click="openSupport('https://github.com/Netroforge/bronom/blob/main/EVALUATION-LICENSE.md')">30-day evaluation ↗</button>
+              <span>License and community</span>
+              <button type="button" @click="openSupport('https://github.com/Netroforge/bronom/blob/main/LICENSE')">Apache 2.0 license ↗</button>
+              <button type="button" @click="openSupport('https://github.com/Netroforge/bronom/blob/main/CONTRIBUTING.md')">Contributing guide ↗</button>
+              <button type="button" @click="openSupport('https://github.com/Netroforge/bronom/issues')">Report an issue ↗</button>
             </div>
           </main>
         </div>
@@ -10442,9 +10442,9 @@ onBeforeUnmount(() => {
           </div>
           <div class="about-actions">
             <button class="secondary-button" type="button" @click="openSupport('https://github.com/Netroforge/bronom')">GitHub repository</button>
-            <button class="secondary-button" type="button" @click="openSupport('https://github.com/Netroforge/bronom/blob/main/LICENSE')">PolyForm license</button>
+            <button class="secondary-button" type="button" @click="openSupport('https://github.com/Netroforge/bronom/blob/main/LICENSE')">Apache 2.0 license</button>
             <button class="secondary-button" type="button" @click="openSupport('https://github.com/Netroforge/bronom/blob/main/CONTRIBUTING.md')">Contribute</button>
-            <button class="primary-button" type="button" @click="openSupportSettings">Commercial licensing</button>
+            <button class="primary-button" type="button" @click="openSupportSettings">Support Bronom</button>
           </div>
         </div>
       </section>

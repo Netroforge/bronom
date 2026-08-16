@@ -2,7 +2,7 @@
 
 Bronom is a visible, multi-tab Electron browser that exposes its live tabs to AI clients through MCP. It is deliberately not headless and is not tied to the lifetime of an AI session.
 
-Bronom 1.0 is source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE). Permitted noncommercial uses are defined by that license. Business evaluation is available under a separate [30-day Evaluation License](EVALUATION-LICENSE.md); other commercial use requires a [commercial license](COMMERCIAL-LICENSE.md).
+Bronom is open source under the [Apache License 2.0](LICENSE), including commercial use, modification, and redistribution under its terms. Contributions are welcome under the same license.
 
 Project website: https://netroforge.github.io/bronom/
 
@@ -352,15 +352,11 @@ The website toolbar keeps navigation, the address field, find, zoom, bookmarks, 
 
 `browser_dialog` accepts or dismisses an already-open JavaScript `alert` or `confirm` dialog. An agent that knows a click or evaluation will open one can instead provide `dialogAction` directly to `browser_click` or `browser_evaluate`. For a website click that opens `window.prompt()`, `browser_click` also accepts `promptText`. Bronom responds inside the same operation so the page cannot deadlock the tool call. Electron does not implement native prompts, so Bronom installs a prompt response only around that explicit click; all other dialogs remain native and user-visible.
 
-## Commercial use
-
-PolyForm Noncommercial covers the noncommercial purposes, personal uses, and noncommercial organizations defined in [LICENSE](LICENSE). Use by a business, an independent professional, or in paid work requires either the limited [30-day Evaluation License](EVALUATION-LICENSE.md) or an active commercial subscription. Each commercial seat belongs to one named user and supports up to three active devices. Creem delivers the license key in the receipt and Customer Portal; activate it from **Settings → Commercial licensing**. See [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md) for the grant and restrictions.
-
 ## License and contributions
 
-Bronom is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE), using SPDX identifier `PolyForm-Noncommercial-1.0.0`. This is a source-available license, not an Open Source license. Bundled dependencies retain their own terms as documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Bronom is licensed under the [Apache License 2.0](LICENSE), using SPDX identifier `Apache-2.0`. The license permits personal and commercial use, modification, and redistribution subject to its notice and other terms. Bundled dependencies retain their own terms as documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-Bug reports, documentation suggestions, and security reports are welcome. Code contributions are temporarily paused until Netroforge publishes a contributor agreement compatible with source-available and commercial licensing; see [CONTRIBUTING.md](CONTRIBUTING.md).
+Bug reports, documentation suggestions, security reports, and focused code contributions are welcome. Contributors certify their right to submit work under Apache 2.0 using the Developer Certificate of Origin sign-off described in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Security model
 

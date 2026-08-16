@@ -20,7 +20,7 @@ test('offers System, Light, Dark, and Cyberpunk themes in Settings', async ({ ap
   expect(websiteView.bounds?.y).toBeGreaterThanOrEqual((websiteView.contentHeight ?? 1) - 1)
   expect(websiteView.bounds?.y).toBeGreaterThanOrEqual(Math.ceil(panelBounds!.y + panelBounds!.height))
 
-  for (const section of [/MCP security/, /Passwords/, /Commercial licensing/]) {
+  for (const section of [/MCP security/, /Passwords/, /Support Bronom/]) {
     await appWindow.getByRole('button', { name: section }).click()
     const sectionBounds = await appWindow.getByRole('dialog', { name: 'Settings' }).boundingBox()
     expect(sectionBounds?.height).toBeCloseTo(panelBounds!.height)
@@ -66,15 +66,16 @@ test('keeps supporting text readable in Settings and page tools', async ({ appWi
   expect(pageToolDescription).toBe(12)
 })
 
-test('explains commercial licensing without interrupting the user', async ({ appWindow }) => {
+test('explains optional project support without restricting use', async ({ appWindow }) => {
   await appWindow.getByRole('button', { name: 'Settings' }).click()
-  await appWindow.getByRole('button', { name: /Commercial licensing/ }).click()
-  await expect(appWindow.getByText('License Bronom for paid work')).toBeVisible()
-  await expect(appWindow.getByText(/one active license per named user/i)).toBeVisible()
-  await expect(appWindow.getByLabel('License key')).toBeVisible()
-  await expect(appWindow.getByRole('button', { name: 'Activate license' })).toBeVisible()
-  await expect(appWindow.getByRole('button', { name: 'Buy a commercial license ↗' })).toBeVisible()
-  await expect(appWindow.getByRole('button', { name: 'Commercial terms ↗' })).toBeVisible()
+  await appWindow.getByRole('button', { name: /Support Bronom/ }).click()
+  await expect(appWindow.getByText('Support Bronom development')).toBeVisible()
+  await expect(appWindow.getByText(/personal and commercial use do not require activation/i)).toBeVisible()
+  await expect(appWindow.getByLabel('Supporter key')).toBeVisible()
+  await expect(appWindow.getByRole('button', { name: 'Activate supporter key' })).toBeVisible()
+  await expect(appWindow.getByRole('button', { name: 'Support Bronom ↗' })).toBeVisible()
+  await expect(appWindow.getByRole('button', { name: 'Apache 2.0 license ↗' })).toBeVisible()
+  await expect(appWindow.getByRole('button', { name: 'Contributing guide ↗' })).toBeVisible()
 })
 
 test('persists the selected theme across application restarts', async ({

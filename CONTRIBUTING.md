@@ -1,20 +1,22 @@
 # Contributing to Bronom
 
-Thank you for helping improve Bronom. Bug reports, focused design proposals, documentation suggestions, accessibility feedback, and private security reports are welcome.
+Thank you for helping improve Bronom. Bug reports, focused design proposals, documentation suggestions, accessibility feedback, code contributions, and private security reports are welcome.
 
-## Code contributions are temporarily paused
+## Contribution license and sign-off
 
-Bronom uses PolyForm Noncommercial and separate commercial licensing. Netroforge must therefore have sufficient rights to distribute accepted contributions under both models.
+Bronom is licensed under the Apache License 2.0. Unless you explicitly state otherwise, a contribution intentionally submitted for inclusion in Bronom is provided under the same license as described in section 5 of [LICENSE](LICENSE).
 
-Do not open a code pull request until this repository publishes a contributor agreement and reopens code contributions. A Developer Certificate of Origin sign-off alone does not provide the relicensing rights required by this model. Unsolicited patches cannot be accepted or incorporated.
+Every commit in a pull request must also carry a Developer Certificate of Origin sign-off. Add it with:
 
-You may still:
+```bash
+git commit --signoff
+```
 
-- open a focused issue for a reproducible defect or proposal;
-- suggest documentation changes in an issue;
-- report vulnerabilities privately through [.github/SECURITY.md](.github/SECURITY.md).
+The sign-off certifies the [Developer Certificate of Origin 1.1](https://developercertificate.org/). It records that you have the right to submit the contribution under the project's license. Maintainers may ask you to squash or amend commits that are missing it.
 
-Do not submit code, media, fonts, credentials, private website data, or other third-party material in an issue.
+Keep pull requests focused, explain the user-visible behavior, add tests for changed behavior, and avoid including credentials, private website data, or third-party material you cannot license.
+
+Report vulnerabilities privately through [.github/SECURITY.md](.github/SECURITY.md) rather than a public issue.
 
 ## Development
 

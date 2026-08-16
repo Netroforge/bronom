@@ -4,6 +4,21 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-16
+
+### Added
+
+- Copy a bounded, sanitized page snapshot from Page tools or the Command Palette so a person can paste the current semantic page structure into an agent chat without exposing password values, URL credentials, fragments, or recognized secret query parameters.
+
+### Changed
+
+- License Bronom under Apache License 2.0 for personal and commercial use, modification, and redistribution under its terms; reopen focused code contributions under the same license with Developer Certificate of Origin sign-off.
+- Present the existing subscription activation as optional project support instead of a requirement for paid work.
+
+### Fixed
+
+- Keep detached website diagnostic panels open on Bronom Home with a clear website-required state, then reconnect them automatically when a website tab is selected.
+
 ## [1.3.0] - 2026-08-16
 
 ### Added

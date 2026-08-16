@@ -220,7 +220,7 @@ test('keeps the tab strip but removes website navigation controls on Home', asyn
     ['Inspect & simulate', 6],
     ['Diagnose & reproduce', 8],
     ['Audit & optimize', 7],
-    ['Export & account', 2]
+    ['Export & account', 3]
   ] as const
   expect(await pageTools.getByRole('heading', { level: 3 }).allTextContents()).toEqual(pageToolGroups.map(([name]) => name))
   for (const [name, buttonCount] of pageToolGroups) {
@@ -734,12 +734,12 @@ test('puts Help in the native application menu and opens shell dialogs above eve
   const aboutDialog = appWindow.getByRole('dialog', { name: 'About Bronom' })
   await expect(aboutDialog).toBeVisible()
   await expect(aboutDialog).toContainText('A persistent, visible browser')
-  await expect(aboutDialog.getByRole('button', { name: 'PolyForm license' })).toBeVisible()
+  await expect(aboutDialog.getByRole('button', { name: 'Apache 2.0 license' })).toBeVisible()
   await expect(aboutDialog.getByRole('button', { name: 'Contribute' })).toBeVisible()
   await aboutDialog.getByRole('button', { name: 'Close help' }).click()
 
   await clickMenuItem('Help', 'Commercial Licensing')
-  await expect(appWindow.locator('.settings-dialog')).toContainText('Commercial licensing')
+  await expect(appWindow.locator('.settings-dialog')).toContainText('Support Bronom')
   await appWindow.locator('.settings-dialog').getByRole('button', { name: 'Close', exact: true }).click()
 
   await appWindow.getByRole('button', { name: 'New tab' }).click()

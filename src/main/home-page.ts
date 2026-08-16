@@ -305,11 +305,11 @@ export function renderHomePage(options: HomePageOptions): string {
           <p class="privacy-note">Bronom records only tool names, timing, and outcome in memory. URLs, selectors, typed text, screenshots, and page content are not stored here.</p>
         </div>
         <aside class="support-card">
-          <span>Commercial licensing</span>
-          <h3 id="support-heading">Use Bronom personally. License it for paid work.</h3>
-          <p id="support-message">PolyForm Noncommercial covers permitted noncommercial use. Businesses can evaluate Bronom internally for 30 days.</p>
-          <a href="https://github.com/Netroforge/bronom/blob/main/COMMERCIAL-LICENSE.md" target="_blank" rel="noreferrer">Commercial licensing ↗</a>
-          <small>Ongoing commercial use requires a separate license from Netroforge.</small>
+          <span>Open source</span>
+          <h3 id="support-heading">Use Bronom anywhere. Help improve it.</h3>
+          <p id="support-message">Apache 2.0 permits personal and commercial use, modification, and redistribution under its terms.</p>
+          <a href="https://github.com/Netroforge/bronom/blob/main/CONTRIBUTING.md" target="_blank" rel="noreferrer">Contribute ↗</a>
+          <small>Focused issues and signed-off code contributions are welcome.</small>
         </aside>
       </div>
     </section>
@@ -388,10 +388,10 @@ export function renderHomePage(options: HomePageOptions): string {
       document.getElementById('success-rate').textContent = successRate;
       document.getElementById('support-heading').textContent = completed
         ? 'Bronom handled ' + completed + ' tab action' + (completed === 1 ? '' : 's') + ' this launch.'
-        : 'Use Bronom personally. License it for paid work.';
+        : 'Use Bronom anywhere. Help improve it.';
       document.getElementById('support-message').textContent = completed
-        ? 'For ongoing use in paid work, purchase a commercial license from Netroforge.'
-        : 'PolyForm Noncommercial covers permitted noncommercial use. Businesses can evaluate Bronom internally for 30 days.';
+        ? 'If Bronom is useful, consider contributing a fix, documentation, or project support.'
+        : 'Apache 2.0 permits personal and commercial use, modification, and redistribution under its terms.';
 
       const activityList = document.getElementById('activity-list');
       if (!dashboard.recentActivity?.length) {
