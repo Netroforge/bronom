@@ -544,6 +544,12 @@ export interface BrowserPerformanceUserTiming {
   durationMs: number
 }
 
+export interface BrowserPerformanceLayoutShift {
+  startTimeMs: number
+  value: number
+  sources: string[]
+}
+
 export interface BrowserPerformanceEnvironment {
   network: BrowserNetworkEmulation
   cacheDisabled: boolean
@@ -633,6 +639,14 @@ export interface BrowserPerformanceReport {
   userTimings: {
     count: number
     entries: BrowserPerformanceUserTiming[]
+    truncated: boolean
+  }
+  layoutShifts: {
+    supported: boolean
+    count: number
+    scoreSum: number | null
+    recentInputCount: number
+    entries: BrowserPerformanceLayoutShift[]
     truncated: boolean
   }
   caveats: string[]

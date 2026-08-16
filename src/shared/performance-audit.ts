@@ -20,7 +20,10 @@ export const PERFORMANCE_AUDIT_LIMITS = {
   maxAttributionChars: 300,
   maxSourceUrlChars: 2_048,
   maxUserTimings: 50,
-  maxUserTimingNameChars: 200
+  maxUserTimingNameChars: 200,
+  maxLayoutShifts: 200,
+  maxReportedLayoutShifts: 20,
+  maxLayoutShiftSources: 5
 } as const
 
 export interface NormalizedPerformanceOptions {
@@ -110,7 +113,10 @@ export function performanceAuditPageScript(
     maxAttributionChars: PERFORMANCE_AUDIT_LIMITS.maxAttributionChars,
     maxSourceUrlChars: PERFORMANCE_AUDIT_LIMITS.maxSourceUrlChars,
     maxUserTimings: PERFORMANCE_AUDIT_LIMITS.maxUserTimings,
-    maxUserTimingNameChars: PERFORMANCE_AUDIT_LIMITS.maxUserTimingNameChars
+    maxUserTimingNameChars: PERFORMANCE_AUDIT_LIMITS.maxUserTimingNameChars,
+    maxLayoutShifts: PERFORMANCE_AUDIT_LIMITS.maxLayoutShifts,
+    maxReportedLayoutShifts: PERFORMANCE_AUDIT_LIMITS.maxReportedLayoutShifts,
+    maxLayoutShiftSources: PERFORMANCE_AUDIT_LIMITS.maxLayoutShiftSources
   })
   return `(() => {
     const config = ${config};
@@ -242,6 +248,41 @@ export function performanceAuditPageScript(
           observer.observe({ type: 'long-animation-frame', buffered: true });
         }
       } catch { longAnimationFrameSupported = false; }
+      const layoutShifts = [];
+      let layoutShiftSupported = false;
+      let layoutShiftCount = 0;
+      let layoutShiftScoreSum = 0;
+      let layoutShiftRecentInputCount = 0;
+      let layoutShiftsTruncated = false;
+      try {
+        if (globalThis.PerformanceObserver?.supportedEntryTypes?.includes('layout-shift')) {
+          layoutShiftSupported = true;
+          const observer = new PerformanceObserver((list) => {
+            for (const entry of list.getEntries()) {
+              if (entry.hadRecentInput) {
+                layoutShiftRecentInputCount += 1;
+                continue;
+              }
+              const value = finite(entry.value) || 0;
+              layoutShiftCount += 1;
+              layoutShiftScoreSum += value;
+              layoutShifts.push({
+                startTimeMs: finite(entry.startTime) || 0,
+                value,
+                sources: Array.from(entry.sources || [])
+                  .map((source) => selectorFor(source.node))
+                  .filter(Boolean)
+                  .slice(0, config.maxLayoutShiftSources)
+              });
+              if (layoutShifts.length > config.maxLayoutShifts) {
+                layoutShifts.splice(0, layoutShifts.length - config.maxLayoutShifts);
+                layoutShiftsTruncated = true;
+              }
+            }
+          });
+          observer.observe({ type: 'layout-shift', buffered: true });
+        }
+      } catch { layoutShiftSupported = false; }
       globalThis.__bronomPerformanceCollector = {
         metrics,
         longTasks,
@@ -249,6 +290,12 @@ export function performanceAuditPageScript(
         longAnimationFrames,
         longAnimationFrameSupported,
         get longAnimationFramesTruncated() { return longAnimationFramesTruncated; },
+        layoutShifts,
+        layoutShiftSupported,
+        get layoutShiftCount() { return layoutShiftCount; },
+        get layoutShiftScoreSum() { return layoutShiftScoreSum; },
+        get layoutShiftRecentInputCount() { return layoutShiftRecentInputCount; },
+        get layoutShiftsTruncated() { return layoutShiftsTruncated; },
         observedAt: new Date().toISOString()
       };
     }
@@ -272,6 +319,7 @@ export function performanceAuditPageScript(
       }
       const longTaskDurations = collector.longTasks.map((entry) => finite(entry.duration) || 0);
       const longFrames = collector.longAnimationFrames || [];
+      const layoutShifts = collector.layoutShifts || [];
       const userMarks = performance.getEntriesByType('mark');
       const userMeasures = performance.getEntriesByType('measure');
       const allUserTimingCount = userMarks.length + userMeasures.length;
@@ -385,12 +433,23 @@ export function performanceAuditPageScript(
           entries: allUserTimings.slice(-config.maxUserTimings),
           truncated: allUserTimingCount > config.maxUserTimings
         },
+        layoutShifts: {
+          supported: collector.layoutShiftSupported,
+          count: collector.layoutShiftCount || 0,
+          scoreSum: collector.layoutShiftSupported ? finite(collector.layoutShiftScoreSum || 0) : null,
+          recentInputCount: collector.layoutShiftRecentInputCount || 0,
+          entries: [...layoutShifts]
+            .sort((left, right) => right.value - left.value || left.startTimeMs - right.startTimeMs)
+            .slice(0, config.maxReportedLayoutShifts),
+          truncated: collector.layoutShiftsTruncated || layoutShifts.length > config.maxReportedLayoutShifts
+        },
         caveats: [
           'This is one local current-visit sample, not field data or a 75th-percentile CrUX result.',
           'INP is unavailable until the page receives a qualifying interaction; some metrics are unavailable for background or short-lived visits.',
           'Long animation frame attribution identifies script entry points rather than necessarily the slowest internal function.',
           'Cross-origin frames, workers, service workers, and isolated-world code may contribute work without script attribution.',
-          'User Timing names are page-authored and sanitized; arbitrary detail objects, stack traces, and source code are omitted.'
+          'User Timing names are page-authored and sanitized; arbitrary detail objects, stack traces, and source code are omitted.',
+          'Layout-shift evidence excludes entries with recent discrete input. Its score sum is diagnostic and may differ from CLS session-window scoring.'
         ]
       });
     }, config.settleMs));
@@ -449,6 +508,14 @@ export function sanitizePerformanceReport(report: BrowserPerformanceReport): Bro
       entries: report.userTimings.entries.map((entry) => ({
         ...entry,
         name: safePerformanceText(entry.name, PERFORMANCE_AUDIT_LIMITS.maxUserTimingNameChars) ?? '(unnamed)'
+      }))
+    },
+    layoutShifts: {
+      ...report.layoutShifts,
+      entries: report.layoutShifts.entries.map((entry) => ({
+        ...entry,
+        sources: entry.sources.map((source) => safePerformanceText(source, PERFORMANCE_AUDIT_LIMITS.maxTargetChars))
+          .filter((source): source is string => Boolean(source))
       }))
     }
   }

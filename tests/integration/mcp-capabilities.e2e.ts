@@ -355,6 +355,17 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
             });
           });
         });
+        window.runLayoutShiftProbe = () => new Promise((resolve) => {
+          document.documentElement.style.overflowAnchor = 'none';
+          window.scrollTo(0, 0);
+          setTimeout(() => requestAnimationFrame(() => {
+              const spacer = document.createElement('div');
+              spacer.id = 'layout-shift-probe';
+              spacer.style.height = '120px';
+              document.body.prepend(spacer);
+              requestAnimationFrame(() => resolve(spacer.getBoundingClientRect().height));
+            }), 600);
+        });
         window.startMemorySaverProbe = () => setInterval(() => fetch('/memory-saver-tick'), 40);
       </script></body></html>`)
   })
@@ -651,6 +662,11 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       arguments: { tabId, script: 'window.runLongAnimationFrameProbe()' }
     }) as CallToolResult
     expect(longAnimationFrameProbe.isError, text(longAnimationFrameProbe)).not.toBe(true)
+    const layoutShiftProbe = await client.callTool({
+      name: 'browser_evaluate',
+      arguments: { tabId, script: 'window.runLayoutShiftProbe()' }
+    }) as CallToolResult
+    expect(layoutShiftProbe.isError, text(layoutShiftProbe)).not.toBe(true)
 
     const performanceResult = await client.callTool({
       name: 'browser_performance',
@@ -676,6 +692,13 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
         entries: expect.any(Array),
         truncated: false
       },
+      layoutShifts: {
+        supported: true,
+        count: expect.any(Number),
+        scoreSum: expect.any(Number),
+        recentInputCount: expect.any(Number),
+        entries: expect.any(Array)
+      },
       baseline: { measuredAt: performanceBaseline.measuredAt },
       comparison: {
         sameUrl: true,
@@ -691,6 +714,9 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       expect.objectContaining({ type: 'measure', name: 'Long frame probe kept', durationMs: expect.any(Number) })
     ]))
     expect(JSON.stringify(performanceReport.userTimings)).not.toContain('user-timing-secret')
+    expect(performanceReport.layoutShifts.count).toBeGreaterThan(0)
+    expect(performanceReport.layoutShifts.scoreSum).toBeGreaterThan(0)
+    expect(performanceReport.layoutShifts.entries.length).toBeGreaterThan(0)
     expect(performanceReport.comparison.metrics.find((metric: { name: string }) => metric.name === 'LOAF_BLOCKING')).toMatchObject({
       unit: 'ms',
       direction: 'regressed',
@@ -717,6 +743,8 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     await expect(performancePanel).toContainText('Resources')
     await expect(performancePanel).toContainText('Long animation frames')
     await expect(performancePanel).toContainText('Top script contributors')
+    await expect(performancePanel).toContainText('Layout shifts')
+    await expect(performancePanel).toContainText('Largest unexpected shifts')
     await expect(performancePanel).toContainText('User timing')
     await expect(performancePanel).toContainText('Long frame probe kept')
     await expect(performancePanel).toContainText('local sample')

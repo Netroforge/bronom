@@ -1605,6 +1605,7 @@ button { color: inherit; }
 .performance-contributors output small { font-weight: 500; }
 .performance-user-timings { margin-top: 0; }
 .performance-user-timings output { min-width: 46px; }
+.performance-layout-shifts output { min-width: 46px; }
 .performance-attribution-note { margin: 7px 0 0; color: var(--muted); font-size: 11px; }
 .performance-hint { display: flex; align-items: flex-start; gap: 7px; margin: 14px 0 0; padding: 10px; border-radius: 8px; color: var(--muted); background: var(--accent-soft); font-size: 12px; line-height: 1.45; }
 .performance-hint svg { width: 16px; height: 16px; flex: 0 0 auto; color: var(--accent-text); }

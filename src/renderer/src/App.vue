@@ -6620,6 +6620,25 @@ onBeforeUnmount(() => {
             </div>
             <p v-else-if="performanceReport.longAnimationFrames.supported && performanceReport.longAnimationFrames.count" class="performance-hint"><IconInfo aria-hidden="true" /> Long frames were observed, but Chromium did not attribute them to a same-origin main-thread script.</p>
           </section>
+          <section v-if="performanceReport.layoutShifts.supported">
+            <h3>Layout shifts</h3>
+            <dl>
+              <div><dt>Unexpected shifts</dt><dd>{{ performanceReport.layoutShifts.count }}</dd></div>
+              <div><dt>Observed score sum</dt><dd>{{ (performanceReport.layoutShifts.scoreSum ?? 0).toFixed(3) }}</dd></div>
+              <div><dt>After recent input</dt><dd>{{ performanceReport.layoutShifts.recentInputCount }} excluded</dd></div>
+            </dl>
+            <div v-if="performanceReport.layoutShifts.entries.length" class="performance-contributors performance-layout-shifts">
+              <h4>Largest unexpected shifts</h4>
+              <ol>
+                <li v-for="(entry, index) in performanceReport.layoutShifts.entries" :key="`${entry.startTimeMs}-${index}`">
+                  <span><strong>{{ entry.sources[0] || 'Affected element unavailable' }}</strong><small>{{ Math.round(entry.startTimeMs) }} ms after navigation<span v-if="entry.sources.length > 1"> · {{ entry.sources.length }} affected elements</span></small></span>
+                  <output>{{ entry.value.toFixed(3) }}</output>
+                </li>
+              </ol>
+              <p v-if="performanceReport.layoutShifts.truncated" class="performance-attribution-note">Showing the highest-scoring bounded shifts.</p>
+            </div>
+            <p v-else class="performance-hint"><IconCheck aria-hidden="true" /> No unexpected layout shift was observed in this visit.</p>
+          </section>
           <section v-if="performanceReport.userTimings.count">
             <h3>User timing</h3>
             <div class="performance-contributors performance-user-timings">
