@@ -60,6 +60,18 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     await pageTools.getByRole('button', { name }).click()
   }
   const server = createServer((request, response) => {
+    if (request.url?.startsWith('/cpu-profile.js')) {
+      response.writeHead(200, { 'content-type': 'application/javascript; charset=utf-8' })
+      response.end(`
+        window.runCpuProfileProbe = function cpuProfileBusyLoop() {
+          const deadline = performance.now() + 120;
+          let checksum = 0;
+          while (performance.now() < deadline) checksum = (checksum + Math.sqrt(checksum + 17)) % 1000003;
+          return checksum;
+        };
+      `)
+      return
+    }
     if (request.url === '/headers') {
       response.writeHead(200, { 'content-type': 'application/json' })
       response.end(JSON.stringify({
@@ -254,6 +266,7 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       <div id="animation-probe" aria-label="Animation probe"></div>
       <div style="height:2200px">Tall page</div>
       <button id="capture-target" value="element-inspection-secret" style="box-sizing:border-box;width:240px;height:120px;background:rgb(103,87,232);color:rgb(255,255,255)">Capture this area</button>
+      <script src="/cpu-profile.js?token=cpu-profile-secret"></script>
       <script>
         localStorage.setItem('bronom-mcp-site-data', 'stored');
         document.cookie = 'bronom-mcp-site-data=stored; SameSite=Lax';
@@ -456,6 +469,7 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       'browser_page_metadata',
       'browser_security',
       'browser_code_coverage',
+      'browser_cpu_profile',
       'browser_memory',
       'browser_debug_report',
       'browser_repro',
@@ -905,6 +919,76 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     await expect(coveragePanel).toContainText('Resources')
     await coveragePanel.getByRole('button', { name: 'Close code coverage' }).click()
     await expect(coveragePanel).toBeHidden()
+
+    const cpuProfileStarted = await client.callTool({
+      name: 'browser_cpu_profile',
+      arguments: { tabId, action: 'start' }
+    }) as CallToolResult
+    expect(cpuProfileStarted.isError, text(cpuProfileStarted)).not.toBe(true)
+    expect(JSON.parse(text(cpuProfileStarted))).toMatchObject({ tabId, status: 'recording' })
+    const cpuProbe = await client.callTool({
+      name: 'browser_evaluate',
+      arguments: { tabId, script: 'window.runCpuProfileProbe()' }
+    }) as CallToolResult
+    expect(cpuProbe.isError, text(cpuProbe)).not.toBe(true)
+    const cpuProfileStopped = await client.callTool({
+      name: 'browser_cpu_profile',
+      arguments: { tabId, action: 'stop' }
+    }) as CallToolResult
+    expect(cpuProfileStopped.isError, text(cpuProfileStopped)).not.toBe(true)
+    const cpuProfile = JSON.parse(text(cpuProfileStopped))
+    expect(cpuProfile).toMatchObject({
+      tabId,
+      status: 'complete',
+      report: {
+        durationMs: expect.any(Number),
+        sampledTimeMs: expect.any(Number),
+        sampleCount: expect.any(Number),
+        hotspots: expect.any(Array)
+      }
+    })
+    expect(cpuProfile.report.sampleCount).toBeGreaterThan(0)
+    expect(cpuProfile.report.hotspots).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        functionName: 'cpuProfileBusyLoop',
+        url: expect.stringContaining('token=%5BREDACTED%5D'),
+        selfTimeMs: expect.any(Number),
+        samples: expect.any(Number)
+      })
+    ]))
+    expect(JSON.stringify(cpuProfile)).not.toContain('cpu-profile-secret')
+
+    await openPageTool(/JavaScript CPU profile:/)
+    const cpuProfilePanel = appWindow.getByRole('dialog', { name: 'JavaScript CPU profile' })
+    await expect(cpuProfilePanel).toBeVisible()
+    await expect(cpuProfilePanel).toContainText('cpuProfileBusyLoop')
+    await expect(cpuProfilePanel).toContainText('Sampled time')
+    await cpuProfilePanel.getByRole('button', { name: 'Record again' }).click()
+    await expect(cpuProfilePanel).toContainText('CPU activity is recording')
+    expect(await appWindow.evaluate(`window.bronom.toggleDevTools(${JSON.stringify(tabId)})`)).toBe(true)
+    await expect(cpuProfilePanel).toContainText('Find hot JavaScript functions')
+    await expect.poll(() => electronApp.evaluate(({ webContents }, requestedOrigin) => {
+      return webContents.getAllWebContents().some((contents) => (
+        contents.getURL().startsWith(requestedOrigin) && contents.isDevToolsOpened()
+      ))
+    }, `http://127.0.0.1:${address.port}`)).toBe(true)
+    expect(await appWindow.evaluate(`window.bronom.toggleDevTools(${JSON.stringify(tabId)})`)).toBe(false)
+    await expect.poll(() => electronApp.evaluate(({ webContents }, requestedOrigin) => {
+      return webContents.getAllWebContents().some((contents) => (
+        contents.getURL().startsWith(requestedOrigin) && contents.isDevToolsOpened()
+      ))
+    }, `http://127.0.0.1:${address.port}`)).toBe(false)
+    const cpuAfterDevToolsResult = await client.callTool({
+      name: 'browser_cpu_profile',
+      arguments: { tabId, action: 'get' }
+    }) as CallToolResult
+    expect(cpuAfterDevToolsResult.isError, text(cpuAfterDevToolsResult)).not.toBe(true)
+    expect(JSON.parse(text(cpuAfterDevToolsResult))).toMatchObject({
+      tabId,
+      status: 'idle'
+    })
+    await cpuProfilePanel.getByRole('button', { name: 'Close JavaScript CPU profile' }).click()
+    await expect(cpuProfilePanel).toBeHidden()
 
     const memoryBaselineResult = await client.callTool({
       name: 'browser_memory',

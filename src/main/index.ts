@@ -76,6 +76,7 @@ import {
   type BrowserPageMetadataReport,
   type BrowserSecurityReport,
   type BrowserCodeCoverageOptions,
+  type BrowserCpuProfileOptions,
   type BrowserMemoryOptions,
   type BrowserDebugReportOptions,
   type BrowserReproAction,
@@ -1205,6 +1206,7 @@ function detachedPanelTitle(panel: DetachablePanelId): string {
     'page-metadata': 'Page metadata',
     security: 'Security',
     coverage: 'Code coverage',
+    'cpu-profile': 'JavaScript CPU profile',
     memory: 'Memory',
     console: 'Console',
     network: 'Network monitor',
@@ -1926,6 +1928,18 @@ function registerIpc(): void {
       throw new TypeError('Invalid code coverage options')
     }
     return tabsManager!.codeCoverage(value as BrowserCodeCoverageOptions)
+  })
+  ipcMain.handle('browser:cpu-profile', (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Invalid JavaScript CPU profile options')
+    const { tabId, action } = value as Record<string, unknown>
+    if (
+      (tabId !== undefined && typeof tabId !== 'string')
+      || (action !== undefined && !['get', 'start', 'stop', 'clear'].includes(String(action)))
+    ) {
+      throw new TypeError('Invalid JavaScript CPU profile options')
+    }
+    return tabsManager!.cpuProfile(value as BrowserCpuProfileOptions)
   })
   ipcMain.handle('browser:memory', (event, value: unknown) => {
     assertTrustedShellSender(event)

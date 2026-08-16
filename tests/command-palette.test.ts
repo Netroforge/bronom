@@ -21,6 +21,7 @@ describe('filterCommandPaletteCommands', () => {
     expect(filterCommandPaletteCommands('cookies cache', true).map((command) => command.id)).toContain('privacy')
     expect(filterCommandPaletteCommands('wcag', true)[0]?.id).toBe('accessibility')
     expect(filterCommandPaletteCommands('unused code', true)[0]?.id).toBe('coverage')
+    expect(filterCommandPaletteCommands('slow function', true)[0]?.id).toBe('cpu-profile')
     expect(filterCommandPaletteCommands('pause animations', true)[0]?.id).toBe('environment')
     expect(filterCommandPaletteCommands('certificate cipher', true)[0]?.id).toBe('security')
     expect(filterCommandPaletteCommands('css palette fonts', true)[0]?.id).toBe('design-overview')

@@ -210,6 +210,7 @@ export const BROWSER_TOOL_CATALOG: BrowserToolDefinition[] = [
   { name: 'browser_page_metadata', category: 'Inspection', description: 'Inspect bounded title, canonical, robots, social cards, alternates, icons, headings, and structured-data types without returning body content or full JSON-LD.' },
   { name: 'browser_security', category: 'Inspection', description: 'Inspect the current main document transport, TLS connection, and bounded certificate metadata without returning raw certificates.' },
   { name: 'browser_code_coverage', category: 'Inspection', description: 'Record bounded JavaScript and CSS usage in one group tab and report unused bytes without returning source code.' },
+  { name: 'browser_cpu_profile', category: 'Inspection', description: 'Record bounded JavaScript CPU samples in one group tab and report the hottest functions by direct self time without returning source code, arguments, or page content.' },
   { name: 'browser_memory', category: 'Inspection', description: 'Compare bounded JavaScript heap and DOM counters against a per-tab runtime baseline, optionally after forced garbage collection.' },
   { name: 'browser_debug_report', category: 'Inspection', description: 'Summarize bounded console and network evidence for one group tab in a copy-ready, security-filtered report.' },
   { name: 'browser_repro', category: 'Inspection', description: 'Start, inspect, stop, clear, or export a privacy-safe human reproduction timeline for one group tab; typed values are never recorded, and Playwright exports require explicit safe test inputs.' },
@@ -1187,6 +1188,23 @@ function createBrowserMcpServer(
       mode: 'function' | 'block'
       reload: boolean
     }) => textResult(await manager.codeCoverage({ tabId, action, mode, reload })))
+  )
+  registerGroupTool(
+    'browser_cpu_profile',
+    {
+      description: toolDescription('browser_cpu_profile'),
+      inputSchema: {
+        tabId: z.string().optional(),
+        action: z.enum(['get', 'start', 'stop', 'clear']).default('get')
+      }
+    },
+    tabTool('browser_cpu_profile', async ({
+      tabId,
+      action
+    }: {
+      tabId?: string
+      action: 'get' | 'start' | 'stop' | 'clear'
+    }) => textResult(await manager.cpuProfile({ tabId, action })))
   )
   registerGroupTool(
     'browser_debug_report',

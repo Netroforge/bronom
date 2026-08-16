@@ -203,6 +203,9 @@ export interface BrowserTabState {
     startedAt: string
     mode: BrowserCodeCoverageMode
   }
+  cpuProfileRecording?: {
+    startedAt: string
+  }
   pageProblem?: BrowserPageProblem
   dialog?: BrowserJavaScriptDialog
   mcpGroupId?: string
@@ -894,6 +897,51 @@ export interface BrowserCodeCoverageOptions {
   action?: BrowserCodeCoverageAction
   mode?: BrowserCodeCoverageMode
   reload?: boolean
+}
+
+export type BrowserCpuProfileAction = 'get' | 'start' | 'stop' | 'clear'
+export type BrowserCpuProfileStatus = 'idle' | 'recording' | 'complete'
+
+export interface BrowserCpuProfileHotspot {
+  functionName: string
+  url?: string
+  lineNumber?: number
+  columnNumber?: number
+  selfTimeMs: number
+  selfPercent: number
+  samples: number
+}
+
+export interface BrowserCpuProfileReport {
+  startedAt: string
+  stoppedAt: string
+  startedUrl: string
+  currentUrl: string
+  durationMs: number
+  sampledTimeMs: number
+  sampleCount: number
+  hotspots: BrowserCpuProfileHotspot[]
+  truncated: boolean
+  caveats: string[]
+}
+
+export interface BrowserCpuProfileResult {
+  tabId: string
+  url: string
+  title: string
+  action: BrowserCpuProfileAction
+  status: BrowserCpuProfileStatus
+  recording?: {
+    startedAt: string
+    startedUrl: string
+  }
+  report?: BrowserCpuProfileReport
+  cleared?: boolean
+}
+
+export interface BrowserCpuProfileOptions {
+  tabId?: string
+  action?: BrowserCpuProfileAction
 }
 
 export type BrowserMemoryAction = 'measure' | 'set-baseline' | 'clear-baseline'
@@ -2003,6 +2051,7 @@ export interface BronomApi {
   inspectPageMetadata(tabId?: string): Promise<BrowserPageMetadataReport>
   inspectSecurity(tabId?: string): Promise<BrowserSecurityReport>
   manageCodeCoverage(options?: BrowserCodeCoverageOptions): Promise<BrowserCodeCoverageResult>
+  manageCpuProfile(options?: BrowserCpuProfileOptions): Promise<BrowserCpuProfileResult>
   measureMemory(options?: BrowserMemoryOptions): Promise<BrowserMemoryReport>
   createDebugReport(options?: BrowserDebugReportOptions): Promise<BrowserDebugReport>
   setDiagnosticLogPreservation(tabId: string, preserve: boolean): Promise<BrowserState>
@@ -2044,6 +2093,7 @@ export const DETACHABLE_PANEL_IDS = [
   'page-metadata',
   'security',
   'coverage',
+  'cpu-profile',
   'memory',
   'console',
   'network',

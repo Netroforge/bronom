@@ -100,6 +100,7 @@ import {
   BrowserSecurityReport,
   BrowserCodeCoverageMode,
   BrowserCodeCoverageResult,
+  BrowserCpuProfileResult,
   BrowserMemoryReport,
   BrowserReproRecording,
   BrowserDomChangeEntry,
@@ -253,6 +254,7 @@ function detachedPanelTitle(panel: DetachablePanelId): string {
     'page-metadata': 'Page metadata',
     security: 'Security',
     coverage: 'Code coverage',
+    'cpu-profile': 'JavaScript CPU profile',
     memory: 'Memory',
     console: 'Console',
     network: 'Network monitor',
@@ -512,6 +514,10 @@ const coverageResult = ref<BrowserCodeCoverageResult | null>(null)
 const coverageState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
 const coverageError = ref('')
 const coverageMode = ref<BrowserCodeCoverageMode>('function')
+const cpuProfilePanelOpen = ref(false)
+const cpuProfileResult = ref<BrowserCpuProfileResult | null>(null)
+const cpuProfileState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
+const cpuProfileError = ref('')
 const memoryState = ref<'idle' | 'running' | 'complete' | 'error'>('idle')
 const memoryReport = ref<BrowserMemoryReport | null>(null)
 const memoryError = ref('')
@@ -600,6 +606,7 @@ else if (detachedPanelId === 'design-overview') designOverviewPanelOpen.value = 
 else if (detachedPanelId === 'page-metadata') pageMetadataPanelOpen.value = true
 else if (detachedPanelId === 'security') securityPanelOpen.value = true
 else if (detachedPanelId === 'coverage') coveragePanelOpen.value = true
+else if (detachedPanelId === 'cpu-profile') cpuProfilePanelOpen.value = true
 else if (detachedPanelId === 'memory') memoryPanelOpen.value = true
 else if (detachedPanelId === 'console') consolePanelOpen.value = true
 else if (detachedPanelId === 'network') networkMonitorOpen.value = true
@@ -734,6 +741,7 @@ const dockedPanelOpen = computed(() => bookmarksOpen.value
   || pageMetadataPanelOpen.value
   || securityPanelOpen.value
   || coveragePanelOpen.value
+  || cpuProfilePanelOpen.value
   || memoryPanelOpen.value
   || consolePanelOpen.value
   || debugReportPanelOpen.value
@@ -754,6 +762,7 @@ const activePanelId = computed<DetachablePanelId | null>(() => {
   if (pageMetadataPanelOpen.value) return 'page-metadata'
   if (securityPanelOpen.value) return 'security'
   if (coveragePanelOpen.value) return 'coverage'
+  if (cpuProfilePanelOpen.value) return 'cpu-profile'
   if (memoryPanelOpen.value) return 'memory'
   if (consolePanelOpen.value) return 'console'
   if (networkMonitorOpen.value) return 'network'
@@ -868,6 +877,16 @@ const coverageLabel = computed(() => {
   if (activeTab.value?.codeCoverageRecording) return `Recording ${activeTab.value.codeCoverageRecording.mode} coverage`
   if (coverageResult.value?.status === 'complete') return `${coverageResult.value.report?.usedPercent ?? 0}% code used`
   return 'Find unused JavaScript and CSS'
+})
+const cpuProfileLabel = computed(() => {
+  if (cpuProfileState.value === 'loading') return 'Updating JavaScript CPU profile'
+  if (cpuProfileState.value === 'error') return 'JavaScript CPU profile needs attention'
+  if (activeTab.value?.cpuProfileRecording) return 'Recording JavaScript CPU activity'
+  if (cpuProfileResult.value?.status === 'complete') {
+    const hotspot = cpuProfileResult.value.report?.hotspots[0]
+    return hotspot ? `${hotspot.functionName}: ${hotspot.selfPercent}% self time` : 'CPU profile complete'
+  }
+  return 'Find hot JavaScript functions'
 })
 const memoryLabel = computed(() => {
   if (memoryState.value === 'running') return 'Measuring page memory'
@@ -2064,6 +2083,7 @@ async function runCommandPaletteCommand(commandId: CommandPaletteCommandId): Pro
     case 'page-metadata': return togglePageMetadata()
     case 'security': return toggleSecurityReport()
     case 'coverage': return toggleCodeCoverage()
+    case 'cpu-profile': return toggleCpuProfile()
     case 'memory': return toggleMemoryReport()
     case 'developer-tools': return toggleDeveloperTools()
     case 'settings': return openSettingsSection('appearance')
@@ -2540,6 +2560,7 @@ watch(
     pageMetadataPanelOpen,
     securityPanelOpen,
     coveragePanelOpen,
+    cpuProfilePanelOpen,
     memoryPanelOpen,
     consolePanelOpen,
     debugReportPanelOpen,
@@ -2600,6 +2621,7 @@ watch(
       pageMetadataPanelOpen.value = false
       securityPanelOpen.value = false
       coveragePanelOpen.value = false
+      cpuProfilePanelOpen.value = false
       memoryPanelOpen.value = false
       consolePanelOpen.value = false
       reproPanelOpen.value = false
@@ -2806,6 +2828,7 @@ watch(
     if (pageMetadataPanelOpen.value && pageMetadataReport.value?.tabId !== tabId) pageMetadataPanelOpen.value = false
     if (securityPanelOpen.value && securityReport.value?.tabId !== tabId) securityPanelOpen.value = false
     if (coveragePanelOpen.value && coverageResult.value?.tabId !== tabId) coveragePanelOpen.value = false
+    if (cpuProfilePanelOpen.value && cpuProfileResult.value?.tabId !== tabId) cpuProfilePanelOpen.value = false
     if (memoryPanelOpen.value && memoryReport.value?.tabId !== tabId) memoryPanelOpen.value = false
     if (consolePanelOpen.value) {
       consoleMessages.value = []
@@ -2835,6 +2858,24 @@ watch(
   () => [activeTab.value?.id, activeTab.value?.reproRecording?.active, activeTab.value?.reproRecording?.stepCount] as const,
   ([tabId]) => {
     if (tabId && reproPanelOpen.value) void manageRepro('get')
+  }
+)
+
+watch(
+  () => activeTab.value?.codeCoverageRecording?.startedAt,
+  (current, previous) => {
+    if (!current && previous && coveragePanelOpen.value && coverageResult.value?.status === 'recording') {
+      void manageCodeCoverage('get')
+    }
+  }
+)
+
+watch(
+  () => activeTab.value?.cpuProfileRecording?.startedAt,
+  (current, previous) => {
+    if (!current && previous && cpuProfilePanelOpen.value && cpuProfileResult.value?.status === 'recording') {
+      void manageCpuProfile('get')
+    }
   }
 )
 
@@ -3376,6 +3417,30 @@ function toggleCodeCoverage(): void {
   closeTransientPanels()
   coveragePanelOpen.value = true
   void manageCodeCoverage('get')
+}
+
+async function manageCpuProfile(action: 'get' | 'start' | 'stop' | 'clear'): Promise<void> {
+  const tab = activeTab.value
+  if (!tab || tab.url.startsWith('bronom://home')) return
+  cpuProfileState.value = 'loading'
+  cpuProfileError.value = ''
+  try {
+    cpuProfileResult.value = await browser.manageCpuProfile({ tabId: tab.id, action })
+    cpuProfileState.value = 'ready'
+  } catch (error) {
+    cpuProfileState.value = 'error'
+    cpuProfileError.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
+function toggleCpuProfile(): void {
+  if (cpuProfilePanelOpen.value) {
+    cpuProfilePanelOpen.value = false
+    return
+  }
+  closeTransientPanels()
+  cpuProfilePanelOpen.value = true
+  void manageCpuProfile('get')
 }
 
 function formatSignedBytes(bytes: number): string {
@@ -4756,6 +4821,7 @@ function closeDockedPanels(): void {
   pageMetadataPanelOpen.value = false
   securityPanelOpen.value = false
   coveragePanelOpen.value = false
+  cpuProfilePanelOpen.value = false
   memoryPanelOpen.value = false
   consolePanelOpen.value = false
   networkMonitorOpen.value = false
@@ -4781,6 +4847,7 @@ function activatePanel(panel: DetachablePanelId): void {
   else if (panel === 'page-metadata') pageMetadataPanelOpen.value = true
   else if (panel === 'security') securityPanelOpen.value = true
   else if (panel === 'coverage') coveragePanelOpen.value = true
+  else if (panel === 'cpu-profile') cpuProfilePanelOpen.value = true
   else if (panel === 'memory') memoryPanelOpen.value = true
   else if (panel === 'console') consolePanelOpen.value = true
   else if (panel === 'network') networkMonitorOpen.value = true
@@ -4803,6 +4870,7 @@ async function refreshDetachedPanel(panel: DetachablePanelId): Promise<void> {
   else if (panel === 'page-metadata') await runPageMetadata()
   else if (panel === 'security') await runSecurityReport()
   else if (panel === 'coverage') await manageCodeCoverage('get')
+  else if (panel === 'cpu-profile') await manageCpuProfile('get')
   else if (panel === 'memory') await runMemoryReport()
   else if (panel === 'console') await refreshConsole()
   else if (panel === 'network') await Promise.all([refreshNetworkMonitor(), refreshNetworkRoutes()])
@@ -5018,6 +5086,7 @@ function handleKeyDown(event: KeyboardEvent): void {
   else if (pageMetadataPanelOpen.value) pageMetadataPanelOpen.value = false
   else if (securityPanelOpen.value) securityPanelOpen.value = false
   else if (coveragePanelOpen.value) coveragePanelOpen.value = false
+  else if (cpuProfilePanelOpen.value) cpuProfilePanelOpen.value = false
   else if (memoryPanelOpen.value) memoryPanelOpen.value = false
   else if (consolePanelOpen.value) consolePanelOpen.value = false
   else if (debugReportPanelOpen.value) debugReportPanelOpen.value = false
@@ -6122,6 +6191,21 @@ onBeforeUnmount(() => {
                 <span><strong>Code coverage</strong><small>{{ coverageLabel }}</small></span>
               </button>
               <button
+                :class="{
+                  complete: cpuProfileResult?.status === 'complete',
+                  error: cpuProfileState === 'error',
+                  running: Boolean(activeTab?.cpuProfileRecording) || cpuProfileState === 'loading'
+                }"
+                type="button"
+                :aria-label="`JavaScript CPU profile: ${cpuProfileLabel}`"
+                :disabled="cpuProfileState === 'loading'"
+                @click="toggleCpuProfile"
+              >
+                <IconProgress v-if="cpuProfileState === 'loading'" class="state-spinner" aria-hidden="true" />
+                <IconMonitoring v-else aria-hidden="true" />
+                <span><strong>JavaScript CPU</strong><small>{{ cpuProfileLabel }}</small></span>
+              </button>
+              <button
                 :class="{ error: memoryState === 'error', running: memoryState === 'running' }"
                 type="button"
                 :aria-label="memoryLabel"
@@ -7143,6 +7227,101 @@ onBeforeUnmount(() => {
         <div>
           <button type="button" @click="manageCodeCoverage('start', false)"><IconPlay aria-hidden="true" /> Start now</button>
           <button class="primary" type="button" @click="manageCodeCoverage('start', true)"><IconRefresh aria-hidden="true" /> Start and reload</button>
+        </div>
+      </div>
+    </section>
+    <section
+      v-if="cpuProfilePanelOpen"
+      class="accessibility-panel coverage-panel"
+      data-shell-docked-panel
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby="cpu-profile-panel-title"
+      :aria-busy="cpuProfileState === 'loading'"
+    >
+      <header>
+        <div>
+          <span class="eyebrow">Runtime diagnostics</span>
+          <h2 id="cpu-profile-panel-title">JavaScript CPU profile</h2>
+        </div>
+        <div class="panel-header-actions">
+          <PanelDockPicker v-model="panelDock" label="Dock JavaScript CPU profile" />
+          <button class="panel-close" type="button" aria-label="Close JavaScript CPU profile" @click="cpuProfilePanelOpen = false"><IconClose aria-hidden="true" /></button>
+        </div>
+      </header>
+      <div v-if="cpuProfileState === 'loading'" class="accessibility-audit-loading" role="status">
+        <IconProgress class="state-spinner" aria-hidden="true" />
+        <strong>Updating JavaScript CPU profile…</strong>
+        <span>Only bounded function timing and sanitized locations leave the profiler.</span>
+      </div>
+      <div v-else-if="cpuProfileState === 'error'" class="accessibility-audit-error" role="alert">
+        <IconError aria-hidden="true" />
+        <strong>JavaScript CPU profile needs attention</strong>
+        <span>{{ cpuProfileError }}</span>
+        <button type="button" @click="manageCpuProfile('get')">Try again</button>
+      </div>
+      <div v-else-if="cpuProfileResult?.status === 'recording'" class="coverage-recording" role="status">
+        <IconRecord aria-hidden="true" />
+        <strong>CPU activity is recording</strong>
+        <span>Exercise the slow interaction once, then stop to rank functions by direct self time.</span>
+        <small>Started {{ debugTimestamp(cpuProfileResult.recording?.startedAt || '') }}</small>
+        <button class="primary" type="button" @click="manageCpuProfile('stop')"><IconStop aria-hidden="true" /> Stop and show hotspots</button>
+      </div>
+      <template v-else-if="cpuProfileResult?.report">
+        <div class="coverage-summary">
+          <article>
+            <span>Profile time</span>
+            <strong>{{ Math.round(cpuProfileResult.report.durationMs) }} ms</strong>
+            <small>{{ cpuProfileResult.report.sampleCount }} samples</small>
+          </article>
+          <article>
+            <span>Sampled time</span>
+            <strong>{{ Math.round(cpuProfileResult.report.sampledTimeMs) }} ms</strong>
+            <small>JavaScript self time</small>
+          </article>
+          <article>
+            <span>Hot functions</span>
+            <strong>{{ cpuProfileResult.report.hotspots.length }}</strong>
+            <small v-if="cpuProfileResult.report.truncated">Top bounded results</small>
+            <small v-else>Ranked by self time</small>
+          </article>
+        </div>
+        <div class="coverage-resource-list" role="list" aria-label="JavaScript CPU hotspots">
+          <article v-for="hotspot in cpuProfileResult.report.hotspots" :key="`${hotspot.functionName}:${hotspot.url}:${hotspot.lineNumber}:${hotspot.columnNumber}`" role="listitem">
+            <div>
+              <span class="coverage-type">JS</span>
+              <strong>{{ hotspot.functionName }}</strong>
+              <small v-if="hotspot.url" :title="hotspot.url">{{ hotspot.url }}<template v-if="hotspot.lineNumber">:{{ hotspot.lineNumber }}</template></small>
+              <small v-else>Browser or anonymous runtime work</small>
+              <small>{{ hotspot.selfTimeMs }} ms self · {{ hotspot.samples }} {{ hotspot.samples === 1 ? 'sample' : 'samples' }}</small>
+            </div>
+            <output>{{ hotspot.selfPercent }}%</output>
+            <div class="coverage-bar" aria-hidden="true"><span :style="{ width: `${hotspot.selfPercent}%` }" /></div>
+          </article>
+          <div v-if="!cpuProfileResult.report.hotspots.length" class="network-monitor-empty compact">
+            <IconMonitoring aria-hidden="true" />
+            <strong>No JavaScript hotspot was sampled</strong>
+            <span>Record a longer or CPU-heavy interaction and try again.</span>
+          </div>
+        </div>
+        <details class="coverage-caveats">
+          <summary>How to interpret this profile</summary>
+          <ul><li v-for="caveat in cpuProfileResult.report.caveats" :key="caveat">{{ caveat }}</li></ul>
+        </details>
+        <footer>
+          <span>Started on {{ cpuProfileResult.report.startedUrl }}<span v-if="cpuProfileResult.report.currentUrl !== cpuProfileResult.report.startedUrl"> · page changed</span></span>
+          <div>
+            <button type="button" @click="manageCpuProfile('clear')"><IconDelete aria-hidden="true" /> Clear</button>
+            <button class="primary" type="button" @click="manageCpuProfile('start')"><IconRecord aria-hidden="true" /> Record again</button>
+          </div>
+        </footer>
+      </template>
+      <div v-else class="coverage-empty">
+        <IconMonitoring aria-hidden="true" />
+        <strong>Find hot JavaScript functions</strong>
+        <span>Start recording, reproduce one slow interaction, then stop. Bronom reports sampled self time without source code or page content.</span>
+        <div>
+          <button class="primary" type="button" @click="manageCpuProfile('start')"><IconRecord aria-hidden="true" /> Start recording</button>
         </div>
       </div>
     </section>

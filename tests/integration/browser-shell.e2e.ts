@@ -213,13 +213,13 @@ test('keeps the tab strip but removes website navigation controls on Home', asyn
     y: 105,
     width: Math.round(pageToolsBounds!.x)
   })
-  for (const label of ['Site storage is unavailable', 'Responsive preview: Test phones, tablets, and desktops', 'Environment: Network, cache, service workers, CPU, animations, rendering, runtime, region, identity, and location', 'Open Console', 'Open network monitor', 'Request conditions: none active', 'Run accessibility audit', 'Measure page performance', 'Design overview: Colors, typography, and contrast', 'Page metadata: Search, social, and structured data', 'Security: TLS, certificate, and connection details', 'Code coverage: Find unused JavaScript and CSS', 'Measure page memory', 'DOM changes: See what changed after an action', 'Visual compare: Compare the page before and after', 'Select an element to copy for agent', 'Select an element and copy its screenshot', 'Save page as PDF', 'No saved password for this site']) {
+  for (const label of ['Site storage is unavailable', 'Responsive preview: Test phones, tablets, and desktops', 'Environment: Network, cache, service workers, CPU, animations, rendering, runtime, region, identity, and location', 'Open Console', 'Open network monitor', 'Request conditions: none active', 'Run accessibility audit', 'Measure page performance', 'Design overview: Colors, typography, and contrast', 'Page metadata: Search, social, and structured data', 'Security: TLS, certificate, and connection details', 'Code coverage: Find unused JavaScript and CSS', 'JavaScript CPU profile: Find hot JavaScript functions', 'Measure page memory', 'DOM changes: See what changed after an action', 'Visual compare: Compare the page before and after', 'Select an element to copy for agent', 'Select an element and copy its screenshot', 'Save page as PDF', 'No saved password for this site']) {
     await expect(pageTools.getByRole('button', { name: label })).toBeVisible()
   }
   const pageToolGroups = [
     ['Inspect & simulate', 6],
     ['Diagnose & reproduce', 8],
-    ['Audit & optimize', 6],
+    ['Audit & optimize', 7],
     ['Export & account', 2]
   ] as const
   expect(await pageTools.getByRole('heading', { level: 3 }).allTextContents()).toEqual(pageToolGroups.map(([name]) => name))
@@ -2708,7 +2708,7 @@ test('shows typed agent setup, connection activity, and the live tool catalog on
   }) as { heading: string; agents: string[]; tools: number }
   expect(homeContent.heading).toBe('Your browser, ready for coding agents.')
   expect(homeContent.agents).toEqual(['Codex', 'Claude Code', 'Cursor', 'VS Code / Copilot', 'Generic MCP client'])
-  expect(homeContent.tools).toBe(61)
+  expect(homeContent.tools).toBe(62)
 
   const initial = await fetch(`http://127.0.0.1:${mcpPort}/mcp`, {
     method: 'POST',

@@ -33,6 +33,7 @@ export type CommandPaletteCommandId =
   | 'page-metadata'
   | 'security'
   | 'coverage'
+  | 'cpu-profile'
   | 'memory'
   | 'developer-tools'
   | 'settings'
@@ -86,6 +87,7 @@ export const COMMAND_PALETTE_COMMANDS: readonly CommandPaletteCommand[] = [
   { id: 'page-metadata', label: 'Inspect page metadata', description: 'Review search, social, canonical, and structured data signals', category: 'Current website', keywords: ['seo', 'open graph', 'twitter card', 'json-ld', 'robots'], websiteOnly: true },
   { id: 'security', label: 'Inspect connection security', description: 'Review TLS and certificate details for the current page', category: 'Current website', keywords: ['https', 'ssl', 'cipher', 'certificate'], websiteOnly: true },
   { id: 'coverage', label: 'Record code coverage', description: 'Find unused JavaScript and CSS bytes', category: 'Current website', keywords: ['unused code', 'bundle', 'optimize'], websiteOnly: true },
+  { id: 'cpu-profile', label: 'Record JavaScript CPU profile', description: 'Find hot JavaScript functions by sampled self time', category: 'Current website', keywords: ['performance', 'profiler', 'hotspot', 'slow function', 'bottom up'], websiteOnly: true },
   { id: 'memory', label: 'Measure page memory', description: 'Inspect aggregate Chromium memory counters', category: 'Current website', keywords: ['heap', 'dom'], websiteOnly: true },
   { id: 'developer-tools', label: 'Toggle Developer Tools', description: 'Open Chromium DevTools for the current website', category: 'Current website', keywords: ['inspect', 'console'], shortcut: 'F12', websiteOnly: true },
   { id: 'settings', label: 'Open Settings', description: 'Change Bronom preferences', category: 'Application', keywords: ['preferences'] },

@@ -47,6 +47,7 @@ import {
   summarizeCoverageResources,
   type CoverageRange
 } from '../../shared/code-coverage.js'
+import { summarizeCpuProfile, type CdpCpuProfile } from '../../shared/cpu-profile.js'
 import {
   buildPerformanceComparison,
   normalizePerformanceOptions,
@@ -162,6 +163,9 @@ import type {
   BrowserCodeCoverageReport,
   BrowserCodeCoverageResource,
   BrowserCodeCoverageResult,
+  BrowserCpuProfileOptions,
+  BrowserCpuProfileReport,
+  BrowserCpuProfileResult,
   BrowserMemoryDelta,
   BrowserMemoryMeasurement,
   BrowserMemoryOptions,
@@ -506,6 +510,7 @@ interface BrowserTab {
     details?: BrowserSecurityDetailsInput
   }
   codeCoverage?: BrowserCodeCoverageInternal
+  cpuProfile?: BrowserCpuProfileInternal
   reproRecording?: BrowserReproRecordingInternal
   domChangesRecording?: {
     active: boolean
@@ -533,6 +538,14 @@ interface BrowserCodeCoverageInternal {
     styleSheets: Map<string, BrowserCodeCoverageStyleSheet>
   }
   report?: BrowserCodeCoverageReport
+}
+
+interface BrowserCpuProfileInternal {
+  recording?: {
+    startedAt: string
+    startedUrl: string
+  }
+  report?: BrowserCpuProfileReport
 }
 
 interface BrowserTabGroup {
@@ -2571,6 +2584,7 @@ export class BrowserTabsManager {
     if (action === 'get') return this.codeCoverageResult(tab, action)
     if (action === 'start') {
       if (tab.codeCoverage?.recording) throw new Error('Code coverage is already recording for this tab')
+      if (tab.cpuProfile?.recording) throw new Error('Stop the JavaScript CPU profile before recording code coverage')
       const mode = options.mode ?? 'function'
       if (mode !== 'function' && mode !== 'block') throw new Error('Code coverage mode must be function or block')
       const recording: NonNullable<BrowserCodeCoverageInternal['recording']> = {
@@ -2791,6 +2805,104 @@ export class BrowserTabsManager {
         await webDebugger.sendCommand('DOM.disable').catch(() => undefined)
       }
       await webDebugger.sendCommand('Debugger.disable').catch(() => undefined)
+    }).catch(() => undefined)
+  }
+
+  async cpuProfile(options: BrowserCpuProfileOptions = {}): Promise<BrowserCpuProfileResult> {
+    const tab = this.getTab(options.tabId)
+    if (isBronomHomeUrl(tab.url)) throw new Error('Open a website tab before recording a JavaScript CPU profile')
+    const action = options.action ?? 'get'
+    if (!['get', 'start', 'stop', 'clear'].includes(action)) throw new Error('Unsupported JavaScript CPU profile action')
+
+    if (action === 'get') return this.cpuProfileResult(tab, action)
+    if (action === 'start') {
+      if (tab.cpuProfile?.recording) throw new Error('A JavaScript CPU profile is already recording for this tab')
+      if (tab.codeCoverage?.recording) throw new Error('Stop code coverage before recording a JavaScript CPU profile')
+      tab.cpuProfile = {
+        recording: {
+          startedAt: new Date().toISOString(),
+          startedUrl: tab.url
+        }
+      }
+      try {
+        await this.withDebugger(tab.view.webContents, async () => {
+          await tab.view.webContents.debugger.sendCommand('Profiler.enable')
+          await tab.view.webContents.debugger.sendCommand('Profiler.setSamplingInterval', { interval: 1_000 })
+          await tab.view.webContents.debugger.sendCommand('Profiler.start')
+        })
+      } catch (error) {
+        tab.cpuProfile = undefined
+        throw error
+      }
+      this.changed(false)
+      return this.cpuProfileResult(tab, action)
+    }
+
+    if (action === 'clear') {
+      const cleared = Boolean(tab.cpuProfile?.recording || tab.cpuProfile?.report)
+      if (tab.cpuProfile?.recording) await this.discardCpuProfileRecording(tab)
+      tab.cpuProfile = undefined
+      this.changed(false)
+      return this.cpuProfileResult(tab, action, cleared)
+    }
+
+    const recording = tab.cpuProfile?.recording
+    if (!recording) throw new Error('Start a JavaScript CPU profile before stopping it')
+    try {
+      const response = await this.withDebugger(tab.view.webContents, async () => {
+        try {
+          return await tab.view.webContents.debugger.sendCommand('Profiler.stop') as { profile: CdpCpuProfile }
+        } finally {
+          await tab.view.webContents.debugger.sendCommand('Profiler.disable').catch(() => undefined)
+        }
+      })
+      const summary = summarizeCpuProfile(response.profile, redactNetworkUrl)
+      const report: BrowserCpuProfileReport = {
+        startedAt: recording.startedAt,
+        stoppedAt: new Date().toISOString(),
+        startedUrl: redactNetworkUrl(recording.startedUrl),
+        currentUrl: redactNetworkUrl(tab.url),
+        ...summary,
+        caveats: [
+          'The profile contains sampled JavaScript self time, so short functions and browser rendering work may not appear.',
+          'Record the smallest reproducible interaction and compare repeated runs before changing production code.',
+          'Function names and sanitized locations are included, but source code, arguments, and page content are never returned.'
+        ]
+      }
+      tab.cpuProfile = { report }
+      this.changed(false)
+      return this.cpuProfileResult(tab, action)
+    } catch (error) {
+      tab.cpuProfile = undefined
+      this.changed(false)
+      throw error
+    }
+  }
+
+  private cpuProfileResult(
+    tab: BrowserTab,
+    action: BrowserCpuProfileResult['action'],
+    cleared?: boolean
+  ): BrowserCpuProfileResult {
+    const recording = tab.cpuProfile?.recording
+    const report = tab.cpuProfile?.report
+    return {
+      tabId: tab.id,
+      url: tab.url,
+      title: tab.title,
+      action,
+      status: recording ? 'recording' : report ? 'complete' : 'idle',
+      ...(recording ? { recording: { ...recording } } : {}),
+      ...(report ? { report } : {}),
+      ...(cleared !== undefined ? { cleared } : {})
+    }
+  }
+
+  private async discardCpuProfileRecording(tab: BrowserTab): Promise<void> {
+    await this.withDebugger(tab.view.webContents, async () => {
+      const webDebugger = tab.view.webContents.debugger
+      await webDebugger.sendCommand('Profiler.stop').catch(() => undefined)
+      await webDebugger.sendCommand('Profiler.disable').catch(() => undefined)
     }).catch(() => undefined)
   }
 
@@ -4891,6 +5003,7 @@ export class BrowserTabsManager {
       tab.dialog = undefined
       tab.networkDebuggerEnabled = false
       if (tab.codeCoverage?.recording) tab.codeCoverage = undefined
+      if (tab.cpuProfile?.recording) tab.cpuProfile = undefined
       this.defaultExecutionContexts.delete(webContents.id)
       this.changed(false)
       if (
@@ -5368,6 +5481,7 @@ export class BrowserTabsManager {
     if (tab.reproRecording?.active) return 'A tab recording reproduction steps stays active.'
     if (tab.domChangesRecording?.active) return 'A tab recording DOM changes stays active.'
     if (tab.codeCoverage?.recording) return 'A tab recording code coverage stays active.'
+    if (tab.cpuProfile?.recording) return 'A tab recording a JavaScript CPU profile stays active.'
     if ((this.mcpActivitiesByTab.get(tab.id)?.size ?? 0) > 0) return 'A tab with an active MCP command stays active.'
     if ([...this.downloads.values()].some((download) => download.tabId === tab.id && download.state === 'progressing')) {
       return 'A tab with an active download stays active.'
@@ -5497,6 +5611,11 @@ export class BrowserTabsManager {
         codeCoverageRecording: {
           startedAt: tab.codeCoverage.recording.startedAt,
           mode: tab.codeCoverage.recording.mode
+        }
+      } : {}),
+      ...(tab.cpuProfile?.recording ? {
+        cpuProfileRecording: {
+          startedAt: tab.cpuProfile.recording.startedAt
         }
       } : {}),
       ...(tab.pageProblem ? { pageProblem: { ...tab.pageProblem } } : {}),

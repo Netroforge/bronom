@@ -20,6 +20,7 @@ import type {
   BrowserAccessibilityAuditOptions,
   BrowserPerformanceOptions,
   BrowserCodeCoverageOptions,
+  BrowserCpuProfileOptions,
   BrowserMemoryOptions,
   BrowserDebugReportOptions,
   BrowserReproAction,
@@ -132,6 +133,8 @@ const api: BronomApi = {
   inspectSecurity: (tabId?: string) => ipcRenderer.invoke('browser:security', tabId),
   manageCodeCoverage: (options: BrowserCodeCoverageOptions = {}) =>
     ipcRenderer.invoke('browser:code-coverage', options),
+  manageCpuProfile: (options: BrowserCpuProfileOptions = {}) =>
+    ipcRenderer.invoke('browser:cpu-profile', options),
   measureMemory: (options: BrowserMemoryOptions = {}) =>
     ipcRenderer.invoke('browser:memory', options),
   createDebugReport: (options: BrowserDebugReportOptions = {}) =>
