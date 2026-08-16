@@ -223,4 +223,44 @@ describe('sanitized network HAR', () => {
     expect(filterNetworkRequests([details, runningWebSocket], normalizeNetworkHarOptions({ query: 'is:running' })))
       .toEqual([runningWebSocket])
   })
+
+  it('exports only payload-free EventSource metadata', () => {
+    const eventSourceDetails: BrowserNetworkRequestDetails = {
+      ...details,
+      id: 'events-1',
+      url: 'https://example.test/events',
+      method: 'GET',
+      resourceType: 'eventsource',
+      completedAt: undefined,
+      eventSource: {
+        open: true,
+        messages: [{
+          timestamp: '2026-08-16T10:00:00.100Z',
+          eventName: 'progress',
+          eventId: 'event-2',
+          sizeBytes: 24,
+          data: 'private event payload',
+          originalChars: 21,
+          truncated: false,
+          redacted: false
+        }],
+        droppedMessages: 2
+      }
+    }
+    const har = buildSanitizedNetworkHar({
+      appVersion: '1.0.0',
+      tabId: 'tab-1',
+      title: 'Example',
+      url: 'https://example.test/',
+      availableRequestCount: 1,
+      details: [eventSourceDetails],
+      includeBodies: true,
+      truncated: false
+    })
+
+    expect(har.log.entries[0]!._bronom.eventSource).toEqual({ open: true, messageCount: 1, droppedMessages: 2 })
+    expect(JSON.stringify(har)).not.toContain('private event payload')
+    expect(filterNetworkRequests([eventSourceDetails], normalizeNetworkHarOptions({ resourceType: 'eventsource' })))
+      .toEqual([eventSourceDetails])
+  })
 })

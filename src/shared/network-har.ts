@@ -76,6 +76,7 @@ export function networkResourceCategory(resourceType: string): string {
   if (normalized === 'stylesheet') return 'stylesheet'
   if (normalized === 'image') return 'image'
   if (normalized === 'websocket') return 'websocket'
+  if (normalized === 'eventsource') return 'eventsource'
   return 'other'
 }
 
@@ -295,6 +296,13 @@ function harEntry(details: BrowserNetworkRequestDetails, includeBodies: boolean)
           open: details.webSocket.open,
           messageCount: details.webSocket.messages.length,
           droppedMessages: details.webSocket.droppedMessages
+        }
+      } : {}),
+      ...(details.eventSource ? {
+        eventSource: {
+          open: details.eventSource.open,
+          messageCount: details.eventSource.messages.length,
+          droppedMessages: details.eventSource.droppedMessages
         }
       } : {})
     }

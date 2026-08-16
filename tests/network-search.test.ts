@@ -97,6 +97,39 @@ describe('network search', () => {
     expect(result.unavailableResponseBodyCount).toBe(0)
   })
 
+  it('searches retained server-sent event names, IDs, and sanitized data', () => {
+    const result = searchNetworkDetails({
+      tabId: 'tab-1',
+      availableRequestCount: 1,
+      details: [details({
+        resourceType: 'eventsource',
+        response: { headers: {}, body: { available: false } },
+        eventSource: {
+          open: true,
+          droppedMessages: 0,
+          messages: [{
+            timestamp: '2026-08-16T10:00:01.000Z',
+            eventName: 'progress',
+            eventId: 'event-2',
+            sizeBytes: 26,
+            data: '{"state":"progress-kept","token":"[REDACTED]"}',
+            originalChars: 41,
+            truncated: false,
+            redacted: true
+          }]
+        }
+      })],
+      options: normalizeNetworkSearchOptions({ query: 'progress-kept' })
+    })
+
+    expect(result.matches).toEqual([expect.objectContaining({
+      field: 'eventsource-message',
+      label: 'progress event',
+      snippet: expect.stringContaining('progress-kept')
+    })])
+    expect(result.unavailableResponseBodyCount).toBe(0)
+  })
+
   it('bounds requests, results, bodies, and query input', () => {
     const options = normalizeNetworkSearchOptions({
       query: ' match ',

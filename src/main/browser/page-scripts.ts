@@ -432,12 +432,14 @@ export function elementPickerScript(): string {
     };
     const cancel = () => finish({ canceled: true });
     const onPointerMove = (event) => {
+      if (window.__bronomAgentInputActive === true) return;
       const candidate = event.composedPath().find((node) => node instanceof Element && !node.hasAttribute?.('data-bronom-element-picker'));
       if (!(candidate instanceof Element)) return;
       current = candidate;
       position(candidate);
     };
     const onClick = (event) => {
+      if (window.__bronomAgentInputActive === true || event.isTrusted === false) return;
       const candidate = event.composedPath().find((node) => node instanceof Element && !node.hasAttribute?.('data-bronom-element-picker'));
       if (!(candidate instanceof Element)) return;
       event.preventDefault();
@@ -507,6 +509,27 @@ export function elementPickerNativeInputScript(
       ${JSON.stringify(x)} * innerWidth / width,
       ${JSON.stringify(y)} * innerHeight / height
     );
+  })()`
+}
+
+export function elementPickerInspectionAtPointScript(
+  x: number,
+  y: number,
+  viewportWidth: number,
+  viewportHeight: number
+): string {
+  return `(() => {
+    ${elementInspectionHelpersSource()}
+    const width = Math.max(1, ${JSON.stringify(viewportWidth)});
+    const height = Math.max(1, ${JSON.stringify(viewportHeight)});
+    const candidate = document.elementFromPoint(
+      Math.max(0, Math.min(innerWidth - 1, ${JSON.stringify(x)} * innerWidth / width)),
+      Math.max(0, Math.min(innerHeight - 1, ${JSON.stringify(y)} * innerHeight / height))
+    );
+    if (!(candidate instanceof Element) || candidate.hasAttribute('data-bronom-element-picker')) {
+      throw new Error('No selectable element was found at the pointer position.');
+    }
+    return bronomInspectElement(candidate);
   })()`
 }
 
@@ -695,19 +718,19 @@ export function screenshotAreaScript(): string {
       return true;
     };
     const onPointerDown = (event) => {
-      if (event.button !== 0) return;
+      if (event.button !== 0 || window.__bronomAgentInputActive === true) return;
       consume(event);
       beginAt(point(event));
       try { shade.setPointerCapture(event.pointerId); } catch {}
     };
     const onPointerMove = (event) => {
-      if (!start) return;
+      if (!start || window.__bronomAgentInputActive === true) return;
       consume(event);
       if (event.pointerType === 'mouse' && event.buttons === 0) completeAt(point(event));
       else moveTo(point(event));
     };
     const onPointerUp = (event) => {
-      if (!start || event.button !== 0) return;
+      if (!start || event.button !== 0 || window.__bronomAgentInputActive === true) return;
       consume(event);
       completeAt(point(event));
     };

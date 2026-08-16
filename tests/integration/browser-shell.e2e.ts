@@ -2220,14 +2220,13 @@ test('picks a page element and copies safe agent-ready DOM context from an MCP-c
     expect(pickerTooltip).toContain('button "Save profile" · keyboard focusable')
     expect(pickerTooltip).toContain('Click to copy · Esc to cancel')
 
-    await electronApp.evaluate(async ({ webContents }) => {
+    await electronApp.evaluate(({ webContents }) => {
       const page = webContents.getAllWebContents().find((contents) => contents.getURL().includes('/picker?mode=test'))
       if (!page) throw new Error('Picker fixture web contents was not found')
-      await page.executeJavaScript(`document.querySelector('#save-profile').dispatchEvent(new MouseEvent('click', {
-        bubbles: true,
-        cancelable: true,
-        composed: true
-      }))`)
+      page.focus()
+      page.sendInputEvent({ type: 'mouseMove', x: 40, y: 30, movementX: 0, movementY: 0 })
+      page.sendInputEvent({ type: 'mouseDown', x: 40, y: 30, button: 'left', clickCount: 1 })
+      page.sendInputEvent({ type: 'mouseUp', x: 40, y: 30, button: 'left', clickCount: 1 })
     })
 
     await expect(appWindow.getByRole('button', { name: 'Element copied for agent' })).toBeVisible()
@@ -2264,6 +2263,16 @@ test('picks a page element and copies safe agent-ready DOM context from an MCP-c
     pageTools = appWindow.getByRole('dialog', { name: 'Page tools' })
     await expect(pageTools.getByRole('button', { name: 'Cancel element selection' })).toBeVisible()
     await pageTools.getByRole('button', { name: 'Close page tools' }).click()
+    const agentClickWhilePicking = await client.callTool({
+      name: 'browser_click',
+      arguments: { tabId: mcpTabId, selector: '#save-profile' }
+    }) as CallToolResult
+    expect(agentClickWhilePicking.isError, mcpResultText(agentClickWhilePicking)).not.toBe(true)
+    await expect(appWindow.getByRole('button', { name: 'Cancel element selection' })).toBeVisible()
+    await expect.poll(() => electronApp.evaluate(async ({ webContents }) => {
+      const page = webContents.getAllWebContents().find((contents) => contents.getURL().includes('/picker?mode=test'))
+      return page?.executeJavaScript('window.fixtureClicks')
+    })).toBe(1)
     await appWindow.keyboard.press('Escape')
     await appWindow.getByRole('button', { name: 'Page tools' }).click()
     pageTools = appWindow.getByRole('dialog', { name: 'Page tools' })
@@ -2275,6 +2284,10 @@ test('picks a page element and copies safe agent-ready DOM context from an MCP-c
         return page?.executeJavaScript(`Boolean(document.querySelector('[data-bronom-element-picker="overlay"]'))`)
       }))
       .toBe(false)
+    await electronApp.evaluate(async ({ webContents }) => {
+      const page = webContents.getAllWebContents().find((contents) => contents.getURL().includes('/picker?mode=test'))
+      await page?.executeJavaScript('window.fixtureClicks = 0')
+    })
 
     const activeTabId = await appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.find((tab) => tab.active).id)')
     await appWindow.evaluate(`window.bronom.setTabHumanInteractionLocked(${JSON.stringify(activeTabId)}, true)`)
@@ -2284,9 +2297,10 @@ test('picks a page element and copies safe agent-ready DOM context from an MCP-c
     const lockedPicker = appWindow.getByRole('button', { name: 'Select an element to copy for agent' })
     await lockedPicker.click()
     await expect(appWindow.getByRole('button', { name: 'Cancel element selection' })).toBeVisible()
-    await electronApp.evaluate(({ webContents }) => {
+    await electronApp.evaluate(async ({ webContents }) => {
       const page = webContents.getAllWebContents().find((contents) => contents.getURL().includes('/picker?mode=test'))
       if (!page) throw new Error('Locked picker fixture web contents was not found')
+      await page.executeJavaScript('window.__bronomElementPicker.nativeInput = () => false; true')
       page.focus()
       page.sendInputEvent({ type: 'mouseMove', x: 40, y: 30, movementX: 0, movementY: 0 })
       page.sendInputEvent({ type: 'mouseDown', x: 40, y: 30, button: 'left', clickCount: 1 })
@@ -2635,9 +2649,14 @@ test('drags a page area and copies the screenshot image for agent chat', async (
     await electronApp.evaluate(({ clipboard }) => clipboard.clear())
     await capture.click()
     await expect(appWindow.getByRole('button', { name: 'Cancel area screenshot' })).toBeVisible()
-    await electronApp.evaluate(({ webContents }) => {
+    await electronApp.evaluate(async ({ webContents }) => {
       const page = webContents.getAllWebContents().find((contents) => contents.getURL().includes('/area-capture?created=mcp'))
       if (!page) throw new Error('MCP-created area capture fixture disappeared')
+      await page.executeJavaScript(`(() => {
+        document.querySelector('#target').textContent = 'Changed while selecting';
+        document.querySelector('#target').style.background = '#7ce3b1';
+        window.__bronomScreenshotArea.nativeInput = () => false;
+      })()`)
       page.focus()
       page.sendInputEvent({ type: 'mouseMove', x: 90, y: 75, movementX: 0, movementY: 0 })
       page.sendInputEvent({ type: 'mouseDown', x: 90, y: 75, button: 'left', clickCount: 1 })

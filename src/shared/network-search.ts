@@ -132,6 +132,13 @@ function searchableFields(details: BrowserNetworkRequestDetails): SearchableFiel
       text: message.text
     })
   }
+  for (const message of details.eventSource?.messages ?? []) {
+    fields.push({
+      field: 'eventsource-message',
+      label: `${message.eventName} event`,
+      text: [message.eventName, message.eventId, message.data].filter(Boolean).join('\n')
+    })
+  }
   return fields
 }
 
@@ -176,12 +183,12 @@ export function searchNetworkDetails(input: SearchInput): BrowserNetworkSearchRe
     resultCount: matches.length,
     occurrenceCount: totalOccurrences,
     unavailableResponseBodyCount: input.details.filter((details) => (
-      !details.webSocket && details.response.body.available !== true
+      !details.webSocket && !details.eventSource && details.response.body.available !== true
     )).length,
     truncated,
     matches,
     caveats: [
-      'Search covers bounded sanitized URLs, errors, request and response headers, request and response text bodies, and retained WebSocket text messages.',
+      'Search covers bounded sanitized URLs, errors, request and response headers, request and response text bodies, retained WebSocket text messages, and retained server-sent events.',
       'Known secret fields are redacted before matching. Arbitrary text receives best-effort filtering and snippets must still be reviewed before sharing.',
       'Binary and multipart payloads are omitted, and Chromium may no longer retain older response bodies.',
       `Only the most recent ${options.maxRequests} retained requests and up to ${options.maxResults} matching fields are included.`

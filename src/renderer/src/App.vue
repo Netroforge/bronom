@@ -687,6 +687,7 @@ const networkResourceFilters = [
   { value: 'script', label: 'JS' },
   { value: 'stylesheet', label: 'CSS' },
   { value: 'image', label: 'Img' },
+  { value: 'eventsource', label: 'SSE' },
   { value: 'websocket', label: 'WS' },
   { value: 'other', label: 'Other' }
 ]
@@ -7417,8 +7418,8 @@ onBeforeUnmount(() => {
               ref="networkContentSearchInput"
               v-model="networkContentSearchQuery"
               type="search"
-              aria-label="Search headers, payloads, responses, and WebSocket text"
-              placeholder="Search headers, payloads, responses, and WebSocket text"
+              aria-label="Search headers, payloads, responses, WebSocket text, and event streams"
+              placeholder="Search headers, payloads, responses, WebSocket text, and event streams"
               maxlength="200"
               spellcheck="false"
             />
@@ -7724,6 +7725,35 @@ onBeforeUnmount(() => {
               </div>
               <p v-else>No messages captured yet.</p>
               <p v-if="networkRequestDetails.webSocket.droppedMessages">{{ networkRequestDetails.webSocket.droppedMessages }} older messages were removed from the bounded diagnostic buffer.</p>
+            </details>
+            <details v-if="networkRequestDetails.eventSource" open>
+              <summary>
+                Event stream
+                <span>{{ networkRequestDetails.eventSource.messages.length }}{{ networkRequestDetails.eventSource.droppedMessages ? ` + ${networkRequestDetails.eventSource.droppedMessages} older` : '' }}</span>
+              </summary>
+              <div class="network-websocket-summary">
+                <span :class="networkRequestDetails.eventSource.open ? 'open' : 'closed'">{{ networkRequestDetails.eventSource.open ? 'Stream open' : 'Stream closed' }}</span>
+                <small>Event names, IDs, and data are sanitized and bounded.</small>
+              </div>
+              <div v-if="networkRequestDetails.eventSource.messages.length" class="network-websocket-messages network-eventsource-messages">
+                <article
+                  v-for="(message, index) in networkRequestDetails.eventSource.messages"
+                  :key="`${message.timestamp}:${message.eventName}:${message.eventId || ''}:${index}`"
+                  class="received text"
+                >
+                  <header>
+                    <span>event</span>
+                    <strong>{{ message.eventName }}</strong>
+                    <small :title="message.eventId ? `Event ID: ${message.eventId}` : undefined">{{ message.eventId ? `${message.eventId} · ` : '' }}{{ debugTimestamp(message.timestamp) }}</small>
+                    <code>{{ formatBytes(message.sizeBytes) }}</code>
+                  </header>
+                  <pre v-if="message.data">{{ message.data }}</pre>
+                  <p v-else>Empty event data.</p>
+                  <p v-if="message.truncated || message.redacted">{{ [message.truncated ? 'truncated' : '', message.redacted ? 'sanitized' : ''].filter(Boolean).join(' · ') }}</p>
+                </article>
+              </div>
+              <p v-else>No events captured yet.</p>
+              <p v-if="networkRequestDetails.eventSource.droppedMessages">{{ networkRequestDetails.eventSource.droppedMessages }} older events were removed from the bounded diagnostic buffer.</p>
             </details>
             <details v-if="networkRequestDetails.timing || networkRequestDetails.response.serverTiming?.length" open>
               <summary>Timing <span>{{ networkRequestDetails.timing?.totalMs !== undefined ? formatNetworkMilliseconds(networkRequestDetails.timing.totalMs) : `${networkRequestDetails.response.serverTiming?.length || 0} server metrics` }}</span></summary>

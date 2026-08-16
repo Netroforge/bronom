@@ -115,6 +115,20 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       response.end(JSON.stringify({ accepted: true, url: request.url }))
       return
     }
+    if (request.url === '/events') {
+      response.writeHead(200, {
+        'cache-control': 'no-store',
+        'content-type': 'text/event-stream; charset=utf-8',
+        connection: 'keep-alive'
+      })
+      response.write(`data: ${JSON.stringify({ state: 'ready', accessToken: 'sse-secret', visible: 'sse-kept' })}\n\n`)
+      setTimeout(() => {
+        response.write('event: progress\n')
+        response.write('id: event-2\n')
+        response.end(`data: ${JSON.stringify({ state: 'complete', password: 'sse-secret', visible: 'progress-kept' })}\n\n`)
+      }, 50)
+      return
+    }
     if (request.url?.startsWith('/redirect-start')) {
       response.writeHead(302, {
         location: '/redirect-middle?access_token=redirect-middle-secret&view=middle'
@@ -284,6 +298,23 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
           };
           socket.onclose = () => { clearTimeout(timeout); resolve(received); };
           socket.onerror = () => { clearTimeout(timeout); reject(new Error('WebSocket fixture failed')); };
+        });
+        window.runEventSourceProbe = () => new Promise((resolve, reject) => {
+          const source = new EventSource('/events');
+          const received = [];
+          const timeout = setTimeout(() => { source.close(); reject(new Error('EventSource fixture timed out')); }, 3000);
+          source.onmessage = (event) => received.push({ event: 'message', id: event.lastEventId, data: JSON.parse(event.data) });
+          source.addEventListener('progress', (event) => {
+            received.push({ event: 'progress', id: event.lastEventId, data: JSON.parse(event.data) });
+            clearTimeout(timeout);
+            source.close();
+            resolve(received);
+          });
+          source.onerror = () => {
+            clearTimeout(timeout);
+            source.close();
+            reject(new Error('EventSource fixture failed'));
+          };
         });
         window.runConsoleExceptionProbe = () => {
           function innerConsoleFailure() { throw new TypeError('console-stack-kept token=console-stack-secret'); }
@@ -1483,6 +1514,73 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     })
     expect(text(webSocketHarResult)).not.toContain('client-kept')
     expect(text(webSocketHarResult)).not.toContain('server-kept')
+    const eventSourceProbe = await client.callTool({
+      name: 'browser_evaluate',
+      arguments: { tabId, script: 'window.runEventSourceProbe()' }
+    }) as CallToolResult
+    expect(JSON.parse(text(eventSourceProbe))).toEqual([
+      { event: 'message', id: '', data: { state: 'ready', accessToken: 'sse-secret', visible: 'sse-kept' } },
+      { event: 'progress', id: 'event-2', data: { state: 'complete', password: 'sse-secret', visible: 'progress-kept' } }
+    ])
+    let eventSourceRequest: Record<string, unknown> | undefined
+    await expect.poll(async () => {
+      const networkResult = await client.callTool({
+        name: 'browser_network',
+        arguments: { tabId, query: '/events', resourceType: 'eventsource' }
+      }) as CallToolResult
+      eventSourceRequest = (JSON.parse(text(networkResult)) as Array<Record<string, unknown>>)[0]
+      return eventSourceRequest?.status === 200
+    }).toBe(true)
+    const eventSourceDetailsResult = await client.callTool({
+      name: 'browser_network_request',
+      arguments: { tabId, requestId: eventSourceRequest?.id }
+    }) as CallToolResult
+    expect(eventSourceDetailsResult.isError, text(eventSourceDetailsResult)).not.toBe(true)
+    const eventSourceDetails = JSON.parse(text(eventSourceDetailsResult)) as {
+      resourceType: string
+      eventSource: {
+        open: boolean
+        messages: Array<{ eventName: string; eventId?: string; data: string; redacted: boolean }>
+        droppedMessages: number
+      }
+    }
+    expect(eventSourceDetails).toMatchObject({
+      resourceType: 'eventsource',
+      eventSource: { droppedMessages: 0 }
+    })
+    expect(eventSourceDetails.eventSource.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ eventName: 'message', data: expect.stringContaining('sse-kept'), redacted: true }),
+      expect.objectContaining({ eventName: 'progress', eventId: 'event-2', data: expect.stringContaining('progress-kept'), redacted: true })
+    ]))
+    expect(text(eventSourceDetailsResult)).toContain('[REDACTED]')
+    expect(text(eventSourceDetailsResult)).not.toContain('sse-secret')
+    const eventSourceSearchResult = await client.callTool({
+      name: 'browser_network_search',
+      arguments: { tabId, query: 'progress-kept' }
+    }) as CallToolResult
+    expect(JSON.parse(text(eventSourceSearchResult))).toMatchObject({
+      matches: [expect.objectContaining({
+        requestId: eventSourceRequest?.id,
+        field: 'eventsource-message',
+        label: 'progress event'
+      })]
+    })
+    const eventSourceHarResult = await client.callTool({
+      name: 'browser_network_har',
+      arguments: { tabId, query: '/events', resourceType: 'eventsource', includeBodies: true }
+    }) as CallToolResult
+    expect(JSON.parse(text(eventSourceHarResult))).toMatchObject({
+      log: {
+        entries: [expect.objectContaining({
+          _bronom: expect.objectContaining({
+            resourceType: 'eventsource',
+            eventSource: { open: expect.any(Boolean), messageCount: 2, droppedMessages: 0 }
+          })
+        })]
+      }
+    })
+    expect(text(eventSourceHarResult)).not.toContain('sse-kept')
+    expect(text(eventSourceHarResult)).not.toContain('progress-kept')
     const diagnosticFetch = await client.callTool({
       name: 'browser_evaluate',
       arguments: {
@@ -1774,7 +1872,7 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     await networkPanel.getByRole('button', { name: 'Search request content' }).click()
     const networkContentSearch = networkPanel.getByRole('region', { name: 'Search request content' })
     await expect(networkContentSearch).toBeVisible()
-    await networkContentSearch.getByRole('searchbox', { name: 'Search headers, payloads, responses, and WebSocket text' }).fill('network-detail-42')
+    await networkContentSearch.getByRole('searchbox', { name: 'Search headers, payloads, responses, WebSocket text, and event streams' }).fill('network-detail-42')
     await networkContentSearch.getByRole('button', { name: 'Search', exact: true }).click()
     await expect(networkContentSearch).toContainText('matching fields')
     await expect(networkContentSearch.getByText('x-request-id', { exact: true }).first()).toBeVisible()
@@ -1797,6 +1895,16 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     await expect(networkPanel).not.toContainText('server-secret')
     await expect(networkPanel.getByRole('button', { name: 'Copy sanitized cURL' })).toHaveCount(0)
     await expect(networkPanel.getByRole('button', { name: 'Copy sanitized fetch' })).toHaveCount(0)
+    await networkPanel.getByRole('searchbox', { name: 'Filter network requests' }).fill('/events')
+    const eventSourceRow = networkPanel.locator(`[data-request-id="${String(eventSourceRequest?.id)}"]`)
+    await expect(eventSourceRow).toBeVisible()
+    await eventSourceRow.click()
+    await expect(networkPanel.locator('summary').filter({ hasText: 'Event stream' })).toBeVisible()
+    await expect(networkPanel).toContainText('progress')
+    await expect(networkPanel).toContainText('event-2')
+    await expect(networkPanel).toContainText('sse-kept')
+    await expect(networkPanel).toContainText('progress-kept')
+    await expect(networkPanel).not.toContainText('sse-secret')
     await networkPanel.getByRole('searchbox', { name: 'Filter network requests' }).fill('redirect-final')
     const redirectRow = networkPanel.locator(`[data-request-id="${String(redirectRequest?.id)}"]`)
     await expect(redirectRow).toBeVisible()

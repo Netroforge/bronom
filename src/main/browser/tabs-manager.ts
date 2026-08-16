@@ -81,6 +81,11 @@ import {
   normalizeWebSocketMessage
 } from '../../shared/websocket-messages.js'
 import {
+  MAX_EVENTSOURCE_MESSAGES_PER_CONNECTION,
+  MAX_EVENTSOURCE_MESSAGES_PER_TAB,
+  normalizeEventSourceMessage
+} from '../../shared/eventsource-messages.js'
+import {
   buildSanitizedNetworkHar,
   filterNetworkRequests,
   networkHarFilename,
@@ -196,6 +201,7 @@ import type {
   BrowserNetworkRequestDetails,
   BrowserNetworkSearchOptions,
   BrowserNetworkSearchResult,
+  BrowserEventSourceMessage,
   BrowserWebSocketMessage,
   BrowserNetworkHar,
   BrowserNetworkHarExport,
@@ -225,6 +231,7 @@ import {
   cancelElementPickerScript,
   cancelScreenshotAreaScript,
   dialogAwareClickScript,
+  elementPickerInspectionAtPointScript,
   elementPickerNativeInputScript,
   elementPickerScript,
   elementInspectionScript,
@@ -542,6 +549,8 @@ interface BrowserNetworkRequestRecord extends BrowserNetworkRequest {
   webSocketOpen?: boolean
   webSocketMessages?: BrowserWebSocketMessage[]
   webSocketDroppedMessages?: number
+  eventSourceMessages?: BrowserEventSourceMessage[]
+  eventSourceDroppedMessages?: number
 }
 
 interface CdpNetworkResponseMetadata extends CdpNetworkResponseSourceInput {
@@ -586,9 +595,17 @@ interface BrowserElementPickerScriptResult {
   inspection?: unknown
 }
 
-interface BrowserElementPickerSession {
+interface BrowserNativeSelectionSession<Result> {
   canceled: boolean
   inputQueue: Promise<void>
+  settled: boolean
+  result: Promise<Result>
+  resolve: (result: Result) => void
+  reject: (error: unknown) => void
+}
+
+interface BrowserElementPickerSession extends BrowserNativeSelectionSession<BrowserElementPickerScriptResult> {
+  pointerDown: boolean
 }
 
 export interface BrowserElementPickerResult {
@@ -604,9 +621,37 @@ export interface BrowserScreenshotAreaResult {
   url?: string
 }
 
-interface BrowserScreenshotAreaSession {
-  canceled: boolean
-  inputQueue: Promise<void>
+interface BrowserScreenshotAreaSession extends BrowserNativeSelectionSession<BrowserScreenshotAreaResult> {
+  start?: { x: number; y: number }
+  current?: { x: number; y: number }
+}
+
+function createNativeSelectionSession<Result>(): BrowserNativeSelectionSession<Result> {
+  let resolvePromise!: (result: Result) => void
+  let rejectPromise!: (error: unknown) => void
+  const result = new Promise<Result>((resolve, reject) => {
+    resolvePromise = resolve
+    rejectPromise = reject
+  })
+  const session: BrowserNativeSelectionSession<Result> = {
+    canceled: false,
+    inputQueue: Promise.resolve(),
+    settled: false,
+    result,
+    resolve: () => undefined,
+    reject: () => undefined
+  }
+  session.resolve = (value) => {
+    if (session.settled) return
+    session.settled = true
+    resolvePromise(value)
+  }
+  session.reject = (error) => {
+    if (session.settled) return
+    session.settled = true
+    rejectPromise(error)
+  }
+  return session
 }
 
 interface BrowserReproRecordingInternal {
@@ -679,7 +724,7 @@ export class BrowserTabsManager {
   private activeTabId: string | null = null
   private splitView: BrowserSplitViewState | null = null
   private allHumanInteractionLocked = false
-  private readonly agentInputWebContents = new Set<number>()
+  private readonly agentInputWebContents = new Map<number, number>()
   private readonly elementPickerSessions = new Map<number, BrowserElementPickerSession>()
   private readonly screenshotAreaSessions = new Map<number, BrowserScreenshotAreaSession>()
   private destroyed = false
@@ -2155,11 +2200,13 @@ export class BrowserTabsManager {
     const screenshotSession = this.screenshotAreaSessions.get(tab.view.webContents.id)
     if (screenshotSession) {
       screenshotSession.canceled = true
+      screenshotSession.resolve({ canceled: true })
       this.screenshotAreaSessions.delete(tab.view.webContents.id)
     }
     const elementPickerSession = this.elementPickerSessions.get(tab.view.webContents.id)
     if (elementPickerSession) {
       elementPickerSession.canceled = true
+      elementPickerSession.resolve({ canceled: true })
       this.elementPickerSessions.delete(tab.view.webContents.id)
     }
     const splitPartnerId = this.splitViewContains(tab.id)
@@ -2821,12 +2868,23 @@ export class BrowserTabsManager {
     const existing = this.elementPickerSessions.get(webContents.id)
     if (existing) {
       existing.canceled = true
+      existing.resolve({ canceled: true })
       await webContents.executeJavaScript(cancelElementPickerScript(), true).catch(() => false)
     }
-    const session: BrowserElementPickerSession = { canceled: false, inputQueue: Promise.resolve() }
+    const session: BrowserElementPickerSession = {
+      ...createNativeSelectionSession<BrowserElementPickerScriptResult>(),
+      pointerDown: false
+    }
     this.elementPickerSessions.set(webContents.id, session)
     try {
-      const selected = await webContents.executeJavaScript(elementPickerScript(), true) as BrowserElementPickerScriptResult
+      void webContents.executeJavaScript(elementPickerScript(), true)
+        .then((selected: BrowserElementPickerScriptResult) => {
+          if (selected?.canceled || selected?.inspection) session.resolve(selected)
+        })
+        .catch((error: unknown) => {
+          if (!/context.*destroyed|frame.*removed|navigat/i.test(String(error))) session.reject(error)
+        })
+      const selected = await session.result
       if (session.canceled || this.elementPickerSessions.get(webContents.id) !== session || selected.canceled || !selected.inspection) {
         return null
       }
@@ -2865,7 +2923,10 @@ export class BrowserTabsManager {
   async cancelElementPicker(tabId?: string): Promise<boolean> {
     const tab = this.getTab(tabId)
     const session = this.elementPickerSessions.get(tab.view.webContents.id)
-    if (session) session.canceled = true
+    if (session) {
+      session.canceled = true
+      session.resolve({ canceled: true })
+    }
     return tab.view.webContents.executeJavaScript(cancelElementPickerScript(), true) as Promise<boolean>
   }
 
@@ -2876,15 +2937,25 @@ export class BrowserTabsManager {
     const existing = this.screenshotAreaSessions.get(webContents.id)
     if (existing) {
       existing.canceled = true
+      existing.resolve({ canceled: true })
       await webContents.executeJavaScript(cancelScreenshotAreaScript(), true).catch(() => false)
     }
-    const session: BrowserScreenshotAreaSession = { canceled: false, inputQueue: Promise.resolve() }
+    const session = createNativeSelectionSession<BrowserScreenshotAreaResult>() as BrowserScreenshotAreaSession
     this.screenshotAreaSessions.set(webContents.id, session)
     try {
-      const selection = await webContents.executeJavaScript(screenshotAreaScript(), true) as BrowserScreenshotAreaResult
+      void webContents.executeJavaScript(screenshotAreaScript(), true)
+        .then((selection: BrowserScreenshotAreaResult) => {
+          if (selection?.canceled || (selection?.clip && selection?.viewport)) session.resolve(selection)
+        })
+        .catch((error: unknown) => {
+          if (!/context.*destroyed|frame.*removed|navigat/i.test(String(error))) session.reject(error)
+        })
+      const selection = await session.result
       if (session.canceled || this.screenshotAreaSessions.get(webContents.id) !== session || selection.canceled) {
         return { canceled: true }
       }
+      await session.inputQueue.catch(() => undefined)
+      await webContents.executeJavaScript(cancelScreenshotAreaScript(), true).catch(() => false)
       const data = await this.captureScreenshotAreaSelection(tab, selection)
       if (session.canceled || this.screenshotAreaSessions.get(webContents.id) !== session) return { canceled: true }
       return { canceled: false, data }
@@ -2900,7 +2971,10 @@ export class BrowserTabsManager {
   async cancelScreenshotArea(tabId?: string): Promise<boolean> {
     const tab = this.getTab(tabId)
     const session = this.screenshotAreaSessions.get(tab.view.webContents.id)
-    if (session) session.canceled = true
+    if (session) {
+      session.canceled = true
+      session.resolve({ canceled: true })
+    }
     return tab.view.webContents.executeJavaScript(cancelScreenshotAreaScript(), true) as Promise<boolean>
   }
 
@@ -2943,14 +3017,16 @@ export class BrowserTabsManager {
     const tab = this.getTab(target.tabId)
     const webContents = tab.view.webContents
     const dialogAction = target.dialogAction
-    if (dialogAction === undefined) return webContents.executeJavaScript(targetActionScript('click', target), true)
-    return this.withOptionalDialogHandling(webContents, target, async () => {
-      const contextId = await this.mainWorldContextId(webContents)
-      return this.evaluateWithAttachedDebugger(
-        webContents,
-        dialogAwareClickScript(target, dialogAction, target.promptText),
-        contextId
-      )
+    return this.withAgentInput(webContents, () => {
+      if (dialogAction === undefined) return webContents.executeJavaScript(targetActionScript('click', target), true)
+      return this.withOptionalDialogHandling(webContents, target, async () => {
+        const contextId = await this.mainWorldContextId(webContents)
+        return this.evaluateWithAttachedDebugger(
+          webContents,
+          dialogAwareClickScript(target, dialogAction, target.promptText),
+          contextId
+        )
+      })
     })
   }
 
@@ -2963,19 +3039,22 @@ export class BrowserTabsManager {
   }): Promise<unknown> {
     this.validateTarget(target)
     const tab = this.getTab(target.tabId)
-    return tab.view.webContents.executeJavaScript(targetActionScript('type', target, target.text, target.submit), true)
+    return this.withAgentInput(tab.view.webContents, () =>
+      tab.view.webContents.executeJavaScript(targetActionScript('type', target, target.text, target.submit), true))
   }
 
   async select(target: { tabId?: string; ref?: string; selector?: string; value: string }): Promise<unknown> {
     this.validateTarget(target)
     const tab = this.getTab(target.tabId)
-    return tab.view.webContents.executeJavaScript(targetActionScript('select', target, target.value), true)
+    return this.withAgentInput(tab.view.webContents, () =>
+      tab.view.webContents.executeJavaScript(targetActionScript('select', target, target.value), true))
   }
 
   async fillForm(tabId: string | undefined, fields: BrowserFormField[]): Promise<unknown> {
     if (!fields.length || fields.length > 50) throw new Error('Provide between 1 and 50 form fields')
     for (const field of fields) this.validateTarget(field)
-    return this.getTab(tabId).view.webContents.executeJavaScript(fillFormScript(fields), true)
+    const webContents = this.getTab(tabId).view.webContents
+    return this.withAgentInput(webContents, () => webContents.executeJavaScript(fillFormScript(fields), true))
   }
 
   async hover(target: { tabId?: string; ref?: string; selector?: string }): Promise<unknown> {
@@ -3664,7 +3743,9 @@ export class BrowserTabsManager {
     const responseContentType = request.mimeType || headerValue(request.responseHeaders, 'content-type')
     let responseBody: BrowserNetworkBody = {
       available: false,
-      reason: request.webSocketMessages
+      reason: request.eventSourceMessages
+        ? 'Server-sent events are available in the bounded Event stream section.'
+        : request.webSocketMessages
         ? 'WebSocket messages are available in the bounded messages section.'
         : request.detailsAvailable
           ? request.bodyAvailable ? 'Response body is no longer available from Chromium.' : 'The response body has not completed.'
@@ -3673,7 +3754,7 @@ export class BrowserTabsManager {
 
     if (!includeBody) {
       responseBody = { available: false, reason: 'Response body was omitted from this sanitized export.' }
-    } else if (request.cdpRequestId && request.bodyAvailable) {
+    } else if (request.cdpRequestId && request.bodyAvailable && !request.eventSourceMessages) {
       try {
         const captured = await this.withDebugger(tab.view.webContents, () =>
           tab.view.webContents.debugger.sendCommand('Network.getResponseBody', { requestId: request.cdpRequestId })
@@ -3727,6 +3808,13 @@ export class BrowserTabsManager {
           open: request.webSocketOpen === true,
           messages: request.webSocketMessages.map((message) => ({ ...message })),
           droppedMessages: request.webSocketDroppedMessages ?? 0
+        }
+      } : {}),
+      ...(request.eventSourceMessages ? {
+        eventSource: {
+          open: request.completedAt === undefined,
+          messages: request.eventSourceMessages.map((message) => ({ ...message })),
+          droppedMessages: request.eventSourceDroppedMessages ?? 0
         }
       } : {})
     }
@@ -4011,6 +4099,10 @@ export class BrowserTabsManager {
   async evaluate(script: string, tabId?: string, dialog: BrowserDialogHandlingOptions = {}): Promise<unknown> {
     const webContents = this.getTab(tabId).view.webContents
     if (dialog.promptText !== undefined) throw new Error('Text prompts are supported by browser_click; Electron does not implement prompt() evaluation')
+    // DOM events dispatched by evaluated page scripts are untrusted and the
+    // human picker ignores them directly. Do not mark the whole evaluation as
+    // agent input: an evaluated script may open a blocking dialog, which would
+    // also block the cleanup executeJavaScript call and deadlock the MCP tool.
     return this.withOptionalDialogHandling(webContents, dialog, () => webContents.executeJavaScript(script, true))
   }
 
@@ -4404,9 +4496,15 @@ export class BrowserTabsManager {
     for (const tabId of this.networkWaiters.keys()) {
       this.rejectNetworkWaiters(tabId, 'Bronom closed while waiting for network activity.')
     }
-    for (const session of this.screenshotAreaSessions.values()) session.canceled = true
+    for (const session of this.screenshotAreaSessions.values()) {
+      session.canceled = true
+      session.resolve({ canceled: true })
+    }
     this.screenshotAreaSessions.clear()
-    for (const session of this.elementPickerSessions.values()) session.canceled = true
+    for (const session of this.elementPickerSessions.values()) {
+      session.canceled = true
+      session.resolve({ canceled: true })
+    }
     this.elementPickerSessions.clear()
     for (const tab of this.tabs.values()) {
       this.clearReproRecording(tab)
@@ -4547,7 +4645,7 @@ export class BrowserTabsManager {
     })
     webContents.on('before-input-event', (event, input) => {
       const screenshotSession = this.screenshotAreaSessions.get(webContents.id)
-      if (screenshotSession && !screenshotSession.canceled) {
+      if (screenshotSession && !screenshotSession.canceled && !this.agentInputWebContents.has(webContents.id)) {
         event.preventDefault()
         if (
           input.type === 'keyDown'
@@ -4559,7 +4657,7 @@ export class BrowserTabsManager {
         return
       }
       const elementPickerSession = this.elementPickerSessions.get(webContents.id)
-      if (elementPickerSession && !elementPickerSession.canceled) {
+      if (elementPickerSession && !elementPickerSession.canceled && !this.agentInputWebContents.has(webContents.id)) {
         event.preventDefault()
         const shortcut = (input.type === 'keyDown' || input.type === 'rawKeyDown') ? browserShortcutAction({
           key: input.key,
@@ -4608,7 +4706,7 @@ export class BrowserTabsManager {
     })
     webContents.on('before-mouse-event', (event, mouse) => {
       const screenshotSession = this.screenshotAreaSessions.get(webContents.id)
-      if (screenshotSession && !screenshotSession.canceled) {
+      if (screenshotSession && !screenshotSession.canceled && !this.agentInputWebContents.has(webContents.id)) {
         event.preventDefault()
         if (mouse.type === 'mouseDown' && (mouse.button === undefined || mouse.button === 'left')) {
           this.queueScreenshotAreaMouseInput(tab, screenshotSession, 'down', mouse)
@@ -4620,7 +4718,7 @@ export class BrowserTabsManager {
         return
       }
       const elementPickerSession = this.elementPickerSessions.get(webContents.id)
-      if (elementPickerSession && !elementPickerSession.canceled) {
+      if (elementPickerSession && !elementPickerSession.canceled && !this.agentInputWebContents.has(webContents.id)) {
         event.preventDefault()
         if (mouse.type === 'mouseDown' && (mouse.button === undefined || mouse.button === 'left')) {
           this.queueElementPickerMouseInput(tab, elementPickerSession, 'down', mouse)
@@ -5533,6 +5631,35 @@ export class BrowserTabsManager {
     mouse: Electron.MouseInputEvent
   ): void {
     const bounds = tab.view.getBounds()
+    const point = {
+      x: Math.max(0, Math.min(bounds.width, Number(mouse.x))),
+      y: Math.max(0, Math.min(bounds.height, Number(mouse.y)))
+    }
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return
+    if (type === 'down') {
+      session.start = point
+      session.current = point
+    } else if (session.start) {
+      session.current = point
+    }
+    let fallbackSelection: BrowserScreenshotAreaResult | undefined
+    if (type === 'up' && session.start && session.current) {
+      const left = Math.floor(Math.min(session.start.x, session.current.x))
+      const top = Math.floor(Math.min(session.start.y, session.current.y))
+      const right = Math.ceil(Math.max(session.start.x, session.current.x))
+      const bottom = Math.ceil(Math.max(session.start.y, session.current.y))
+      const clip = { x: left, y: top, width: right - left, height: bottom - top }
+      if (clip.width >= 2 && clip.height >= 2) {
+        fallbackSelection = {
+          canceled: false,
+          clip,
+          viewport: { width: Math.max(1, bounds.width), height: Math.max(1, bounds.height) },
+          url: tab.url
+        }
+      }
+      session.start = undefined
+      session.current = undefined
+    }
     const queued = session.inputQueue.catch(() => undefined).then(async () => {
       if (session.canceled || this.screenshotAreaSessions.get(tab.view.webContents.id) !== session) return
       await tab.view.webContents.executeJavaScript(screenshotAreaNativeInputScript(
@@ -5544,6 +5671,14 @@ export class BrowserTabsManager {
       ), true)
     })
     session.inputQueue = queued
+    if (fallbackSelection) {
+      const selection = fallbackSelection
+      void queued.catch(() => undefined).then(() => {
+        if (!session.canceled && this.screenshotAreaSessions.get(tab.view.webContents.id) === session) {
+          session.resolve(selection)
+        }
+      })
+    }
     void queued.catch((error) => {
       if (!session.canceled && this.screenshotAreaSessions.get(tab.view.webContents.id) === session) {
         console.error('[browser] Could not forward screenshot selection input:', error)
@@ -5558,6 +5693,9 @@ export class BrowserTabsManager {
     mouse: Electron.MouseInputEvent
   ): void {
     const bounds = tab.view.getBounds()
+    if (type === 'down') session.pointerDown = true
+    const shouldSelect = type === 'up' && session.pointerDown
+    if (type === 'up') session.pointerDown = false
     const queued = session.inputQueue.catch(() => undefined).then(async () => {
       if (session.canceled || this.elementPickerSessions.get(tab.view.webContents.id) !== session) return
       await tab.view.webContents.executeJavaScript(elementPickerNativeInputScript(
@@ -5566,7 +5704,21 @@ export class BrowserTabsManager {
         mouse.y,
         Math.max(1, bounds.width),
         Math.max(1, bounds.height)
-      ), true)
+      ), true).catch(() => false)
+      if (!shouldSelect || session.settled || session.canceled) return
+      const inspection = await tab.view.webContents.executeJavaScriptInIsolatedWorld(
+        ELEMENT_INSPECTION_WORLD_ID,
+        [{ code: elementPickerInspectionAtPointScript(
+          mouse.x,
+          mouse.y,
+          Math.max(1, bounds.width),
+          Math.max(1, bounds.height)
+        ) }],
+        false
+      )
+      if (!session.canceled && this.elementPickerSessions.get(tab.view.webContents.id) === session) {
+        session.resolve({ canceled: false, inspection })
+      }
     })
     session.inputQueue = queued
     void queued.catch((error) => {
@@ -5785,11 +5937,23 @@ export class BrowserTabsManager {
     webContents: BrowserTab['view']['webContents'],
     operation: () => Promise<T>
   ): Promise<T> {
-    this.agentInputWebContents.add(webContents.id)
+    const depth = (this.agentInputWebContents.get(webContents.id) ?? 0) + 1
+    this.agentInputWebContents.set(webContents.id, depth)
+    if (depth === 1 && !webContents.isDestroyed()) {
+      await webContents.executeJavaScript('window.__bronomAgentInputActive = true', true).catch(() => undefined)
+    }
     try {
       return await operation()
     } finally {
-      this.agentInputWebContents.delete(webContents.id)
+      const remaining = Math.max(0, (this.agentInputWebContents.get(webContents.id) ?? 1) - 1)
+      if (remaining > 0) {
+        this.agentInputWebContents.set(webContents.id, remaining)
+      } else {
+        this.agentInputWebContents.delete(webContents.id)
+        if (!webContents.isDestroyed()) {
+          await webContents.executeJavaScript('delete window.__bronomAgentInputActive', true).catch(() => undefined)
+        }
+      }
     }
   }
 
@@ -6300,6 +6464,31 @@ export class BrowserTabsManager {
     }
   }
 
+  private appendEventSourceMessage(
+    tab: BrowserTab,
+    request: BrowserNetworkRequestRecord,
+    message: BrowserEventSourceMessage
+  ): void {
+    request.eventSourceMessages ??= []
+    request.eventSourceMessages.push(message)
+    if (request.eventSourceMessages.length > MAX_EVENTSOURCE_MESSAGES_PER_CONNECTION) {
+      request.eventSourceMessages.shift()
+      request.eventSourceDroppedMessages = (request.eventSourceDroppedMessages ?? 0) + 1
+    }
+
+    let tabMessageCount = tab.networkRequests.reduce(
+      (total, candidate) => total + (candidate.eventSourceMessages?.length ?? 0),
+      0
+    )
+    while (tabMessageCount > MAX_EVENTSOURCE_MESSAGES_PER_TAB) {
+      const oldest = tab.networkRequests.find((candidate) => candidate.eventSourceMessages?.length)
+      if (!oldest?.eventSourceMessages?.length) break
+      oldest.eventSourceMessages.shift()
+      oldest.eventSourceDroppedMessages = (oldest.eventSourceDroppedMessages ?? 0) + 1
+      tabMessageCount -= 1
+    }
+  }
+
   private handleNetworkDebuggerMessage(tab: BrowserTab, method: string, params: unknown): void {
     if (method === 'Network.webSocketCreated') {
       const details = params as { requestId?: string; url?: string; initiator?: CdpNetworkInitiator }
@@ -6405,6 +6594,26 @@ export class BrowserTabsManager {
       return
     }
 
+    if (method === 'Network.eventSourceMessageReceived') {
+      const details = params as {
+        requestId?: string
+        timestamp?: number
+        eventName?: string
+        eventId?: string
+        data?: string
+      }
+      if (!details.requestId || details.data === undefined) return
+      const request = this.networkRequestByCdpId(tab, details.requestId)
+      if (!request) return
+      this.appendEventSourceMessage(tab, request, normalizeEventSourceMessage({
+        timestamp: this.networkEventTimestamp(request, details.timestamp),
+        eventName: details.eventName ?? 'message',
+        eventId: details.eventId ?? '',
+        data: details.data
+      }))
+      return
+    }
+
     if (method === 'Network.requestWillBeSent') {
       const details = params as {
         requestId?: string
@@ -6460,6 +6669,7 @@ export class BrowserTabsManager {
         details.initiator,
         previous && details.redirectResponse ? previous.url : undefined
       )
+      const resourceType = details.type?.toLowerCase() ?? 'other'
       tab.networkRequests.push({
         id: randomUUID(),
         captureSequence: ++tab.networkCaptureSequence,
@@ -6467,7 +6677,7 @@ export class BrowserTabsManager {
         ...(details.initiator?.requestId ? { initiatorRequestCdpId: details.initiator.requestId } : {}),
         url: request.url,
         method: request.method,
-        resourceType: details.type?.toLowerCase() ?? 'other',
+        resourceType,
         startedAt: Number.isFinite(details.wallTime)
           ? new Date((details.wallTime as number) * 1_000).toISOString()
           : new Date().toISOString(),
@@ -6475,7 +6685,11 @@ export class BrowserTabsManager {
         detailsAvailable: true,
         requestHeaders: request.headers ? { ...request.headers } : {},
         ...(initiator ? { initiator } : {}),
-        ...(request.postData !== undefined ? { requestBody: request.postData } : {})
+        ...(request.postData !== undefined ? { requestBody: request.postData } : {}),
+        ...(resourceType === 'eventsource' ? {
+          eventSourceMessages: [],
+          eventSourceDroppedMessages: 0
+        } : {})
       })
       this.trimNetworkRequests(tab)
       return

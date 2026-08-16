@@ -993,6 +993,23 @@ export interface BrowserWebSocketDetails {
   droppedMessages: number
 }
 
+export interface BrowserEventSourceMessage {
+  timestamp: string
+  eventName: string
+  eventId?: string
+  sizeBytes: number
+  data: string
+  originalChars: number
+  truncated: boolean
+  redacted: boolean
+}
+
+export interface BrowserEventSourceDetails {
+  open: boolean
+  messages: BrowserEventSourceMessage[]
+  droppedMessages: number
+}
+
 export interface BrowserNetworkRequestDetails extends BrowserNetworkRequest {
   request: {
     headers: Record<string, string | string[]>
@@ -1009,6 +1026,7 @@ export interface BrowserNetworkRequestDetails extends BrowserNetworkRequest {
   initiator?: BrowserNetworkInitiator
   relationships?: BrowserNetworkRequestRelationships
   webSocket?: BrowserWebSocketDetails
+  eventSource?: BrowserEventSourceDetails
 }
 
 export type BrowserNetworkSearchField =
@@ -1019,6 +1037,7 @@ export type BrowserNetworkSearchField =
   | 'response-header'
   | 'response-body'
   | 'websocket-message'
+  | 'eventsource-message'
 
 export interface BrowserNetworkSearchOptions {
   tabId?: string
@@ -1182,6 +1201,7 @@ export interface BrowserNetworkHarEntry {
     initiator?: BrowserNetworkInitiator
     serverTiming?: BrowserServerTimingMetric[]
     webSocket?: { open: boolean; messageCount: number; droppedMessages: number }
+    eventSource?: { open: boolean; messageCount: number; droppedMessages: number }
   }
 }
 
