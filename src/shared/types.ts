@@ -1795,6 +1795,7 @@ export interface BrowserStorageChangesReport {
 
 export interface BronomApi {
   getState(): Promise<BrowserState>
+  copyText(text: string): Promise<void>
   openHome(): Promise<BrowserState>
   newTab(options?: NewTabOptions): Promise<BrowserState>
   reopenClosedTab(closedTabId?: string): Promise<BrowserState>

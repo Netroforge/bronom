@@ -104,6 +104,7 @@ import { isBrowserViewportEmulation } from '../shared/viewport-presets.js'
 import { isBrowserEnvironmentSettings } from '../shared/browser-environment.js'
 import { DEFAULT_MCP_PORT, isValidMcpPort } from '../shared/mcp-port.js'
 import { isSearchEngineName } from '../shared/search-engine.js'
+import { writeVerifiedClipboardText } from './verified-clipboard.js'
 
 const MCP_HOST = process.env.BRONOM_MCP_HOST || '127.0.0.1'
 const MCP_AUTH_DISABLED = process.env.BRONOM_DISABLE_MCP_AUTH === '1'
@@ -171,13 +172,7 @@ let lastCopiedText = ''
 
 async function copyTextToClipboard(text: string): Promise<void> {
   lastCopiedText = text
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    clipboard.clear()
-    clipboard.writeText(lastCopiedText)
-    await new Promise<void>((resolve) => setTimeout(resolve, 30 * (attempt + 1)))
-    if (clipboard.readText() === lastCopiedText) return
-  }
-  throw new Error('The selection was prepared, but the system clipboard did not accept the text')
+  await writeVerifiedClipboardText(lastCopiedText, clipboard)
 }
 
 async function copyPngToClipboard(data: Buffer): Promise<{ width: number; height: number }> {
@@ -1222,6 +1217,11 @@ function registerIpc(): void {
     return state
   })
   ipcMain.handle('browser:get-state', (event) => { assertTrustedShellSender(event); return tabsManager!.getState() })
+  ipcMain.handle('browser:copy-text', async (event, value: unknown) => {
+    assertTrustedShellSender(event)
+    if (typeof value !== 'string') throw new TypeError('Clipboard text must be a string')
+    await copyTextToClipboard(value)
+  })
   ipcMain.handle('browser:open-home', (event) => { assertTrustedShellSender(event); return tabsManager!.openHome() })
   ipcMain.handle('browser:new-tab', (event, options) => { assertTrustedShellSender(event); return tabsManager!.newTab(options) })
   ipcMain.handle('browser:reopen-closed-tab', (event, closedTabId: unknown) => {

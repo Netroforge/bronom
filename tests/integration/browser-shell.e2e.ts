@@ -51,6 +51,15 @@ test('launches a visible browser shell with an authenticated MCP endpoint', asyn
     .toBe(true)
 })
 
+test('copies shell text through the verified native clipboard bridge', async ({ appWindow, electronApp }) => {
+  const expected = 'Bronom clipboard bridge \u2713'
+  await electronApp.evaluate(({ clipboard }) => clipboard.clear())
+
+  await appWindow.evaluate(`window.bronom.copyText(${JSON.stringify(expected)})`)
+
+  await expect.poll(() => electronApp.evaluate(({ clipboard }) => clipboard.readText())).toBe(expected)
+})
+
 test('shows an error status when the MCP port is already in use', async ({
   mcpPort,
   profileDirectory

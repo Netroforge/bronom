@@ -60,6 +60,7 @@ import type { BrowserShortcutAction } from '../shared/browser-shortcuts.js'
 
 const api: BronomApi = {
   getState: () => ipcRenderer.invoke('browser:get-state'),
+  copyText: (text: string) => ipcRenderer.invoke('browser:copy-text', text),
   openHome: () => ipcRenderer.invoke('browser:open-home'),
   newTab: (options: NewTabOptions = {}) => ipcRenderer.invoke('browser:new-tab', options),
   reopenClosedTab: (closedTabId?: string) => ipcRenderer.invoke('browser:reopen-closed-tab', closedTabId),

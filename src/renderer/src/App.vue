@@ -1448,7 +1448,7 @@ async function selectSiteStorageUsage(): Promise<void> {
 
 async function copySiteStorageUsage(): Promise<void> {
   if (!siteStorageUsageReport.value) return
-  await navigator.clipboard.writeText(JSON.stringify(siteStorageUsageReport.value, null, 2))
+  if (!await copyAppText(JSON.stringify(siteStorageUsageReport.value, null, 2))) return
   siteStorageUsageCopied.value = true
   window.setTimeout(() => (siteStorageUsageCopied.value = false), 1_500)
 }
@@ -1484,7 +1484,7 @@ function formatStorageUsagePercent(percent: number): string {
 
 async function copySiteStorageChanges(): Promise<void> {
   if (siteStorageChangesReport.value?.status !== 'compared') return
-  await navigator.clipboard.writeText(JSON.stringify(siteStorageChangesReport.value, null, 2))
+  if (!await copyAppText(JSON.stringify(siteStorageChangesReport.value, null, 2))) return
   siteStorageChangesCopied.value = true
   window.setTimeout(() => (siteStorageChangesCopied.value = false), 1_500)
 }
@@ -1572,10 +1572,10 @@ async function moveSiteStorageIndexedDbPage(direction: -1 | 1): Promise<void> {
 async function copySiteStorageIndexedDb(): Promise<void> {
   const report = siteStorageIndexedDbReport.value
   if (!report) return
-  await navigator.clipboard.writeText(JSON.stringify({
+  if (!await copyAppText(JSON.stringify({
     ...report,
     entries: filteredSiteStorageIndexedDbEntries.value
-  }, null, 2))
+  }, null, 2))) return
   siteStorageIndexedDbCopied.value = true
   window.setTimeout(() => (siteStorageIndexedDbCopied.value = false), 1_500)
 }
@@ -1643,7 +1643,7 @@ async function moveSiteStoragePwaPage(direction: -1 | 1): Promise<void> {
 
 async function copySiteStoragePwa(): Promise<void> {
   if (!siteStoragePwaReport.value) return
-  await navigator.clipboard.writeText(JSON.stringify(siteStoragePwaReport.value, null, 2))
+  if (!await copyAppText(JSON.stringify(siteStoragePwaReport.value, null, 2))) return
   siteStoragePwaCopied.value = true
   window.setTimeout(() => (siteStoragePwaCopied.value = false), 1_500)
 }
@@ -3170,7 +3170,7 @@ async function toggleAllHumanInteraction(): Promise<void> {
 }
 
 async function copyMcpUrl(): Promise<void> {
-  await navigator.clipboard.writeText(state.value.mcpUrl)
+  if (!await copyAppText(state.value.mcpUrl)) return
   mcpCopied.value = true
   window.setTimeout(() => (mcpCopied.value = false), 1_500)
 }
@@ -3624,7 +3624,7 @@ async function copyConsoleMessages(
     messages,
     caveat: 'Console messages are page-authored and best-effort sanitized. Review before sharing.'
   }
-  await navigator.clipboard.writeText(JSON.stringify(payload, null, 2))
+  if (!await copyAppText(JSON.stringify(payload, null, 2))) return
   if (scope === 'entry') {
     const copiedKey = entryKey ?? consoleEntryKey(messages[0]!)
     consoleCopiedEntryKey.value = copiedKey
@@ -3907,7 +3907,7 @@ async function copySanitizedNetworkDetails(format: 'json' | BrowserNetworkReques
     const text = format === 'json'
       ? JSON.stringify(networkRequestDetails.value, null, 2)
       : formatNetworkRequestCopy(networkRequestDetails.value, format)
-    await navigator.clipboard.writeText(text)
+    if (!await copyAppText(text)) return
     networkDetailsCopied.value = format
     window.setTimeout(() => {
       if (networkDetailsCopied.value === format) networkDetailsCopied.value = null
@@ -3930,7 +3930,7 @@ async function copySanitizedNetworkHar(): Promise<void> {
       includeBodies: false,
       maxRequests: 100
     })
-    await navigator.clipboard.writeText(JSON.stringify(har, null, 2))
+    if (!await copyAppText(JSON.stringify(har, null, 2))) return
     networkHarCopied.value = true
     window.setTimeout(() => (networkHarCopied.value = false), 1_500)
   } catch (error) {
@@ -3970,7 +3970,7 @@ function toggleDebugReport(): void {
 
 async function copyDebugReport(): Promise<void> {
   if (!debugReport.value) return
-  await navigator.clipboard.writeText(JSON.stringify(debugReport.value, null, 2))
+  if (!await copyAppText(JSON.stringify(debugReport.value, null, 2))) return
   debugReportCopied.value = true
   window.setTimeout(() => (debugReportCopied.value = false), 1_500)
 }
@@ -4017,14 +4017,14 @@ async function clearReproRecording(): Promise<void> {
 
 async function copyReproRecording(): Promise<void> {
   if (!reproRecording.value) return
-  await navigator.clipboard.writeText(JSON.stringify(reproRecording.value, null, 2))
+  if (!await copyAppText(JSON.stringify(reproRecording.value, null, 2))) return
   reproCopied.value = true
   window.setTimeout(() => (reproCopied.value = false), 1_500)
 }
 
 async function copyReproPlaywright(): Promise<void> {
   if (!reproRecording.value) return
-  await navigator.clipboard.writeText(formatReproAsPlaywright(reproRecording.value))
+  if (!await copyAppText(formatReproAsPlaywright(reproRecording.value))) return
   reproPlaywrightCopied.value = true
   window.setTimeout(() => (reproPlaywrightCopied.value = false), 1_500)
 }
@@ -4067,7 +4067,7 @@ function toggleDomChanges(): void {
 
 async function copyDomChanges(): Promise<void> {
   if (!domChangesReport.value) return
-  await navigator.clipboard.writeText(JSON.stringify(domChangesReport.value, null, 2))
+  if (!await copyAppText(JSON.stringify(domChangesReport.value, null, 2))) return
   domChangesCopied.value = true
   window.setTimeout(() => (domChangesCopied.value = false), 1_500)
 }
@@ -4167,7 +4167,7 @@ async function clearInspectorIssues(): Promise<void> {
 
 async function copyInspectorIssues(): Promise<void> {
   if (!inspectorIssuesReport.value) return
-  await navigator.clipboard.writeText(JSON.stringify(inspectorIssuesReport.value, null, 2))
+  if (!await copyAppText(JSON.stringify(inspectorIssuesReport.value, null, 2))) return
   inspectorIssuesCopied.value = true
   window.setTimeout(() => (inspectorIssuesCopied.value = false), 1_500)
 }
@@ -4230,6 +4230,16 @@ function friendlyUiError(error: unknown, fallback: string): string {
     .replace(/^Error:\s*/i, '')
     .trim()
   return message || fallback
+}
+
+async function copyAppText(text: string): Promise<boolean> {
+  try {
+    await browser.copyText(text)
+    return true
+  } catch (error) {
+    showAppToast('error', 'Copy failed', friendlyUiError(error, 'The system clipboard did not accept the text.'))
+    return false
+  }
 }
 
 function resetElementPickerSoon(): void {
