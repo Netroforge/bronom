@@ -119,6 +119,7 @@ const api: BronomApi = {
     ipcRenderer.invoke('browser:set-tab-human-interaction-locked', tabId, locked),
   setAllHumanInteractionLocked: (locked: boolean) =>
     ipcRenderer.invoke('browser:set-all-human-interaction-locked', locked),
+  copySnapshot: (tabId?: string) => ipcRenderer.invoke('browser:copy-snapshot', tabId),
   pickElement: (tabId?: string) => ipcRenderer.invoke('browser:pick-element', tabId),
   captureElement: (tabId?: string) => ipcRenderer.invoke('browser:capture-element', tabId),
   capturePage: (options: BrowserPageCaptureOptions = {}) => ipcRenderer.invoke('browser:capture-page', options),

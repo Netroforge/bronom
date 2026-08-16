@@ -38,6 +38,14 @@ test('finds global and website commands from the accessible command palette', as
   await expect(appWindow.getByRole('button', { name: 'Viewport screenshot copied — paste it into agent chat' })).toBeVisible()
   expect(await electronApp.evaluate(({ clipboard }) => clipboard.readImage().isEmpty())).toBe(false)
 
+  await electronApp.evaluate(({ clipboard }) => clipboard.clear())
+  await commandButton.click()
+  palette = appWindow.getByRole('dialog', { name: 'Commands' })
+  await palette.getByRole('combobox', { name: 'Search commands' }).fill('page context headings controls')
+  await palette.getByRole('option', { name: /Copy page snapshot for agent/ }).click()
+  await expect(appWindow.getByRole('status', { name: 'Page snapshot copied' })).toBeVisible()
+  expect(await electronApp.evaluate(({ clipboard }) => clipboard.readText())).toContain('URL:')
+
   await commandButton.click()
   palette = appWindow.getByRole('dialog', { name: 'Commands' })
   await palette.getByRole('combobox', { name: 'Search commands' }).fill('timeout override request')

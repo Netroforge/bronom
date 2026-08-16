@@ -417,6 +417,12 @@ export interface BrowserElementSelection {
   copied: boolean
 }
 
+export interface BrowserSnapshotCopyResult {
+  copied: true
+  characters: number
+  truncated: boolean
+}
+
 export interface BrowserElementInspectionOptions {
   tabId?: string
   ref?: string
@@ -2079,6 +2085,7 @@ export interface BronomApi {
   savePdf(options?: BrowserPdfOptions): Promise<BrowserPdfExport>
   setTabHumanInteractionLocked(tabId: string, locked: boolean): Promise<BrowserState>
   setAllHumanInteractionLocked(locked: boolean): Promise<BrowserState>
+  copySnapshot(tabId?: string): Promise<BrowserSnapshotCopyResult>
   pickElement(tabId?: string): Promise<BrowserElementSelection>
   captureElement(tabId?: string): Promise<BrowserElementCaptureResult>
   capturePage(options?: BrowserPageCaptureOptions): Promise<BrowserPageCaptureResult>

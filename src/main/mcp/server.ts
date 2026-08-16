@@ -185,7 +185,7 @@ export const BROWSER_TOOL_CATALOG: BrowserToolDefinition[] = [
   },
   { name: 'browser_navigate', category: 'Navigation', description: 'Navigate to a URL or search phrase.' },
   { name: 'browser_history', category: 'Navigation', description: 'Go back, forward, reload normally or without cache, or stop loading.' },
-  { name: 'browser_snapshot', category: 'Inspection', description: 'Read a compact page snapshot with stable element refs.' },
+  { name: 'browser_snapshot', category: 'Inspection', description: 'Read a compact page snapshot with stable element refs. Live form values, URL credentials, fragments, and recognized secret-bearing query values are excluded.' },
   { name: 'browser_element_inspect', category: 'Inspection', description: 'Inspect one snapshot ref or CSS selector for bounded computed box model, layout, typography, contrast, and accessibility properties without returning stylesheet source or form values.' },
   { name: 'browser_click', category: 'Interaction', description: 'Click an element by snapshot ref or CSS selector.' },
   { name: 'browser_dialog', category: 'Interaction', description: 'Accept or dismiss an open JavaScript alert or confirmation.' },

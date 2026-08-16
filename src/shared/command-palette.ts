@@ -14,6 +14,7 @@ export type CommandPaletteCommandId =
   | 'capture-element'
   | 'capture-viewport'
   | 'capture-full-page'
+  | 'copy-snapshot'
   | 'pick-element'
   | 'page-tools'
   | 'site-storage'
@@ -68,6 +69,7 @@ export const COMMAND_PALETTE_COMMANDS: readonly CommandPaletteCommand[] = [
   { id: 'capture-element', label: 'Capture element screenshot', description: 'Pick one element and copy its complete PNG for an agent chat', category: 'Current website', keywords: ['image', 'clipboard', 'node', 'component'], websiteOnly: true },
   { id: 'capture-viewport', label: 'Capture viewport screenshot', description: 'Copy the visible website as a PNG for an agent chat', category: 'Current website', keywords: ['image', 'clipboard', 'screen', 'visible'], websiteOnly: true },
   { id: 'capture-full-page', label: 'Capture full-page screenshot', description: 'Copy the complete scrollable page as a PNG for an agent chat', category: 'Current website', keywords: ['image', 'clipboard', 'entire', 'long'], websiteOnly: true },
+  { id: 'copy-snapshot', label: 'Copy page snapshot for agent', description: 'Copy bounded headings, controls, and visible text for an agent chat', category: 'Current website', keywords: ['clipboard', 'context', 'text', 'accessibility', 'structure'], websiteOnly: true },
   { id: 'pick-element', label: 'Pick element for agent', description: 'Copy safe DOM context from the current website', category: 'Current website', keywords: ['inspect', 'selector'], shortcut: 'Ctrl+Shift+C / Cmd+Option+C', websiteOnly: true },
   { id: 'page-tools', label: 'Open Page tools', description: 'Browse all current-website diagnostics', category: 'Current website', keywords: ['debug'], websiteOnly: true },
   { id: 'site-storage', label: 'Inspect site storage', description: 'Review cookies, databases, workers, and browser storage', category: 'Current website', keywords: ['local storage', 'session storage', 'indexeddb', 'service worker', 'offline', 'pwa'], websiteOnly: true },

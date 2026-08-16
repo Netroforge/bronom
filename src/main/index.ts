@@ -1824,6 +1824,14 @@ function registerIpc(): void {
     if (typeof locked !== 'boolean') throw new TypeError('Invalid global interaction lock')
     return tabsManager!.setAllHumanInteractionLocked(locked)
   })
+  ipcMain.handle('browser:copy-snapshot', async (event, tabId: unknown) => {
+    assertTrustedShellSender(event)
+    if (tabId !== undefined && typeof tabId !== 'string') throw new TypeError('Invalid snapshot tab ID')
+    const maxChars = 30_000
+    const snapshot = await tabsManager!.snapshot(tabId, maxChars)
+    await copyTextToClipboard(snapshot)
+    return { copied: true, characters: snapshot.length, truncated: snapshot.length >= maxChars }
+  })
   ipcMain.handle('browser:pick-element', async (event, tabId) => {
     assertTrustedShellSender(event)
     const result = await tabsManager!.pickElement(tabId)

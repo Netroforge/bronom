@@ -18,6 +18,7 @@ describe('filterCommandPaletteCommands', () => {
     expect(filterCommandPaletteCommands('node screenshot', true)[0]?.id).toBe('capture-element')
     expect(filterCommandPaletteCommands('visible screen', true)[0]?.id).toBe('capture-viewport')
     expect(filterCommandPaletteCommands('entire long screenshot', true)[0]?.id).toBe('capture-full-page')
+    expect(filterCommandPaletteCommands('page context headings controls', true)[0]?.id).toBe('copy-snapshot')
     expect(filterCommandPaletteCommands('cookies cache', true).map((command) => command.id)).toContain('privacy')
     expect(filterCommandPaletteCommands('wcag', true)[0]?.id).toBe('accessibility')
     expect(filterCommandPaletteCommands('unused code', true)[0]?.id).toBe('coverage')

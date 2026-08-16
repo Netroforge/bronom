@@ -2179,7 +2179,7 @@ test('picks a page element and copies safe agent-ready DOM context from an MCP-c
     response.writeHead(200, { 'content-type': 'text/html' })
     response.end(`<!doctype html>
       <title>Picker fixture</title>
-      <main><button id="save-profile" class="primary action" value="internal-secret" style="box-sizing:border-box;width:140px;height:44px;color:rgb(255,255,255);background:rgb(60,40,180)">Save profile</button></main>
+      <main><button id="save-profile" class="primary action" value="internal-secret" style="box-sizing:border-box;width:140px;height:44px;color:rgb(255,255,255);background:rgb(60,40,180)">Save profile</button><input id="password" type="password" value="snapshot-password-secret"></main>
       <script>window.fixtureClicks = 0; document.querySelector('button').addEventListener('click', () => window.fixtureClicks += 1)</script>`)
   })
   await new Promise<void>((resolve, reject) => {
@@ -2195,7 +2195,7 @@ test('picks a page element and copies safe agent-ready DOM context from an MCP-c
   try {
     const address = server.address()
     if (!address || typeof address === 'string') throw new Error('Test server did not expose a TCP port')
-    const url = `http://127.0.0.1:${address.port}/picker?mode=test&created=mcp#fragment`
+    const url = `http://127.0.0.1:${address.port}/picker?mode=test&created=mcp&token=snapshot-url-secret#fragment`
     await expect.poll(async () => {
       try {
         return (await fetch(`http://127.0.0.1:${mcpPort}/healthz`, {
@@ -2214,14 +2214,29 @@ test('picks a page element and copies safe agent-ready DOM context from an MCP-c
     expect(ready.isError, mcpResultText(ready)).not.toBe(true)
     await expect
       .poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.find((tab) => tab.active)?.url)'))
-      .toContain('/picker?mode=test&created=mcp#fragment')
+      .toContain('/picker?mode=test&created=mcp&token=snapshot-url-secret#fragment')
+
+    await electronApp.evaluate(({ clipboard }) => clipboard.clear())
+    await appWindow.getByRole('button', { name: 'Page tools' }).click()
+    let pageTools = appWindow.getByRole('dialog', { name: 'Page tools' })
+    await pageTools.getByRole('button', { name: 'Copy page snapshot for agent' }).click()
+    await expect(appWindow.getByRole('status', { name: 'Page snapshot copied' })).toBeVisible()
+    const copiedSnapshot = await electronApp.evaluate(({ clipboard }) => clipboard.readText())
+    expect(copiedSnapshot).toContain('TITLE: Picker fixture')
+    expect(copiedSnapshot).toContain('[e1] button "Save profile"')
+    expect(copiedSnapshot).toContain('TEXT: Save profile')
+    expect(copiedSnapshot).toContain('token=%5BREDACTED%5D')
+    expect(copiedSnapshot).not.toContain('snapshot-password-secret')
+    expect(copiedSnapshot).not.toContain('snapshot-url-secret')
+    expect(copiedSnapshot).not.toContain('#fragment')
+    await pageTools.getByRole('button', { name: 'Close page tools' }).click()
 
     const picker = appWindow.getByRole('button', { name: 'Select an element to copy for agent' })
     await expect(picker).toBeEnabled()
     await picker.click()
     await expect(appWindow.getByRole('button', { name: 'Cancel element selection' })).toBeVisible()
     await appWindow.getByRole('button', { name: 'Page tools' }).click()
-    let pageTools = appWindow.getByRole('dialog', { name: 'Page tools' })
+    pageTools = appWindow.getByRole('dialog', { name: 'Page tools' })
     await expect(pageTools.getByRole('button', { name: 'Cancel element selection' })).toBeVisible()
     await pageTools.getByRole('button', { name: 'Close page tools' }).click()
 

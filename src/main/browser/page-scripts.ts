@@ -2,6 +2,23 @@ export function snapshotScript(maxChars: number): string {
   return `(() => {
     const MAX_CHARS = ${maxChars};
     const interactive = 'a,button,input,textarea,select,summary,[role="button"],[role="link"],[role="checkbox"],[role="radio"],[role="tab"],[contenteditable="true"]';
+    const safeUrl = (value) => {
+      try {
+        const url = new URL(value, location.href);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') return url.protocol + '//';
+        url.username = '';
+        url.password = '';
+        url.hash = '';
+        for (const key of [...url.searchParams.keys()]) {
+          if (/(api[-_]?key|authorization|auth[-_]?token|cookie|credential|csrf|password|passwd|passcode|secret|session|token)/i.test(key)) {
+            url.searchParams.set(key, '[REDACTED]');
+          }
+        }
+        return url.href;
+      } catch {
+        return '';
+      }
+    };
     const visible = (element) => {
       const style = getComputedStyle(element);
       const rect = element.getBoundingClientRect();
@@ -13,7 +30,7 @@ export function snapshotScript(maxChars: number): string {
     const add = (line) => {
       if (lines.join('\\n').length < MAX_CHARS) lines.push(line);
     };
-    add('URL: ' + location.href);
+    add('URL: ' + safeUrl(location.href));
     add('TITLE: ' + document.title);
     const headings = [...document.querySelectorAll('h1,h2,h3')].filter(visible).slice(0, 80);
     for (const heading of headings) {
@@ -25,8 +42,8 @@ export function snapshotScript(maxChars: number): string {
       const ref = 'e' + (++refIndex);
       element.setAttribute('data-bronom-ref', ref);
       const role = element.getAttribute('role') || element.tagName.toLowerCase();
-      const label = element.getAttribute('aria-label') || element.getAttribute('title') || element.getAttribute('placeholder') || element.innerText || element.value || '';
-      const href = element instanceof HTMLAnchorElement ? ' href=' + JSON.stringify(element.href) : '';
+      const label = element.getAttribute('aria-label') || element.getAttribute('title') || element.getAttribute('placeholder') || element.innerText || '';
+      const href = element instanceof HTMLAnchorElement ? ' href=' + JSON.stringify(safeUrl(element.href)) : '';
       const state = element.disabled ? ' disabled' : element.checked ? ' checked' : '';
       add('[' + ref + '] ' + role + ' ' + JSON.stringify(String(label).replace(/\\s+/g, ' ').trim().slice(0, 300)) + href + state);
     }

@@ -493,6 +493,7 @@ interface AppToast {
 }
 const elementPickerState = ref<'idle' | 'picking' | 'copied' | 'error'>('idle')
 const elementPickerMode = ref<ElementPickerMode>('context')
+const pageSnapshotState = ref<'idle' | 'copying' | 'copied' | 'error'>('idle')
 const areaCaptureState = ref<'idle' | 'picking' | 'capturing' | 'copied' | 'error'>('idle')
 const screenshotCaptureMode = ref<ScreenshotCaptureMode>('area')
 const areaCaptureError = ref('')
@@ -657,6 +658,7 @@ let unsubscribeTabGroupEdit: (() => void) | undefined
 let resizeObserver: ResizeObserver | undefined
 let updateNoticeDismissTimer: number | undefined
 let elementPickerResetTimer: number | undefined
+let pageSnapshotResetTimer: number | undefined
 let areaCaptureResetTimer: number | undefined
 let nextAppToastId = 1
 const appToastTimers = new Map<number, number>()
@@ -2120,6 +2122,7 @@ async function runCommandPaletteCommand(commandId: CommandPaletteCommandId): Pro
     case 'capture-element': return toggleElementPicker('screenshot')
     case 'capture-viewport': return capturePageScreenshot('viewport')
     case 'capture-full-page': return capturePageScreenshot('full-page')
+    case 'copy-snapshot': return copyPageSnapshot()
     case 'pick-element': return toggleElementPicker('context')
     case 'page-tools': return togglePageTools()
     case 'site-storage': return toggleSiteStorage()
@@ -4690,6 +4693,32 @@ async function copyAppText(text: string): Promise<boolean> {
   }
 }
 
+async function copyPageSnapshot(): Promise<void> {
+  if (!activeTab.value || activeTab.value.url.startsWith('bronom://home') || pageSnapshotState.value === 'copying') return
+  if (pageSnapshotResetTimer !== undefined) {
+    window.clearTimeout(pageSnapshotResetTimer)
+    pageSnapshotResetTimer = undefined
+  }
+  const tabId = activeTab.value.id
+  pageSnapshotState.value = 'copying'
+  try {
+    const result = await browser.copySnapshot(tabId)
+    pageSnapshotState.value = 'copied'
+    showAppToast(
+      'success',
+      'Page snapshot copied',
+      `${result.characters.toLocaleString()} characters of headings, controls, and visible text are ready to paste into your agent chat${result.truncated ? ' (bounded at 30,000 characters).' : '.'}`
+    )
+  } catch (error) {
+    pageSnapshotState.value = 'error'
+    showAppToast('error', 'Page snapshot failed', friendlyUiError(error, 'Could not copy the current page snapshot.'))
+  }
+  pageSnapshotResetTimer = window.setTimeout(() => {
+    if (pageSnapshotState.value !== 'copying') pageSnapshotState.value = 'idle'
+    pageSnapshotResetTimer = undefined
+  }, 1_800)
+}
+
 function resetElementPickerSoon(): void {
   if (elementPickerResetTimer !== undefined) window.clearTimeout(elementPickerResetTimer)
   elementPickerResetTimer = window.setTimeout(() => {
@@ -5659,6 +5688,7 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   if (updateNoticeDismissTimer !== undefined) window.clearTimeout(updateNoticeDismissTimer)
   if (elementPickerResetTimer !== undefined) window.clearTimeout(elementPickerResetTimer)
+  if (pageSnapshotResetTimer !== undefined) window.clearTimeout(pageSnapshotResetTimer)
   if (areaCaptureResetTimer !== undefined) window.clearTimeout(areaCaptureResetTimer)
   if (pdfExportResetTimer !== undefined) window.clearTimeout(pdfExportResetTimer)
   if (consoleRefreshTimer !== undefined) window.clearInterval(consoleRefreshTimer)
@@ -6540,6 +6570,19 @@ onBeforeUnmount(() => {
           <section aria-labelledby="page-tools-export-title">
             <h3 id="page-tools-export-title">Export &amp; account</h3>
             <div class="page-tools-grid">
+              <button
+                :class="{ copied: pageSnapshotState === 'copied', error: pageSnapshotState === 'error', running: pageSnapshotState === 'copying' }"
+                type="button"
+                aria-label="Copy page snapshot for agent"
+                :disabled="pageSnapshotState === 'copying'"
+                @click="copyPageSnapshot"
+              >
+                <IconProgress v-if="pageSnapshotState === 'copying'" class="state-spinner" aria-hidden="true" />
+                <IconCheck v-else-if="pageSnapshotState === 'copied'" aria-hidden="true" />
+                <IconError v-else-if="pageSnapshotState === 'error'" aria-hidden="true" />
+                <IconAccountTree v-else aria-hidden="true" />
+                <span><strong>Copy page snapshot</strong><small>Headings, controls, and visible text</small></span>
+              </button>
               <button
                 type="button"
                 :aria-label="pdfExportLabel"
