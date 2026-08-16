@@ -129,6 +129,25 @@ export function mcpRequestAuthorized(configuredToken: string | undefined, author
   return configuredToken === undefined || authorization === `Bearer ${configuredToken}`
 }
 
+export function assertMcpToolRegistrationContract(
+  catalog: readonly Pick<BrowserToolDefinition, 'name'>[],
+  registeredNames: readonly string[]
+): void {
+  const duplicates = (names: readonly string[]) => [...new Set(names.filter((name, index) => names.indexOf(name) !== index))].sort()
+  const catalogNames = catalog.map((tool) => tool.name)
+  const catalogSet = new Set(catalogNames)
+  const registeredSet = new Set(registeredNames)
+  const duplicateCatalogNames = duplicates(catalogNames)
+  const duplicateRegisteredNames = duplicates(registeredNames)
+  const issues = [
+    duplicateCatalogNames.length ? `duplicate catalog tools: ${duplicateCatalogNames.join(', ')}` : '',
+    duplicateRegisteredNames.length ? `duplicate registrations: ${duplicateRegisteredNames.join(', ')}` : '',
+    ...[...catalogSet].filter((name) => !registeredSet.has(name)).sort().map((name) => `missing registration: ${name}`),
+    ...[...registeredSet].filter((name) => !catalogSet.has(name)).sort().map((name) => `unadvertised registration: ${name}`)
+  ].filter(Boolean)
+  if (issues.length) throw new Error(`Invalid MCP tool contract (${issues.join('; ')})`)
+}
+
 export const BROWSER_TOOL_CATALOG: BrowserToolDefinition[] = [
   {
     name: 'browser_tab_groups',
@@ -315,8 +334,13 @@ function createBrowserMcpServer(
   })
 
   const baseRegisterTool = server.registerTool.bind(server)
+  const registeredToolNames: string[] = []
+  const recordToolRegistration = (name: string): string => {
+    registeredToolNames.push(name)
+    return name
+  }
   baseRegisterTool(
-    'browser_tab_groups',
+    recordToolRegistration('browser_tab_groups'),
     {
       description: toolDescription('browser_tab_groups'),
       inputSchema: {
@@ -351,7 +375,7 @@ function createBrowserMcpServer(
   )
 
   baseRegisterTool(
-    'browser_saved_tab_groups',
+    recordToolRegistration('browser_saved_tab_groups'),
     {
       description: toolDescription('browser_saved_tab_groups'),
       inputSchema: {
@@ -391,7 +415,7 @@ function createBrowserMcpServer(
     inputSchema?: Record<string, z.ZodType>
   }, handler: (input: T) => Promise<CallToolResult>): void => {
     baseRegisterTool(
-      name,
+      recordToolRegistration(name),
       {
         ...config,
         inputSchema: {
@@ -1608,6 +1632,7 @@ function createBrowserMcpServer(
     )
   )
 
+  assertMcpToolRegistrationContract(BROWSER_TOOL_CATALOG, registeredToolNames)
   return server
 }
 

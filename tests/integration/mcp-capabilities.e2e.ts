@@ -7,6 +7,7 @@ import { promisify } from 'node:util'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
+import { BROWSER_TOOL_CATALOG } from '../../src/main/mcp/server.js'
 import { expect, test } from './fixtures.js'
 import { useMcpTabGroup } from '../../scripts/mcp-tab-group.js'
 
@@ -444,56 +445,12 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     await client.connect(transport)
     await useMcpTabGroup(client, 'Capability tests')
     const tools = await client.listTools()
-    for (const name of [
-      'browser_tab_groups',
-      'browser_saved_tab_groups',
-      'browser_storage_changes',
-      'browser_storage_usage',
-      'browser_indexeddb',
-      'browser_pwa',
-      'browser_element_inspect',
-      'browser_select',
-      'browser_dialog',
-      'browser_fill_form',
-      'browser_hover',
-      'browser_drag',
-      'browser_scroll',
-      'browser_emulate',
-      'browser_resize',
-      'browser_zoom',
-      'browser_audio',
-      'browser_file_upload',
-      'browser_accessibility_audit',
-      'browser_performance',
-      'browser_design_overview',
-      'browser_page_metadata',
-      'browser_security',
-      'browser_code_coverage',
-      'browser_cpu_profile',
-      'browser_memory',
-      'browser_debug_report',
-      'browser_repro',
-      'browser_dom_changes',
-      'browser_visual_compare',
-      'browser_issues',
-      'browser_console',
-      'browser_diagnostic_logs',
-      'browser_network',
-      'browser_network_wait',
-      'browser_network_search',
-      'browser_network_request',
-      'browser_network_replay',
-      'browser_network_har',
-      'browser_network_routes',
-      'browser_downloads',
-      'browser_bookmarks',
-      'browser_visit_history',
-      'browser_site_data',
-      'browser_storage',
-      'browser_pdf_save',
-      'browser_request_user_attention'
-    ]) {
-      expect(tools.tools.some((tool) => tool.name === name), `missing ${name}`).toBe(true)
+    expect(tools.tools.map((tool) => ({ name: tool.name, description: tool.description })).sort((left, right) => left.name.localeCompare(right.name)))
+      .toEqual(BROWSER_TOOL_CATALOG.map((tool) => ({ name: tool.name, description: tool.description })).sort((left, right) => left.name.localeCompare(right.name)))
+    for (const availableTool of tools.tools) {
+      if (availableTool.name === 'browser_tab_groups' || availableTool.name === 'browser_saved_tab_groups') continue
+      const required = (availableTool.inputSchema as { required?: unknown }).required
+      expect(required, `${availableTool.name} must require groupId`).toEqual(expect.arrayContaining(['groupId']))
     }
 
     const defaultDiagnosticLogs = await client.callTool({ name: 'browser_diagnostic_logs', arguments: { action: 'get' } }) as CallToolResult
