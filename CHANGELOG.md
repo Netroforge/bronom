@@ -4,6 +4,15 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-08-20
+
+### Fixed
+
+- Serialize tab, settings, and window-state persistence so overlapping saves and application shutdown always keep the newest complete snapshot.
+- Tolerate navigation history disappearing during renderer failure or tab teardown, allowing unavailable tabs to close and state to persist without a main-process exception.
+- Keep the keyboard-selected address or saved-account suggestion visible while navigating long, scrollable lists; pressing Enter without explicitly selecting a suggestion still navigates the exact typed address.
+- Serialize credential saves and removals, retain the newest password for each website account, and automatically repair duplicate saved-account records without allowing a delayed save to resurrect a removed credential.
+
 ## [1.6.0] - 2026-08-20
 
 ### Added
