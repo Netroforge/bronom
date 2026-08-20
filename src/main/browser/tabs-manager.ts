@@ -25,6 +25,7 @@ import {
   type WebContents
 } from 'electron'
 import { browserShortcutAction, type BrowserShortcutAction } from '../../shared/browser-shortcuts.js'
+import { safeNavigationHistorySnapshot } from './navigation-history.js'
 import { accessibilityAuditPageScript, normalizeAccessibilityAuditOptions } from '../../shared/accessibility-audit.js'
 import { buildBrowserDebugReport, redactDiagnosticText, sanitizeConsoleMessage } from '../../shared/debug-report.js'
 import {
@@ -150,7 +151,7 @@ import {
 } from '../../shared/memory-saver.js'
 import { resolveViewportPreset } from '../../shared/viewport-presets.js'
 import { isValidBrowserLocale, isValidBrowserTimezone } from '../../shared/browser-environment.js'
-import { isUuidV7, uuidV7 } from '../uuid-v7.js'
+import { uuidV7 } from '../uuid-v7.js'
 import type {
   BrowserEmulationOptions,
   BrowserEmulationState,
@@ -265,7 +266,7 @@ import {
   targetPointScript,
   type BrowserFormField
 } from './page-scripts.js'
-import { TabStateStore, type PersistedBrowserState } from './tab-store.js'
+import { TAB_STATE_VERSION, TabStateStore, type PersistedBrowserState } from './tab-store.js'
 import { normalizeAddress } from './url.js'
 import {
   destroyWorkspaceStorage,
@@ -294,20 +295,6 @@ function workspaceNameKey(name: string): string {
   return name.trim().normalize('NFKC').toLowerCase()
 }
 
-function uniquePersistedWorkspaceName(name: string, usedNames: Set<string>): string {
-  const normalized = name.trim().normalize('NFC').slice(0, MAX_WORKSPACE_NAME_LENGTH) || 'Workspace'
-  if (!usedNames.has(workspaceNameKey(normalized))) {
-    usedNames.add(workspaceNameKey(normalized))
-    return normalized
-  }
-  for (let suffix = 2; ; suffix += 1) {
-    const marker = ` (${suffix})`
-    const candidate = `${normalized.slice(0, MAX_WORKSPACE_NAME_LENGTH - marker.length).trimEnd()}${marker}`
-    if (usedNames.has(workspaceNameKey(candidate))) continue
-    usedNames.add(workspaceNameKey(candidate))
-    return candidate
-  }
-}
 const MAX_DOWNLOAD_HISTORY = 200
 const MAX_FAVICON_BYTES = 512 * 1024
 const MAX_NETWORK_TOTAL_BUFFER_BYTES = 8 * 1024 * 1024
@@ -868,121 +855,60 @@ export class BrowserTabsManager {
     this.restoringLayout = true
     const saved = await this.store.load()
     this.allHumanInteractionLocked = saved?.allHumanInteractionLocked === true
-    const persistedGroups = saved?.mcpTabGroups ?? []
     const persistedTabs = saved?.tabs ?? []
-    const usedWorkspaceIds = new Set<string>()
-    const migratedWorkspaceIdByOriginal = new Map<string, string>()
-    const originalWorkspaceIdByMigrated = new Map<string, string>()
-    const persistedDefaultGroup = saved?.defaultHumanGroupId
-      ? persistedGroups.find((group) => group.id === saved.defaultHumanGroupId)
-      : undefined
-    const orderedPersistedGroups = persistedDefaultGroup
-      ? [persistedDefaultGroup, ...persistedGroups.filter((group) => group !== persistedDefaultGroup)]
-      : persistedGroups
-    const usedWorkspaceNames = new Set<string>(['default'])
-    const usedTabIds = new Set<string>()
-    const migratedTabIdByOriginal = new Map<string, string>()
-    const migratedTabIds = persistedTabs.map((tab) => {
-      const id = isUuidV7(tab.id) && !usedTabIds.has(tab.id) ? tab.id : uuidV7()
-      usedTabIds.add(id)
-      if (!migratedTabIdByOriginal.has(tab.id)) migratedTabIdByOriginal.set(tab.id, id)
-      return id
-    })
-
-    for (const group of orderedPersistedGroups) {
-      const id = isUuidV7(group.id) && !usedWorkspaceIds.has(group.id) ? group.id : uuidV7()
-      usedWorkspaceIds.add(id)
-      if (!migratedWorkspaceIdByOriginal.has(group.id)) migratedWorkspaceIdByOriginal.set(group.id, id)
-      originalWorkspaceIdByMigrated.set(id, group.id)
-      const isDefault = group === persistedDefaultGroup
-      this.mcpTabGroups.set(id, {
+    for (const group of saved?.mcpTabGroups ?? []) {
+      this.mcpTabGroups.set(group.id, {
         ...group,
-        id,
-        name: isDefault ? 'Default' : uniquePersistedWorkspaceName(group.name, usedWorkspaceNames),
-        activeTabId: group.activeTabId ? migratedTabIdByOriginal.get(group.activeTabId) ?? null : null,
-        origins: normalizeWorkspaceStorageOrigins(group.origins ?? [])
+        activeTabId: group.activeTabId ?? null,
+        origins: [...(group.origins ?? [])]
       })
     }
     for (const group of saved?.savedTabGroups ?? []) {
-      const id = isUuidV7(group.id) && !usedWorkspaceIds.has(group.id) ? group.id : uuidV7()
-      usedWorkspaceIds.add(id)
-      this.savedTabGroups.set(id, {
+      this.savedTabGroups.set(group.id, {
         ...group,
-        id,
-        name: uniquePersistedWorkspaceName(group.name, usedWorkspaceNames),
         storageOriginCount: group.origins?.length ?? 0,
-        origins: normalizeWorkspaceStorageOrigins(group.origins ?? []),
+        origins: [...(group.origins ?? [])],
         tabs: group.tabs.map((tab) => ({ title: tab.title, url: tab.url, pinned: tab.pinned === true }))
       })
     }
-    const migratedDefaultGroupId = saved?.defaultHumanGroupId
-      ? migratedWorkspaceIdByOriginal.get(saved.defaultHumanGroupId)
-      : undefined
-    this.defaultHumanGroupId = migratedDefaultGroupId && this.mcpTabGroups.has(migratedDefaultGroupId)
-      ? migratedDefaultGroupId
-      : null
-    // Default represents the shared durable browser profile even before the
-    // first human website tab is opened, so it must always be listable.
+    this.defaultHumanGroupId = saved?.defaultHumanGroupId ?? null
     this.ensureDefaultHumanGroup()
-    for (const group of this.mcpTabGroups.values()) {
-      if (group.id === this.defaultHumanGroupId || group.storageId) continue
-      // Older releases stored every group in Default. Do not copy that shared
-      // state forward: legacy agent workspaces restart in a fresh partition.
-      group.storageId = randomUUID()
-      const originalGroupId = originalWorkspaceIdByMigrated.get(group.id)
-      group.origins = normalizeWorkspaceStorageOrigins([
-        ...group.origins,
-        ...persistedTabs
-          .filter((tab) => tab.mcpGroupId === originalGroupId && isWebUrl(tab.url))
-          .map((tab) => new URL(tab.url).origin)
-      ])
-    }
     if (persistedTabs.length) {
       let restoredHome = false
-      for (const [index, tab] of persistedTabs.entries()) {
+      for (const tab of persistedTabs) {
         if (this.tabs.size >= MAX_TABS) break
         if (isBronomHomeUrl(tab.url)) {
           if (restoredHome) continue
           restoredHome = true
         }
         await this.createTab({
-          id: migratedTabIds[index],
+          id: tab.id,
           title: isBronomHomeUrl(tab.url) ? undefined : tab.title,
           url: isBronomHomeUrl(tab.url) ? BRONOM_HOME_URL : tab.url,
           pinned: tab.pinned === true && !isBronomHomeUrl(tab.url),
           humanInteractionLocked: tab.humanInteractionLocked === true,
           mcpGroupId: isBronomHomeUrl(tab.url)
             ? undefined
-            : tab.mcpGroupId && migratedWorkspaceIdByOriginal.has(tab.mcpGroupId)
-              ? migratedWorkspaceIdByOriginal.get(tab.mcpGroupId)
-              : this.ensureDefaultHumanGroup(),
+            : tab.mcpGroupId,
           suppressInitialHistory: true,
           active: false
         })
       }
       const fallbackId = this.tabs.keys().next().value as string | undefined
       if (fallbackId) {
-        const migratedActiveTabId = saved?.activeTabId ? migratedTabIdByOriginal.get(saved.activeTabId) : undefined
-        const restoredActiveTabId = migratedActiveTabId && this.tabs.has(migratedActiveTabId) ? migratedActiveTabId : fallbackId
+        const restoredActiveTabId = saved?.activeTabId && this.tabs.has(saved.activeTabId) ? saved.activeTabId : fallbackId
         this.selectTab(restoredActiveTabId)
         const savedSplit = saved?.splitView
-        const migratedSplit = savedSplit
-          ? {
-              ...savedSplit,
-              firstTabId: migratedTabIdByOriginal.get(savedSplit.firstTabId) ?? '',
-              secondTabId: migratedTabIdByOriginal.get(savedSplit.secondTabId) ?? ''
-            }
-          : undefined
         if (
-          migratedSplit
-          && this.tabs.has(migratedSplit.firstTabId)
-          && this.tabs.has(migratedSplit.secondTabId)
-          && !isBronomHomeUrl(this.tabs.get(migratedSplit.firstTabId)!.url)
-          && !isBronomHomeUrl(this.tabs.get(migratedSplit.secondTabId)!.url)
-          && (restoredActiveTabId === migratedSplit.firstTabId || restoredActiveTabId === migratedSplit.secondTabId)
+          savedSplit
+          && this.tabs.has(savedSplit.firstTabId)
+          && this.tabs.has(savedSplit.secondTabId)
+          && !isBronomHomeUrl(this.tabs.get(savedSplit.firstTabId)!.url)
+          && !isBronomHomeUrl(this.tabs.get(savedSplit.secondTabId)!.url)
+          && (restoredActiveTabId === savedSplit.firstTabId || restoredActiveTabId === savedSplit.secondTabId)
         ) {
-          this.splitView = migratedSplit
-          const otherTabId = restoredActiveTabId === migratedSplit.firstTabId ? migratedSplit.secondTabId : migratedSplit.firstTabId
+          this.splitView = savedSplit
+          const otherTabId = restoredActiveTabId === savedSplit.firstTabId ? savedSplit.secondTabId : savedSplit.firstTabId
           this.window.contentView.addChildView(this.tabs.get(otherTabId)!.view)
         }
       }
@@ -1048,9 +974,7 @@ export class BrowserTabsManager {
   ): Promise<BrowserTabGroupState> {
     const normalizedName = normalizedWorkspaceName(name)
     this.assertWorkspaceNameAvailable(normalizedName)
-    if (this.mcpTabGroups.size >= MAX_ACTIVE_WORKSPACES) {
-      throw new Error(`Bronom can keep up to ${MAX_ACTIVE_WORKSPACES} active workspaces, including Default.`)
-    }
+    this.assertActiveWorkspaceCapacity()
     const now = new Date().toISOString()
     const id = uuidV7()
     const storageId = randomUUID()
@@ -1064,31 +988,47 @@ export class BrowserTabsManager {
       storageId,
       origins: []
     }
-    this.mcpTabGroups.set(group.id, group)
     if (storage === 'fork-default') {
-      await this.withWorkspaceStorageOperation(group.id, 'creating the workspace from Default', async () => {
+      return this.withGlobalWorkspaceStorageOperation('creating the workspace from Default', async () => {
+        this.mcpTabGroups.set(group.id, group)
+        let selectedOrigins: string[] = []
         try {
           const defaultGroup = this.defaultHumanGroupId ? this.mcpTabGroups.get(this.defaultHumanGroupId) : undefined
-          const selectedOrigins = normalizeWorkspaceStorageOrigins(origins ?? defaultGroup?.origins ?? [])
-          await transferWorkspaceStorage({
-            sourcePartition: this.options.partition,
-            targetPartition: workspacePartition(this.options.partition, storageId),
-            origins: selectedOrigins,
-            copyAllCookies: origins === undefined,
-            copyLocalStorage: true,
-            configureSession: this.options.configureSession
-          })
+          selectedOrigins = normalizeWorkspaceStorageOrigins(origins ?? defaultGroup?.origins ?? [])
+          await this.withWorkspaceOperation(group.id, 'creating the workspace from Default', () => (
+            transferWorkspaceStorage({
+              sourcePartition: this.options.partition,
+              targetPartition: workspacePartition(this.options.partition, storageId),
+              origins: selectedOrigins,
+              copyAllCookies: origins === undefined,
+              copyLocalStorage: true,
+              configureSession: this.options.configureSession
+            })
+          ), true)
           group.origins = selectedOrigins
         } catch (error) {
+          try {
+            await destroyWorkspaceStorage(
+              workspacePartition(this.options.partition, storageId),
+              this.options.configureSession
+            )
+          } catch (cleanupError) {
+            group.origins = selectedOrigins
+            this.changed()
+            throw new AggregateError(
+              [error, cleanupError],
+              `Workspace ${group.id} could not be created or cleaned up. It remains listed so its isolated data can be deleted safely.`
+            )
+          }
           this.mcpTabGroups.delete(group.id)
-          await destroyWorkspaceStorage(
-            workspacePartition(this.options.partition, storageId),
-            this.options.configureSession
-          ).catch(() => undefined)
+          this.changed()
           throw error
         }
-      }, true)
+        this.changed()
+        return this.requireMcpTabGroup(group.id)
+      })
     }
+    this.mcpTabGroups.set(group.id, group)
     this.changed()
     return this.requireMcpTabGroup(group.id)
   }
@@ -1174,7 +1114,7 @@ export class BrowserTabsManager {
     const workspace = this.mcpTabGroups.get(options.workspaceId)
     if (!workspace) throw new Error(`Unknown workspace: ${options.workspaceId}.`)
     if (workspace.id === this.defaultHumanGroupId) throw new Error('Default already is the shared workspace.')
-    if (!workspace.storageId) throw new Error('This legacy workspace must finish isolation before storage can be transferred.')
+    if (!workspace.storageId) throw new Error('Workspace storage is unavailable.')
     return this.withWorkspaceStorageOperation(workspace.id, 'copying workspace storage', async () => {
       const defaultWorkspace = this.defaultHumanGroupId ? this.mcpTabGroups.get(this.defaultHumanGroupId) : undefined
       if (!defaultWorkspace) throw new Error('Default workspace is unavailable.')
@@ -1318,6 +1258,7 @@ export class BrowserTabsManager {
     const saved = this.savedTabGroups.get(savedGroupId)
     if (!saved) throw new Error(`Unknown archived workspace: ${savedGroupId}.`)
     this.assertWorkspaceNameAvailable(saved.name, undefined, savedGroupId)
+    this.assertActiveWorkspaceCapacity()
     if (this.tabs.size + saved.tabs.length > MAX_TABS) {
       throw new Error(`Restoring "${saved.name}" would exceed the ${MAX_TABS}-tab limit.`)
     }
@@ -2432,6 +2373,9 @@ export class BrowserTabsManager {
 
   selectTab(tabId: string): BrowserState {
     const next = this.getTab(tabId)
+    if (next.view.webContents.isDestroyed()) {
+      throw new Error('This tab renderer is no longer available. Close the tab and reopen it from Recently closed.')
+    }
     next.lastActiveAt = Date.now()
     if (next.sleeping) void this.wakeTab(next.id).catch((error) => console.error('[browser] Could not wake selected tab:', error))
     if (this.splitView && this.splitViewContains(tabId)) {
@@ -2526,61 +2470,74 @@ export class BrowserTabsManager {
 
   async closeTab(tabId: string): Promise<BrowserState> {
     const tab = this.getTab(tabId)
+    const webContents = tab.view.webContents
+    const wasActive = tab.id === this.activeTabId
+    // A WebContentsView may be destroyed independently (renderer failure,
+    // devtools teardown, or an Electron close race). Purge those stale siblings
+    // before any child-view transition so they cannot poison selection/layout.
+    for (const candidate of [...this.tabs.values()]) {
+      if (candidate.id === tab.id || !candidate.view.webContents.isDestroyed()) continue
+      if (this.splitViewContains(candidate.id)) this.splitView = null
+      if (this.activeTabId === candidate.id) this.activeTabId = null
+      this.rememberClosedTab(candidate)
+      this.removeTabRecord(candidate)
+    }
     this.rejectNetworkWaiters(tab.id, 'The tab closed while waiting for network activity.')
     this.clearReproRecording(tab)
-    const screenshotSession = this.screenshotAreaSessions.get(tab.view.webContents.id)
+    const screenshotSession = this.screenshotAreaSessions.get(webContents.id)
     if (screenshotSession) {
       screenshotSession.canceled = true
       screenshotSession.resolve({ canceled: true })
-      this.screenshotAreaSessions.delete(tab.view.webContents.id)
+      this.screenshotAreaSessions.delete(webContents.id)
     }
-    const elementPickerSession = this.elementPickerSessions.get(tab.view.webContents.id)
+    const elementPickerSession = this.elementPickerSessions.get(webContents.id)
     if (elementPickerSession) {
       elementPickerSession.canceled = true
       elementPickerSession.resolve({ canceled: true })
-      this.elementPickerSessions.delete(tab.view.webContents.id)
+      this.elementPickerSessions.delete(webContents.id)
     }
     const splitPartnerId = this.splitViewContains(tab.id)
       ? (this.splitView!.firstTabId === tab.id ? this.splitView!.secondTabId : this.splitView!.firstTabId)
       : null
-    if (!isBronomHomeUrl(tab.url)) {
-      this.closedTabs.push({
-        id: uuidV7(),
-        title: tab.title || tab.url,
-        url: tab.url,
-        pinned: tab.pinned,
-        closedAt: new Date().toISOString(),
-        ...(tab.mcpGroupId ? { mcpGroupId: tab.mcpGroupId } : {})
-      })
-      if (this.closedTabs.length > MAX_CLOSED_TABS) this.closedTabs.shift()
-    }
+    this.rememberClosedTab(tab)
     const ids = this.orderedTabs().map((candidate) => candidate.id)
     const index = ids.indexOf(tab.id)
-    if (tab.id === this.activeTabId || splitPartnerId) this.window.contentView.removeChildView(tab.view)
-    if (splitPartnerId) this.splitView = null
-    this.tabs.delete(tab.id)
-    this.mcpActivitiesByTab.delete(tab.id)
-    if (tab.mcpGroupId) {
-      const group = this.mcpTabGroups.get(tab.mcpGroupId)
-      if (group?.activeTabId === tab.id) {
-        group.activeTabId = [...this.tabs.values()].find((candidate) => candidate.mcpGroupId === tab.mcpGroupId)?.id ?? null
-        group.lastUsedAt = new Date().toISOString()
-      }
-    }
-    this.webContentsToTab.delete(tab.view.webContents.id)
-    this.detachDialogMonitoring(tab.view.webContents)
-    tab.view.webContents.close()
+    const orderedCandidates = splitPartnerId
+      ? [splitPartnerId, ...ids]
+      : [...ids.slice(index + 1), ...ids.slice(0, index).reverse()]
+    const nextId = wasActive
+      ? orderedCandidates.find((candidateId) => {
+        const candidate = this.tabs.get(candidateId)
+        return candidate !== undefined && candidate.id !== tab.id && !candidate.view.webContents.isDestroyed()
+      })
+      : undefined
 
-    if (!this.tabs.size) {
-      await this.createTab({ url: 'about:blank', active: true, mcpGroupId: this.ensureDefaultHumanGroup() })
-    } else if (tab.id === this.activeTabId) {
-      const nextId = splitPartnerId && this.tabs.has(splitPartnerId) ? splitPartnerId : ids[index + 1] ?? ids[index - 1]
-      if (splitPartnerId) {
-        const splitPartner = this.tabs.get(splitPartnerId)
-        if (splitPartner) this.window.contentView.removeChildView(splitPartner.view)
+    if (splitPartnerId) {
+      const splitPartner = this.tabs.get(splitPartnerId)
+      if (splitPartner && splitPartner.id !== nextId && !splitPartner.view.webContents.isDestroyed()) {
+        this.window.contentView.removeChildView(splitPartner.view)
       }
-      this.activeTabId = null
-      this.selectTab(nextId!)
+      this.splitView = null
+    }
+    // Move a live replacement into the BrowserWindow before destroying the
+    // current view. Electron can otherwise leave the parent view in an invalid
+    // child transition after a neighboring WebContentsView was destroyed.
+    if (wasActive && nextId) this.selectTab(nextId)
+    else if (wasActive || splitPartnerId) this.window.contentView.removeChildView(tab.view)
+
+    this.removeTabRecord(tab)
+    if (!webContents.isDestroyed()) {
+      this.detachDialogMonitoring(webContents)
+      webContents.close()
+    }
+
+    if (!this.tabs.size || (wasActive && !nextId)) {
+      for (const candidate of [...this.tabs.values()]) {
+        if (!candidate.view.webContents.isDestroyed()) continue
+        this.rememberClosedTab(candidate)
+        this.removeTabRecord(candidate)
+      }
+      await this.createTab({ url: 'about:blank', active: true, mcpGroupId: this.ensureDefaultHumanGroup() })
     } else {
       this.layout()
       this.changed()
@@ -2593,6 +2550,30 @@ export class BrowserTabsManager {
       if (this.tabs.has(tabId)) await this.closeTab(tabId)
     }
     return this.getState()
+  }
+
+  private rememberClosedTab(tab: BrowserTab): void {
+    if (isBronomHomeUrl(tab.url)) return
+    this.closedTabs.push({
+      id: uuidV7(),
+      title: tab.title || tab.url,
+      url: tab.url,
+      pinned: tab.pinned,
+      closedAt: new Date().toISOString(),
+      ...(tab.mcpGroupId ? { mcpGroupId: tab.mcpGroupId } : {})
+    })
+    if (this.closedTabs.length > MAX_CLOSED_TABS) this.closedTabs.shift()
+  }
+
+  private removeTabRecord(tab: BrowserTab): void {
+    this.tabs.delete(tab.id)
+    this.mcpActivitiesByTab.delete(tab.id)
+    this.webContentsToTab.delete(tab.view.webContents.id)
+    if (!tab.mcpGroupId) return
+    const group = this.mcpTabGroups.get(tab.mcpGroupId)
+    if (group?.activeTabId !== tab.id) return
+    group.activeTabId = [...this.tabs.values()].find((candidate) => candidate.mcpGroupId === tab.mcpGroupId)?.id ?? null
+    group.lastUsedAt = new Date().toISOString()
   }
 
   async navigate(url: string, tabId?: string): Promise<BrowserState> {
@@ -5215,6 +5196,12 @@ export class BrowserTabsManager {
     return id
   }
 
+  private assertActiveWorkspaceCapacity(): void {
+    if (this.mcpTabGroups.size >= MAX_ACTIVE_WORKSPACES) {
+      throw new Error(`Bronom can keep up to ${MAX_ACTIVE_WORKSPACES} active workspaces, including Default.`)
+    }
+  }
+
   private assertWorkspaceNameAvailable(
     name: string,
     excludeActiveWorkspaceId?: string,
@@ -5292,13 +5279,22 @@ export class BrowserTabsManager {
     operation: () => Promise<T>,
     blocksNewTabs = false
   ): Promise<T> {
+    return this.withGlobalWorkspaceStorageOperation(action, () => (
+      this.withWorkspaceOperation(workspaceId, action, operation, blocksNewTabs)
+    ))
+  }
+
+  private async withGlobalWorkspaceStorageOperation<T>(
+    action: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
     if (this.workspaceStorageOperation) {
       throw new Error(`Workspace storage is busy ${this.workspaceStorageOperation.action}. Try again after that operation finishes.`)
     }
-    const current: BrowserWorkspaceOperation = { action, blocksNewTabs, token: Symbol(action) }
+    const current: BrowserWorkspaceOperation = { action, blocksNewTabs: false, token: Symbol(action) }
     this.workspaceStorageOperation = current
     try {
-      return await this.withWorkspaceOperation(workspaceId, action, operation, blocksNewTabs)
+      return await operation()
     } finally {
       if (this.workspaceStorageOperation?.token === current.token) this.workspaceStorageOperation = null
     }
@@ -6102,6 +6098,7 @@ export class BrowserTabsManager {
 
   private toState(tab: BrowserTab): BrowserTabState {
     const navigation = this.navigationHistorySnapshot(tab)
+    const webContentsDestroyed = tab.view.webContents.isDestroyed()
     return {
       id: tab.id,
       title: tab.title,
@@ -6114,11 +6111,11 @@ export class BrowserTabsManager {
       sleeping: tab.sleeping,
       humanInteractionLocked: tab.humanInteractionLocked,
       preserveDiagnosticLogs: tab.preserveDiagnosticLogs,
-      zoomPercent: Math.round(tab.view.webContents.getZoomFactor() * 100),
+      zoomPercent: webContentsDestroyed ? 100 : Math.round(tab.view.webContents.getZoomFactor() * 100),
       ...(tab.faviconDataUrl ? { faviconDataUrl: tab.faviconDataUrl } : {}),
       audible: tab.audible,
       muted: tab.muted,
-      devToolsOpen: tab.view.webContents.isDevToolsOpened(),
+      devToolsOpen: !webContentsDestroyed && tab.view.webContents.isDevToolsOpened(),
       ...(this.hasEmulationOverrides(tab.emulation) ? { emulation: this.cloneEmulationState(tab.emulation) } : {}),
       ...(tab.networkRoutes.length ? { networkRouteCount: tab.networkRoutes.length } : {}),
       ...(tab.inspectorIssues.length ? { inspectorIssueCount: tab.inspectorIssues.length } : {}),
@@ -6164,12 +6161,7 @@ export class BrowserTabsManager {
         index: tab.sleepNavigationHistory.index
       }
     }
-    const webContents = tab.view?.webContents
-    if (!webContents || webContents.isDestroyed() || !webContents.navigationHistory) {
-      return { entries: [], index: -1 }
-    }
-    const navigation = webContents.navigationHistory
-    return { entries: navigation.getAllEntries(), index: navigation.getActiveIndex() }
+    return safeNavigationHistorySnapshot(tab.view?.webContents)
   }
 
   private validateTarget(target: { ref?: string; selector?: string }): void {
@@ -7829,6 +7821,7 @@ export class BrowserTabsManager {
 
   private persistedState(): PersistedBrowserState {
     return {
+      version: TAB_STATE_VERSION,
       activeTabId: this.activeTabId,
       ...(this.splitView ? { splitView: { ...this.splitView } } : {}),
       allHumanInteractionLocked: this.allHumanInteractionLocked,

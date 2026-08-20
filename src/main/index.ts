@@ -98,7 +98,6 @@ import {
   type BrowsingDataSummary,
   type BrowsingDataWebsiteSummary,
   type CredentialStorageStatus,
-  type CredentialSummary,
   type CommercialLicenseState,
   type DetachablePanelId,
   type HelpMenuAction,
@@ -2404,30 +2403,14 @@ function registerIpc(): void {
     assertTrustedShellSender(event)
     return credentialStore?.list() ?? []
   })
-  ipcMain.handle('credentials:fill', async (event, tabId: unknown) => {
+  ipcMain.handle('credentials:fill', async (event, tabId: unknown, credentialId: unknown) => {
     assertTrustedShellSender(event)
     if (typeof tabId !== 'string') throw new TypeError('Invalid tab ID')
+    if (typeof credentialId !== 'string') throw new TypeError('Invalid credential ID')
     if (!credentialStorageStatus.available || !credentialStore || !tabsManager) return false
     const origin = tabsManager.credentialOrigin(tabId)
     if (!origin) return false
-    const choices = credentialStore.list().filter((credential) => credential.origin === origin).slice(0, 8)
-    if (!choices.length) return false
-    let selected: CredentialSummary | undefined = choices[0]
-    if (choices.length > 1) {
-      const buttons = [...choices.map((credential) => credential.username || 'Unnamed account'), 'Cancel']
-      const { response } = await showMessageBox({
-        type: 'question',
-        title: 'Choose a saved account',
-        message: `Fill a saved password for ${origin}`,
-        detail: 'Bronom pauses new agent commands before decrypting and filling the password.',
-        buttons,
-        defaultId: 0,
-        cancelId: buttons.length - 1,
-        noLink: true
-      })
-      selected = choices[response]
-      if (!selected) return false
-    }
+    const selected = credentialStore.list().find((credential) => credential.id === credentialId && credential.origin === origin)
     if (!selected) return false
     setMcpPaused(true)
     const waitStartedAt = Date.now()

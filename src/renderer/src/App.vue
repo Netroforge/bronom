@@ -352,6 +352,11 @@ const systemTheme = ref<'light' | 'dark'>('light')
 const sitePermissions = ref<SitePermissionEntry[]>([])
 const credentials = ref<CredentialSummary[]>([])
 const credentialStorage = ref<CredentialStorageStatus>({ available: false, reason: 'Secure storage is initializing.' })
+const credentialPickerOpen = ref(false)
+const credentialPickerQuery = ref('')
+const credentialPickerSelection = ref(0)
+const credentialPickerInput = ref<HTMLInputElement | null>(null)
+const credentialFillState = ref<'idle' | 'filling'>('idle')
 const commercialLicense = ref<CommercialLicenseState>({
   status: 'not-activated',
   active: false,
@@ -366,7 +371,9 @@ const address = ref('')
 const addressInput = ref<HTMLInputElement | null>(null)
 const siteControlsButton = ref<HTMLButtonElement | null>(null)
 const addressSuggestionsOpen = ref(false)
-const addressSuggestionSelection = ref(0)
+// Suggestions stay unselected until the user explicitly points at one or uses
+// the arrow keys. Enter therefore preserves normal address-bar navigation.
+const addressSuggestionSelection = ref(-1)
 const shell = ref<HTMLElement | null>(null)
 const findInput = ref<HTMLInputElement | null>(null)
 const findOpen = ref(false)
@@ -1121,6 +1128,15 @@ const activeSitePermissions = computed(() => (
 ))
 const activeAddressKind = computed(() => activeWebUrl.value?.startsWith('https:') ? 'HTTPS address' : 'HTTP address')
 const activeCredentials = computed(() => credentials.value.filter((credential) => credential.origin === activeOrigin.value))
+const filteredActiveCredentials = computed(() => {
+  const query = credentialPickerQuery.value.trim().toLocaleLowerCase()
+  if (!query) return activeCredentials.value
+  return activeCredentials.value.filter((credential) => (
+    (credential.username || 'Unnamed account').toLocaleLowerCase().includes(query)
+    || credential.origin.toLocaleLowerCase().includes(query)
+  ))
+})
+const selectedActiveCredential = computed(() => filteredActiveCredentials.value[credentialPickerSelection.value])
 const activeDownloads = computed(() => downloads.value.filter((download) => download.state === 'progressing'))
 const finishedDownloads = computed(() => downloads.value.filter((download) => download.state !== 'progressing'))
 const effectiveDownloadDirectory = computed(() => settings.value.downloadDirectory || defaultDownloadDirectory.value || 'System Downloads folder')
@@ -1220,7 +1236,11 @@ const addressSuggestions = computed(() => buildLocalAddressSuggestions({
   history: visitHistory.value
 }))
 const addressSuggestionsVisible = computed(() => addressSuggestionsOpen.value && addressSuggestions.value.length > 0)
-const selectedAddressSuggestion = computed(() => addressSuggestions.value[addressSuggestionSelection.value])
+const selectedAddressSuggestion = computed(() => (
+  addressSuggestionSelection.value >= 0
+    ? addressSuggestions.value[addressSuggestionSelection.value]
+    : undefined
+))
 const selectedBrowsingDataCount = computed(() => [
   browsingDataOptions.value.history,
   browsingDataOptions.value.cookiesAndSiteData,
@@ -1951,21 +1971,26 @@ async function loadWorkspaceStorageOrigins(): Promise<void> {
     return
   }
   workspaceStorageState.value = 'loading'
+  workspaceStorageMessage.value = ''
   try {
     const origins = await browser.listWorkspaceStorageOrigins(sourceId)
     workspaceOriginOptions.value = origins
     workspaceSelectedOrigins.value = [...origins]
     workspaceStorageState.value = 'idle'
   } catch (error) {
+    workspaceOriginOptions.value = []
+    workspaceSelectedOrigins.value = []
     workspaceStorageState.value = 'error'
     workspaceStorageMessage.value = error instanceof Error ? error.message : String(error)
   }
 }
 
 function workspaceTransferOrigins(): string[] | undefined {
-  return workspaceSelectedOrigins.value.length === workspaceOriginOptions.value.length
+  const available = new Set(workspaceOriginOptions.value)
+  const selected = [...new Set(workspaceSelectedOrigins.value.filter((origin) => available.has(origin)))]
+  return selected.length === available.size && selected.every((origin) => available.has(origin))
     ? undefined
-    : [...workspaceSelectedOrigins.value]
+    : selected
 }
 
 async function saveWorkspaceEditor(): Promise<void> {
@@ -2914,7 +2939,18 @@ watch(
 watch(
   () => addressSuggestions.value.length,
   (length) => {
-    addressSuggestionSelection.value = Math.min(addressSuggestionSelection.value, Math.max(0, length - 1))
+    if (addressSuggestionSelection.value >= length) addressSuggestionSelection.value = -1
+  }
+)
+
+watch(credentialPickerQuery, () => {
+  credentialPickerSelection.value = 0
+})
+
+watch(
+  () => activeTab.value?.id,
+  () => {
+    credentialPickerOpen.value = false
   }
 )
 
@@ -3214,7 +3250,7 @@ async function navigate(): Promise<void> {
 }
 
 function showAddressSuggestions(): void {
-  addressSuggestionSelection.value = 0
+  addressSuggestionSelection.value = -1
   addressSuggestionsOpen.value = true
   siteControlsOpen.value = false
   settingsOpen.value = false
@@ -3305,13 +3341,17 @@ function handleAddressKeydown(event: KeyboardEvent): void {
   if (event.key === 'ArrowDown') {
     event.preventDefault()
     addressSuggestionsOpen.value = true
-    addressSuggestionSelection.value = (addressSuggestionSelection.value + 1) % addressSuggestions.value.length
+    addressSuggestionSelection.value = addressSuggestionSelection.value < 0
+      ? 0
+      : (addressSuggestionSelection.value + 1) % addressSuggestions.value.length
     return
   }
   if (event.key === 'ArrowUp') {
     event.preventDefault()
     addressSuggestionsOpen.value = true
-    addressSuggestionSelection.value = (addressSuggestionSelection.value - 1 + addressSuggestions.value.length) % addressSuggestions.value.length
+    addressSuggestionSelection.value = addressSuggestionSelection.value < 0
+      ? addressSuggestions.value.length - 1
+      : (addressSuggestionSelection.value - 1 + addressSuggestions.value.length) % addressSuggestions.value.length
     return
   }
   if (event.key === 'Enter' && addressSuggestionsVisible.value && selectedAddressSuggestion.value) {
@@ -5234,7 +5274,55 @@ async function resetSitePermissionFromControls(entry: SitePermissionEntry): Prom
 
 async function fillSavedPassword(): Promise<void> {
   if (!activeTab.value || !activeCredentials.value.length) return
-  await window.bronomCredentials.fill(activeTab.value.id)
+  if (activeCredentials.value.length === 1) {
+    await fillSelectedCredential(activeCredentials.value[0])
+    return
+  }
+  credentialPickerQuery.value = ''
+  credentialPickerSelection.value = 0
+  credentialPickerOpen.value = true
+  await nextTick()
+  credentialPickerInput.value?.focus()
+}
+
+async function fillSelectedCredential(credential: CredentialSummary): Promise<void> {
+  const tabId = activeTab.value?.id
+  if (!tabId || credentialFillState.value === 'filling') return
+  credentialPickerOpen.value = false
+  credentialFillState.value = 'filling'
+  try {
+    const filled = await window.bronomCredentials.fill(tabId, credential.id)
+    if (!filled) throw new Error('The saved account no longer matches this website.')
+    showAppToast('success', 'Password filled', `${credential.username || 'Unnamed account'} was filled. Agents remain paused.`)
+  } catch (error) {
+    showAppToast('error', 'Password fill failed', friendlyUiError(error, 'The saved password could not be filled.'))
+  } finally {
+    credentialFillState.value = 'idle'
+  }
+}
+
+function handleCredentialPickerKeydown(event: KeyboardEvent): void {
+  const count = filteredActiveCredentials.value.length
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    credentialPickerOpen.value = false
+    return
+  }
+  if (!count) return
+  if (event.key === 'ArrowDown') {
+    event.preventDefault()
+    credentialPickerSelection.value = (credentialPickerSelection.value + 1) % count
+    return
+  }
+  if (event.key === 'ArrowUp') {
+    event.preventDefault()
+    credentialPickerSelection.value = (credentialPickerSelection.value - 1 + count) % count
+    return
+  }
+  if (event.key === 'Enter' && selectedActiveCredential.value) {
+    event.preventDefault()
+    void fillSelectedCredential(selectedActiveCredential.value)
+  }
 }
 
 async function removeSavedCredential(id: string): Promise<void> {
@@ -6269,7 +6357,6 @@ onBeforeUnmount(() => {
               type="button"
               role="option"
               :aria-selected="index === addressSuggestionSelection"
-              @mouseenter="addressSuggestionSelection = index"
               @click="selectAddressSuggestion(suggestion)"
             >
               <span class="address-suggestion-icon" :class="`kind-${suggestion.kind}`" aria-hidden="true">
@@ -9879,7 +9966,7 @@ onBeforeUnmount(() => {
         </header>
         <div class="workspace-editor-body">
         <label for="tab-group-name">Workspace name</label>
-        <input id="tab-group-name" v-model="tabGroupEditorName" type="text" maxlength="80" autocomplete="off" autofocus />
+        <input id="tab-group-name" v-model="tabGroupEditorName" type="text" maxlength="80" autocomplete="off" autofocus :disabled="workspaceEditorMode === 'edit' && state.mcpTabGroups.find((workspace) => workspace.id === tabGroupEditorId)?.isDefault" />
         <label id="tab-group-color-label">Color</label>
         <div class="tab-group-color-options" role="radiogroup" aria-labelledby="tab-group-color-label">
           <button
@@ -9925,7 +10012,7 @@ onBeforeUnmount(() => {
             <p v-else-if="!workspaceOriginOptions.length">No known website origins in the source profile. All cookies can still be copied.</p>
             <label v-for="origin in workspaceOriginOptions" :key="origin"><input v-model="workspaceSelectedOrigins" type="checkbox" :value="origin" /><span>{{ origin }}</span></label>
           </div>
-          <button class="workspace-transfer-button" type="button" :disabled="workspaceStorageState === 'saving' || workspaceStorageState === 'loading'" @click="transferWorkspaceStorage"><IconSwapHoriz aria-hidden="true" /> {{ workspaceStorageState === 'saving' ? 'Copying…' : workspaceTransferDirection === 'from-default' ? 'Import selected data' : 'Save selected data to Default' }}</button>
+          <button class="workspace-transfer-button" type="button" :disabled="workspaceStorageState === 'saving' || workspaceStorageState === 'loading' || workspaceStorageState === 'error'" @click="transferWorkspaceStorage"><IconSwapHoriz aria-hidden="true" /> {{ workspaceStorageState === 'saving' ? 'Copying…' : workspaceTransferDirection === 'from-default' ? 'Import selected data' : 'Save selected data to Default' }}</button>
           <output v-if="workspaceStorageMessage" :class="{ error: workspaceStorageState === 'error' }" role="status">{{ workspaceStorageMessage }}</output>
           <div class="workspace-danger-zone"><div><strong>Close workspace permanently</strong><span>Closes its tabs and deletes its isolated browser data.</span></div><button type="button" @click="closeEditedWorkspace">Close workspace</button></div>
         </section>
@@ -9933,6 +10020,56 @@ onBeforeUnmount(() => {
         </div>
         <footer><button type="button" @click="closeWorkspaceEditor">Cancel</button><button class="primary" type="submit" :disabled="!tabGroupEditorName.trim()">{{ workspaceEditorMode === 'create' ? 'Create workspace' : 'Save changes' }}</button></footer>
       </form>
+    </div>
+    <div v-if="credentialPickerOpen" class="settings-overlay credential-picker-overlay" @click.self="credentialPickerOpen = false">
+      <section class="credential-picker" role="dialog" aria-modal="true" aria-labelledby="credential-picker-title">
+        <header class="credential-picker-header">
+          <IconPassword aria-hidden="true" />
+          <div>
+            <span class="eyebrow">Saved locally</span>
+            <h2 id="credential-picker-title">Choose an account</h2>
+          </div>
+          <button class="panel-close" type="button" aria-label="Close account chooser" @click="credentialPickerOpen = false"><IconClose aria-hidden="true" /></button>
+        </header>
+        <div class="credential-picker-field">
+          <IconSearch aria-hidden="true" />
+          <input
+            ref="credentialPickerInput"
+            v-model="credentialPickerQuery"
+            type="search"
+            role="combobox"
+            aria-label="Search saved accounts"
+            aria-autocomplete="list"
+            aria-controls="credential-picker-results"
+            :aria-expanded="filteredActiveCredentials.length > 0"
+            :aria-activedescendant="selectedActiveCredential ? `credential-option-${selectedActiveCredential.id}` : undefined"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Search usernames"
+            @keydown="handleCredentialPickerKeydown"
+          />
+        </div>
+        <div v-if="filteredActiveCredentials.length" id="credential-picker-results" class="credential-picker-results" role="listbox" aria-label="Saved accounts for this website">
+          <button
+            v-for="(credential, index) in filteredActiveCredentials"
+            :id="`credential-option-${credential.id}`"
+            :key="credential.id"
+            class="credential-picker-item"
+            :class="{ selected: index === credentialPickerSelection }"
+            type="button"
+            role="option"
+            :aria-selected="index === credentialPickerSelection"
+            @mouseenter="credentialPickerSelection = index"
+            @click="fillSelectedCredential(credential)"
+          >
+            <span class="credential-picker-mark" aria-hidden="true"><IconKey /></span>
+            <span><strong>{{ credential.username || 'Unnamed account' }}</strong><small>{{ credential.origin }}</small></span>
+            <IconKeyboardArrowRight aria-hidden="true" />
+          </button>
+        </div>
+        <div v-else class="credential-picker-empty"><IconSearch aria-hidden="true" /><strong>No matching accounts</strong><span>Try another username.</span></div>
+        <footer><span><IconShieldLock aria-hidden="true" /> Filling pauses new agent commands and leaves agents paused.</span><span><kbd>↑</kbd><kbd>↓</kbd> Select · <kbd>Enter</kbd> Fill</span></footer>
+      </section>
     </div>
     <div v-if="commandPaletteOpen" class="settings-overlay command-palette-overlay" @click.self="commandPaletteOpen = false">
       <section

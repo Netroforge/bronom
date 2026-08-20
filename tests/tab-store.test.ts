@@ -2,9 +2,19 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { TabStateStore } from '../src/main/browser/tab-store.js'
-import { defaultTabGroupColor } from '../src/shared/tab-groups.js'
+import {
+  TAB_STATE_VERSION,
+  TabStateStore,
+  type PersistedBrowserState
+} from '../src/main/browser/tab-store.js'
 
+const DEFAULT_WORKSPACE_ID = '01912345-6789-7abc-8def-0123456789ab'
+const ACTIVE_WORKSPACE_ID = '01912345-678a-7abc-8def-0123456789ab'
+const SAVED_WORKSPACE_ID = '01912345-678b-7abc-8def-0123456789ab'
+const HOME_TAB_ID = '01912345-678c-7abc-8def-0123456789ab'
+const ACTIVE_TAB_ID = '01912345-678d-7abc-8def-0123456789ab'
+const ACTIVE_STORAGE_ID = '8e3da8ea-cba4-41c2-9619-a6e04a493a44'
+const SAVED_STORAGE_ID = '9f4eb9fb-dcb5-42d3-a72a-b7f15b5a4b55'
 const temporaryDirectories: string[] = []
 
 afterEach(async () => {
@@ -18,31 +28,73 @@ async function createStore(): Promise<{ path: string; store: TabStateStore }> {
   return { path, store: new TabStateStore(path) }
 }
 
+function currentState(): PersistedBrowserState {
+  return {
+    version: TAB_STATE_VERSION,
+    activeTabId: ACTIVE_TAB_ID,
+    allHumanInteractionLocked: true,
+    defaultHumanGroupId: DEFAULT_WORKSPACE_ID,
+    mcpTabGroups: [
+      {
+        id: DEFAULT_WORKSPACE_ID,
+        name: 'Default',
+        color: 'gray',
+        createdAt: '2026-08-20T09:00:00.000Z',
+        lastUsedAt: '2026-08-20T09:01:00.000Z',
+        activeTabId: null,
+        origins: []
+      },
+      {
+        id: ACTIVE_WORKSPACE_ID,
+        name: 'Checkout debugging',
+        color: 'orange',
+        createdAt: '2026-08-20T09:02:00.000Z',
+        lastUsedAt: '2026-08-20T09:03:00.000Z',
+        activeTabId: ACTIVE_TAB_ID,
+        storageId: ACTIVE_STORAGE_ID,
+        origins: ['https://shop.example']
+      }
+    ],
+    savedTabGroups: [{
+      id: SAVED_WORKSPACE_ID,
+      name: 'Saved checkout research',
+      color: 'blue',
+      savedAt: '2026-08-20T09:04:00.000Z',
+      storageId: SAVED_STORAGE_ID,
+      origins: ['https://docs.example'],
+      tabs: [{ title: 'Orders', url: 'https://docs.example/orders', pinned: true }]
+    }],
+    tabs: [
+      { id: HOME_TAB_ID, title: 'Bronom Home', url: 'bronom://home/' },
+      {
+        id: ACTIVE_TAB_ID,
+        title: 'Checkout',
+        url: 'https://shop.example/checkout',
+        pinned: true,
+        humanInteractionLocked: true,
+        mcpGroupId: ACTIVE_WORKSPACE_ID
+      }
+    ]
+  }
+}
+
 describe('TabStateStore', () => {
-  it('atomically persists and restores tab state', async () => {
+  it('atomically persists and restores only the current UUIDv7 workspace format', async () => {
     const { path, store } = await createStore()
-    const state = {
-      activeTabId: 'tab-2',
-      allHumanInteractionLocked: true,
-      tabs: [
-        { id: 'tab-1', title: 'One', url: 'https://one.example', pinned: true, humanInteractionLocked: true },
-        { id: 'tab-2', title: 'Two', url: 'https://two.example' }
-      ]
-    }
+    const state = currentState()
     await store.save(state)
+
     expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(state)
     expect(await store.load()).toEqual({
       ...state,
-      mcpTabGroups: [],
-      savedTabGroups: [],
       tabs: [
-        state.tabs[0],
-        { ...state.tabs[1], pinned: false, humanInteractionLocked: false }
+        { ...state.tabs[0], pinned: false, humanInteractionLocked: false },
+        state.tabs[1]
       ]
     })
   })
 
-  it('loads pre-lock state files with interaction unlocked', async () => {
+  it('drops unversioned legacy tab state instead of migrating or restoring it', async () => {
     const { path, store } = await createStore()
     await mkdir(join(path, '..'), { recursive: true })
     await writeFile(path, JSON.stringify({
@@ -50,148 +102,72 @@ describe('TabStateStore', () => {
       tabs: [{ id: 'legacy-tab', title: 'Legacy', url: 'https://legacy.example' }]
     }), 'utf8')
 
-    expect(await store.load()).toEqual({
-      activeTabId: 'legacy-tab',
-      allHumanInteractionLocked: false,
-      mcpTabGroups: [],
-      savedTabGroups: [],
-      tabs: [{
-        id: 'legacy-tab',
-        title: 'Legacy',
-        url: 'https://legacy.example',
-        pinned: false,
-        humanInteractionLocked: false
-      }]
-    })
+    expect(await store.load()).toBeNull()
   })
 
-  it('persists tab groups and tab ownership across restarts', async () => {
-    const { store } = await createStore()
-    const state = {
-      activeTabId: 'agent-tab',
-      defaultHumanGroupId: '7298fc5e-42e2-4ae5-a1ee-dbec515369f1',
-      mcpTabGroups: [{
-        id: '7298fc5e-42e2-4ae5-a1ee-dbec515369f1',
-        name: 'Checkout debugging',
-        color: 'orange' as const,
-        createdAt: '2026-08-14T09:00:00.000Z',
-        lastUsedAt: '2026-08-14T09:01:00.000Z',
-        activeTabId: 'agent-tab'
-      }],
-      savedTabGroups: [{
-        id: 'f1395ff9-b3bd-48cb-95fa-f221ba78d65c',
-        name: 'Saved checkout research',
-        color: 'blue' as const,
-        savedAt: '2026-08-14T09:02:00.000Z',
-        tabs: [{ title: 'Orders', url: 'https://shop.example/orders', pinned: true }]
-      }],
-      tabs: [{
-        id: 'agent-tab',
-        title: 'Checkout',
-        url: 'https://shop.example/checkout',
-        mcpGroupId: '7298fc5e-42e2-4ae5-a1ee-dbec515369f1'
-      }]
-    }
-    await store.save(state)
-    expect(await store.load()).toEqual({
-      ...state,
-      allHumanInteractionLocked: false,
-      mcpTabGroups: state.mcpTabGroups.map((workspace) => ({ ...workspace, origins: [] })),
-      savedTabGroups: state.savedTabGroups.map((workspace) => ({ ...workspace, origins: [] })),
-      tabs: [{ ...state.tabs[0], pinned: false, humanInteractionLocked: false }]
-    })
-  })
-
-  it('persists a bounded split-view layout', async () => {
+  it('restores a valid bounded split-view layout', async () => {
     const { path, store } = await createStore()
+    const state = currentState()
+    state.splitView = {
+      firstTabId: HOME_TAB_ID,
+      secondTabId: ACTIVE_TAB_ID,
+      orientation: 'horizontal',
+      ratio: 0.9
+    }
     await mkdir(join(path, '..'), { recursive: true })
-    await writeFile(path, JSON.stringify({
-      activeTabId: 'second',
-      splitView: {
-        firstTabId: 'first',
-        secondTabId: 'second',
-        orientation: 'horizontal',
-        ratio: 0.9
-      },
-      tabs: [
-        { id: 'first', title: 'First', url: 'https://first.example' },
-        { id: 'second', title: 'Second', url: 'https://second.example' }
-      ]
-    }), 'utf8')
+    await writeFile(path, JSON.stringify(state), 'utf8')
 
     expect((await store.load())?.splitView).toEqual({
-      firstTabId: 'first',
-      secondTabId: 'second',
+      firstTabId: HOME_TAB_ID,
+      secondTabId: ACTIVE_TAB_ID,
       orientation: 'horizontal',
       ratio: 0.75
     })
   })
 
-  it('assigns a stable palette color to tab groups saved before colors were supported', async () => {
+  it('rejects current state when active and archived workspaces share a profile partition', async () => {
     const { path, store } = await createStore()
-    const groupId = '7298fc5e-42e2-4ae5-a1ee-dbec515369f1'
+    const state = currentState()
+    state.savedTabGroups![0]!.storageId = ACTIVE_STORAGE_ID
     await mkdir(join(path, '..'), { recursive: true })
-    await writeFile(path, JSON.stringify({
-      activeTabId: null,
-      tabs: [],
-      mcpTabGroups: [{
-        id: groupId,
-        name: 'Legacy group',
-        createdAt: '2026-08-14T09:00:00.000Z',
-        lastUsedAt: '2026-08-14T09:01:00.000Z'
-      }]
-    }), 'utf8')
+    await writeFile(path, JSON.stringify(state), 'utf8')
 
-    expect((await store.load())?.mcpTabGroups).toEqual([expect.objectContaining({
-      id: groupId,
-      color: defaultTabGroupColor(groupId)
-    })])
+    expect(await store.load()).toBeNull()
   })
 
-  it('sanitizes corrupt workspace storage metadata without discarding the profile', async () => {
+  it.each([
+    ['a non-UUIDv7 tab ID', (state: PersistedBrowserState) => { state.tabs[0]!.id = 'legacy-tab' }],
+    ['a non-UUIDv7 workspace ID', (state: PersistedBrowserState) => { state.mcpTabGroups![1]!.id = 'legacy-workspace' }],
+    ['a missing isolated storage ID', (state: PersistedBrowserState) => { delete state.mcpTabGroups![1]!.storageId }],
+    ['a duplicate workspace name', (state: PersistedBrowserState) => { state.savedTabGroups![0]!.name = 'Checkout debugging' }],
+    ['a tab owned by an archived workspace', (state: PersistedBrowserState) => { state.tabs[1]!.mcpGroupId = SAVED_WORKSPACE_ID }]
+  ])('rejects current state containing %s', async (_name, corrupt) => {
     const { path, store } = await createStore()
-    const validStorageId = '8e3da8ea-cba4-41c2-9619-a6e04a493a44'
+    const state = currentState()
+    corrupt(state)
     await mkdir(join(path, '..'), { recursive: true })
-    await writeFile(path, JSON.stringify({
-      activeTabId: null,
-      tabs: [],
-      mcpTabGroups: [{
-        id: 'active-workspace',
-        name: 'Recovered workspace',
-        color: 'blue',
-        createdAt: '2026-08-20T10:00:00.000Z',
-        lastUsedAt: '2026-08-20T10:01:00.000Z',
-        storageId: '../shared-profile',
-        origins: [
-          'https://shop.example/checkout',
-          'not a URL',
-          'file:///tmp/private',
-          'https://shop.example/account',
-          'http://localhost:4173/path'
-        ]
-      }],
-      savedTabGroups: [{
-        id: 'saved-workspace',
-        name: 'Archived workspace',
-        color: 'green',
-        savedAt: '2026-08-20T10:02:00.000Z',
-        storageId: validStorageId,
-        origins: ['https://docs.example/path', 'javascript:alert(1)'],
-        tabs: [{ title: 'Docs', url: 'https://docs.example' }]
-      }]
-    }), 'utf8')
+    await writeFile(path, JSON.stringify(state), 'utf8')
 
-    const loaded = await store.load()
-    expect(loaded?.mcpTabGroups).toEqual([expect.objectContaining({
-      id: 'active-workspace',
-      origins: ['http://localhost:4173', 'https://shop.example']
-    })])
-    expect(loaded?.mcpTabGroups?.[0]).not.toHaveProperty('storageId')
-    expect(loaded?.savedTabGroups).toEqual([expect.objectContaining({
-      id: 'saved-workspace',
-      storageId: validStorageId,
-      origins: ['https://docs.example']
-    })])
+    expect(await store.load()).toBeNull()
+  })
+
+  it('sanitizes origin lists inside an otherwise valid current profile', async () => {
+    const { path, store } = await createStore()
+    const state = currentState()
+    state.mcpTabGroups![1]!.origins = [
+      'https://shop.example/checkout',
+      'not a URL',
+      'file:///tmp/private',
+      'https://shop.example/account',
+      'http://localhost:4173/path'
+    ]
+    await mkdir(join(path, '..'), { recursive: true })
+    await writeFile(path, JSON.stringify(state), 'utf8')
+
+    expect((await store.load())?.mcpTabGroups?.[1]?.origins).toEqual([
+      'http://localhost:4173',
+      'https://shop.example'
+    ])
   })
 
   it('returns null for missing and malformed files', async () => {

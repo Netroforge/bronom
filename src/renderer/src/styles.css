@@ -3105,6 +3105,47 @@ button { color: inherit; }
 .command-palette > footer { display: flex; min-height: 40px; flex: 0 0 auto; align-items: center; gap: 18px; padding: 7px 14px; border-top: 1px solid var(--border-soft); color: var(--muted); background: var(--surface); font-size: 12px; }
 .command-palette > footer span { display: flex; align-items: center; gap: 4px; }
 
+.credential-picker-overlay { align-items: flex-start; padding-top: max(72px, 11vh); }
+.credential-picker {
+  display: flex;
+  width: min(590px, calc(100vw - 56px));
+  max-height: min(580px, calc(100vh - 144px));
+  overflow: hidden;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  color: var(--text);
+  background: var(--surface-raised);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, .54);
+  user-select: text;
+}
+.credential-picker-header { display: grid; min-height: 70px; grid-template-columns: 38px minmax(0, 1fr) 32px; align-items: center; gap: 11px; padding: 12px 15px; border-bottom: 1px solid var(--border-soft); background: var(--surface); }
+.credential-picker-header > svg { width: 24px; height: 24px; justify-self: center; color: var(--accent-text); }
+.credential-picker-header h2 { margin: 2px 0 0; font-size: 20px; line-height: 1.15; }
+.credential-picker-field { display: grid; min-height: 50px; flex: 0 0 auto; grid-template-columns: 20px minmax(0, 1fr); align-items: center; gap: 10px; margin: 12px; padding: 0 12px; border: 1px solid var(--border-soft); border-radius: 9px; color: var(--muted); background: var(--surface-muted); }
+.credential-picker-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.credential-picker-field > svg { width: 18px; height: 18px; }
+.credential-picker-field input { min-width: 0; width: 100%; border: 0; outline: 0; color: var(--text); background: transparent; font: inherit; font-size: 15px; }
+.credential-picker-results { min-height: 0; overflow-y: auto; padding: 0 9px 10px; overscroll-behavior: contain; }
+.credential-picker-item { display: grid; width: 100%; min-height: 62px; grid-template-columns: 34px minmax(0, 1fr) 20px; align-items: center; gap: 11px; padding: 8px 10px; border: 1px solid transparent; border-radius: 9px; color: var(--text); background: transparent; text-align: left; cursor: pointer; }
+.credential-picker-item.selected { border-color: color-mix(in srgb, var(--accent) 55%, var(--border-soft)); background: var(--accent-soft); }
+.credential-picker-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.credential-picker-item > span:nth-child(2) { min-width: 0; }
+.credential-picker-item strong, .credential-picker-item small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.credential-picker-item strong { font-size: 14px; line-height: 1.35; }
+.credential-picker-item small { margin-top: 3px; color: var(--muted); font-size: 12px; }
+.credential-picker-item > svg { width: 18px; height: 18px; color: var(--muted); }
+.credential-picker-mark { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 8px; color: var(--accent-text); background: var(--surface-muted); }
+.credential-picker-mark svg { width: 17px; height: 17px; }
+.credential-picker-empty { display: grid; min-height: 170px; place-items: center; align-content: center; padding: 24px; color: var(--muted); text-align: center; }
+.credential-picker-empty > svg { width: 32px; height: 32px; color: var(--accent-text); }
+.credential-picker-empty strong { margin-top: 10px; color: var(--text); }
+.credential-picker-empty span { margin-top: 4px; font-size: 12px; }
+.credential-picker > footer { display: flex; min-height: 44px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--border-soft); color: var(--muted); background: var(--surface); font-size: 11px; }
+.credential-picker > footer span { display: flex; align-items: center; gap: 4px; }
+.credential-picker > footer svg { width: 15px; height: 15px; color: var(--accent-text); }
+.credential-picker > footer kbd { padding: 3px 5px; border: 1px solid var(--border-soft); border-radius: 5px; color: var(--text); background: var(--surface); font: 650 11px/1 "SFMono-Regular", Consolas, monospace; white-space: nowrap; box-shadow: 0 1px 0 var(--border-soft); }
+
 .settings-dialog {
   display: flex;
   width: min(840px, calc(100vw - 56px));
@@ -3766,6 +3807,9 @@ button { color: inherit; }
   .command-palette-overlay { padding-top: 28px; }
   .command-palette { width: calc(100vw - 28px); max-height: calc(100vh - 56px); }
   .command-palette-meta kbd { display: none; }
+  .credential-picker-overlay { padding-top: 28px; }
+  .credential-picker { width: calc(100vw - 28px); max-height: calc(100vh - 56px); }
+  .credential-picker > footer { align-items: flex-start; flex-direction: column; }
   .settings-dialog { width: calc(100vw - 28px); max-height: calc(100vh - 28px); }
   .help-dialog { width: calc(100vw - 28px); max-height: calc(100vh - 28px); }
   .settings-layout { display: block; overflow-y: auto; }

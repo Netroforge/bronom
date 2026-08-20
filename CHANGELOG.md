@@ -4,6 +4,26 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-08-20
+
+### Added
+
+- Organize tabs into named, UUIDv7-identified workspaces: keep the undeletable Default workspace as the durable shared browser profile, create isolated workspaces from a clean profile or a copy of Default, explicitly copy all or selected-site storage in either direction, and archive isolated workspaces for later reopening with a fresh active ID.
+- Choose among multiple saved accounts in a searchable, vertically scrollable Bronom dialog; a single matching account still fills directly, and every selection is revalidated against the active website before use.
+
+### Changed
+
+- Require MCP agents to create or reopen an explicit workspace before opening tabs, list workspaces when coordination is needed, and consistently address both workspaces and tabs by UUIDv7 while retaining unique editable workspace names for people.
+- Navigate the exact address-bar text when Enter is pressed; suggestions are used only after an explicit keyboard or pointer selection.
+- Update the embedded Electron runtime to 42.9.3.
+
+### Fixed
+
+- Close crashed, unavailable, or already-destroyed tabs without reading a missing navigation history, reattaching a destroyed view, or trapping the user in repeated close failures; closing a tab now activates the nearest usable neighbor.
+- Make profile transfers transactional: serialize workspace storage operations, roll back cookies and local storage after partial copy failures, prevent failed forks from leaving ghost workspaces, and retain recoverable metadata if profile cleanup cannot complete.
+- Reject corrupt, duplicate, cross-workspace, oversized, or pre-workspace tab state instead of restoring ambiguous identities or sharing an isolated profile accidentally. Existing legacy tab/workspace layout is intentionally reset, while Default continues to use the durable shared browser profile.
+- Clear stale per-site transfer selections after source-loading errors and prevent transfers from applying an outdated origin list to another workspace.
+
 ## [1.5.0] - 2026-08-17
 
 ### Added

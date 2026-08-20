@@ -19,7 +19,7 @@ test('exposes metadata-only password controls and fails closed without secure st
   const pageTools = appWindow.getByRole('dialog', { name: 'Page tools' })
   await expect(pageTools.getByRole('button', { name: 'No saved password for this site' })).toBeDisabled()
   await pageTools.getByRole('button', { name: 'Close page tools' }).click()
-  expect(await appWindow.evaluate(`window.bronomCredentials.fill(${JSON.stringify(state.browser.activeTabId)})`)).toBe(false)
+  expect(await appWindow.evaluate(`window.bronomCredentials.fill(${JSON.stringify(state.browser.activeTabId)}, 'missing-credential')`)).toBe(false)
 
   await appWindow.getByRole('button', { name: 'Settings' }).click()
   await appWindow.getByRole('button', { name: 'Passwords' }).click()

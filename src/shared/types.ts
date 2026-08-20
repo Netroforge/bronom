@@ -2311,7 +2311,7 @@ export interface BronomPermissionsApi {
 export interface BronomCredentialsApi {
   status(): Promise<CredentialStorageStatus>
   list(): Promise<CredentialSummary[]>
-  fill(tabId: string): Promise<boolean>
+  fill(tabId: string, credentialId: string): Promise<boolean>
   remove(id: string): Promise<boolean>
   clear(): Promise<void>
   onChanged(listener: (credentials: CredentialSummary[]) => void): () => void

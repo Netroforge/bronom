@@ -306,7 +306,7 @@ contextBridge.exposeInMainWorld('bronomPermissions', permissionsApi)
 const credentialsApi: BronomCredentialsApi = {
   status: () => ipcRenderer.invoke('credentials:status'),
   list: () => ipcRenderer.invoke('credentials:list'),
-  fill: (tabId: string) => ipcRenderer.invoke('credentials:fill', tabId),
+  fill: (tabId: string, credentialId: string) => ipcRenderer.invoke('credentials:fill', tabId, credentialId),
   remove: (id: string) => ipcRenderer.invoke('credentials:remove', id),
   clear: () => ipcRenderer.invoke('credentials:clear'),
   onChanged: (listener: (credentials: CredentialSummary[]) => void) => {

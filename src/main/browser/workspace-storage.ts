@@ -26,6 +26,12 @@ export interface WorkspaceStorageTransferResult {
   origins: string[]
 }
 
+interface LocalStorageRollbackEntry {
+  origin: string
+  keys: string[]
+  previous: Array<[string, string]>
+}
+
 export function workspacePartition(defaultPartition: string, storageId: string): string {
   const profile = defaultPartition.startsWith('persist:') ? defaultPartition.slice('persist:'.length) : defaultPartition
   return `persist:${profile}-workspace-${storageId}`
@@ -173,6 +179,13 @@ class LocalStorageSurface {
     })()`, true)
   }
 
+  async restore(entry: LocalStorageRollbackEntry): Promise<void> {
+    await this.webContents.executeJavaScript(`(() => {
+      for (const key of ${JSON.stringify(entry.keys)}) localStorage.removeItem(key);
+      for (const [key, value] of ${JSON.stringify(entry.previous)}) localStorage.setItem(key, value);
+    })()`, true)
+  }
+
   close(): void {
     if (this.pendingRequest) {
       clearTimeout(this.pendingRequest.timer)
@@ -196,34 +209,92 @@ export async function transferWorkspaceStorage(
   options.configureSession?.(target)
 
   const cookies = await cookiesForTransfer(source, origins, options.copyAllCookies)
-  for (const cookie of cookies) await target.cookies.set(cookieDetails(cookie))
-
+  const cookieIdentities = new Set(cookies.map(cookieIdentity))
+  const previousCookies = (await target.cookies.get({})).filter((cookie) => cookieIdentities.has(cookieIdentity(cookie)))
+  const localStorageRollback: LocalStorageRollbackEntry[] = []
   let localStorageOriginCount = 0
   let localStorageItemCount = 0
-  if (options.copyLocalStorage && origins.length) {
-    const sourceSurface = new LocalStorageSurface(options.sourcePartition)
-    const targetSurface = new LocalStorageSurface(options.targetPartition)
-    try {
-      await Promise.all([sourceSurface.initialize(), targetSurface.initialize()])
-      for (const origin of origins) {
-        await Promise.all([sourceSurface.loadOrigin(origin), targetSurface.loadOrigin(origin)])
-        const items = await sourceSurface.read()
-        if (!items.length) continue
-        await targetSurface.merge(items)
-        localStorageOriginCount += 1
-        localStorageItemCount += items.length
+  try {
+    for (const cookie of cookies) await target.cookies.set(cookieDetails(cookie))
+
+    if (options.copyLocalStorage && origins.length) {
+      const sourceSurface = new LocalStorageSurface(options.sourcePartition)
+      const targetSurface = new LocalStorageSurface(options.targetPartition)
+      try {
+        await Promise.all([sourceSurface.initialize(), targetSurface.initialize()])
+        for (const origin of origins) {
+          await Promise.all([sourceSurface.loadOrigin(origin), targetSurface.loadOrigin(origin)])
+          const items = await sourceSurface.read()
+          if (!items.length) continue
+          const targetItems = new Map(await targetSurface.read())
+          const keys = items.map(([key]) => key)
+          localStorageRollback.push({
+            origin,
+            keys,
+            previous: keys.flatMap((key) => targetItems.has(key) ? [[key, targetItems.get(key)!] as [string, string]] : [])
+          })
+          await targetSurface.merge(items)
+          localStorageOriginCount += 1
+          localStorageItemCount += items.length
+        }
+      } finally {
+        sourceSurface.close()
+        targetSurface.close()
       }
-    } finally {
-      sourceSurface.close()
-      targetSurface.close()
     }
-  }
-  await target.flushStorageData()
-  return {
-    cookieCount: cookies.length,
-    localStorageOriginCount,
-    localStorageItemCount,
-    origins
+    await target.flushStorageData()
+    return {
+      cookieCount: cookies.length,
+      localStorageOriginCount,
+      localStorageItemCount,
+      origins
+    }
+  } catch (transferError) {
+    const rollbackErrors: unknown[] = []
+    if (localStorageRollback.length) {
+      const targetSurface = new LocalStorageSurface(options.targetPartition)
+      try {
+        await targetSurface.initialize()
+        for (const entry of [...localStorageRollback].reverse()) {
+          try {
+            await targetSurface.loadOrigin(entry.origin)
+            await targetSurface.restore(entry)
+          } catch (error) {
+            rollbackErrors.push(error)
+          }
+        }
+      } catch (error) {
+        rollbackErrors.push(error)
+      } finally {
+        targetSurface.close()
+      }
+    }
+    for (const cookie of cookies) {
+      try {
+        await target.cookies.remove(cookieUrl(cookie), cookie.name)
+      } catch (error) {
+        rollbackErrors.push(error)
+      }
+    }
+    for (const cookie of previousCookies) {
+      try {
+        await target.cookies.set(cookieDetails(cookie))
+      } catch (error) {
+        rollbackErrors.push(error)
+      }
+    }
+    try {
+      await target.flushStorageData()
+    } catch (error) {
+      rollbackErrors.push(error)
+    }
+    if (rollbackErrors.length) {
+      throw new AggregateError(
+        [transferError, ...rollbackErrors],
+        'Workspace storage transfer failed and the destination could not be fully restored.'
+      )
+    }
+    throw transferError
   }
 }
 

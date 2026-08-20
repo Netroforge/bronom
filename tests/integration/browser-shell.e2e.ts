@@ -7,6 +7,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { useMcpWorkspace } from '../../scripts/mcp-workspace.js'
+import type { BrowserState } from '../../src/shared/types.js'
 import { closeBronom, expect, launchBronom, test } from './fixtures.js'
 
 const execFileAsync = promisify(execFile)
@@ -919,9 +920,20 @@ test('suggests local tabs, bookmarks, and history from the address bar', async (
     await listbox.getByRole('option').nth(0).click()
     await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.find((tab) => tab.active)?.title)')).toBe('Suggestion open tab')
 
+    const directNavigation = await appWindow.evaluate('window.bronom.newTab({ active: true })') as BrowserState
+    const directNavigationTabId = directNavigation.activeTabId
+    await address.fill(bookmarkUrl)
+    await expect(listbox.getByRole('option')).toHaveCount(1)
+    await expect(address).not.toHaveAttribute('aria-activedescendant')
+    await address.press('Enter')
+    await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.find((tab) => tab.active)?.title)')).toBe('Suggestion bookmark')
+    await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')).toBe(directNavigationTabId)
+
+    await appWindow.evaluate('window.bronom.newTab({ active: true })')
     await address.fill('@bookmarks')
     await expect(listbox.getByRole('option')).toHaveCount(1)
     await expect(listbox).toContainText('Suggestion bookmark')
+    await address.press('ArrowDown')
     await address.press('Enter')
     await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.find((tab) => tab.active)?.title)')).toBe('Suggestion bookmark')
 

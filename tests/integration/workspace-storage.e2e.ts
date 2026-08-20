@@ -159,6 +159,30 @@ test('isolates workspace profiles and explicitly forks or saves data through Def
     expect(forkData.cookies).toContain('path-cookie=default-private')
     expect(requestCookies.get('/inspect-fork')).toContain('workspace-cookie=default')
 
+    await electronApp.evaluate(async ({ webContents }, url) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === url)
+      if (!contents) throw new Error('Forked workspace page was not found for rollback setup')
+      await contents.session.cookies.set({ url, name: 'workspace-cookie', value: 'fork-before-failure', path: '/', httpOnly: true, sameSite: 'lax' })
+      const originalSet = contents.session.cookies.set.bind(contents.session.cookies)
+      let writeCount = 0
+      contents.session.cookies.set = async (...args: Parameters<Electron.Cookies['set']>) => {
+        writeCount += 1
+        if (writeCount === 2) {
+          contents.session.cookies.set = originalSet
+          throw new Error('simulated partial workspace cookie copy failure')
+        }
+        return originalSet(...args)
+      }
+    }, forkUrl)
+    const failedImport = await appWindow.evaluate(`window.bronom.transferWorkspaceStorage({ workspaceId: ${JSON.stringify(forkWorkspace.id)}, direction: 'from-default' }).then(() => 'copied', (error) => String(error.message ?? error))`)
+    expect(failedImport).toContain('simulated partial workspace cookie copy failure')
+    const cookieAfterRollback = await electronApp.evaluate(async ({ webContents }, input) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === input.url)
+      if (!contents) throw new Error('Forked workspace page was not found after rollback')
+      return (await contents.session.cookies.get({ url: `${input.origin}/`, name: 'workspace-cookie' }))[0]?.value
+    }, { url: forkUrl, origin })
+    expect(cookieAfterRollback).toBe('fork-before-failure')
+
     await electronApp.evaluate(({ webContents }, url) => {
       const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === url)
       if (!contents) throw new Error('Forked workspace page was not found for the concurrency check')
@@ -189,6 +213,9 @@ test('isolates workspace profiles and explicitly forks or saves data through Def
       expect(closeWhileCopying).toContain('is busy copying workspace storage')
       const secondCopy = await appWindow.evaluate(`window.bronom.transferWorkspaceStorage({ workspaceId: ${JSON.stringify(forkWorkspace.id)}, direction: 'to-default' }).then(() => 'copied', (error) => String(error.message ?? error))`)
       expect(secondCopy).toContain('Workspace storage is busy copying workspace storage')
+      const forkWhileCopying = await appWindow.evaluate(`window.bronom.createWorkspace({ name: 'Blocked fork', storage: 'fork-default' }).then(() => 'created', (error) => String(error.message ?? error))`)
+      expect(forkWhileCopying).toContain('Workspace storage is busy copying workspace storage')
+      await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => state.mcpTabGroups.some((workspace) => workspace.name === 'Blocked fork'))`)).toBe(false)
       const tabOpenedWhileCopying = await appWindow.evaluate(`window.bronom.newTab({ url: 'about:blank', active: false, mcpGroupId: ${JSON.stringify(forkWorkspace.id)} })`) as {
         mcpTabGroups: Array<{ id: string; tabCount: number }>
       }

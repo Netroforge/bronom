@@ -30,6 +30,7 @@ import { formatReproAsPlaywright } from '../../shared/repro-export.js'
 import { isUuidV7 } from '../uuid-v7.js'
 
 const workspaceIdSchema = z.string().refine(isUuidV7, 'Workspace ID must be a UUIDv7.')
+const tabIdSchema = z.string().refine(isUuidV7, 'Tab ID must be a UUIDv7.')
 
 export interface BookmarkOperations {
   list: () => BrowserBookmark[]
@@ -156,7 +157,7 @@ export const BROWSER_TOOL_CATALOG: BrowserToolDefinition[] = [
   {
     name: 'browser_workspaces',
     category: 'Session',
-    description: 'Start every workflow by creating a fresh uniquely named workspace. Its stable workspaceId is UUIDv7 identity; renaming changes only the human-readable unique name. New workspaces use clean isolated storage unless create requests fork-default with optional HTTP(S) origins. Use list-origins, import-default, or save-default for explicit storage copies. Use only the workspaceId returned by your own create call for the whole task. Listing is for awareness only: never use, rename, recolor, or close a listed workspace you did not create, and never touch the human Default workspace marked isDefault.'
+    description: 'Start every workflow by creating a fresh uniquely named workspace. Its stable id is UUIDv7 identity; pass that value as workspaceId to browser tools. Renaming changes only the human-readable unique name. New workspaces use clean isolated storage unless create requests fork-default with optional HTTP(S) origins. Use list-origins, import-default, or save-default for explicit storage copies. Use only the id returned by your own create call, or the fresh id returned when you reopen your own archive, for the whole task. Listing is for awareness only: never use, rename, recolor, or close a listed workspace you did not create, and never touch the human Default workspace marked isDefault.'
   },
   {
     name: 'browser_saved_workspaces',
@@ -381,7 +382,7 @@ function createBrowserMcpServer(
       description: toolDescription('browser_workspaces'),
       inputSchema: {
         action: z.enum(['list', 'create', 'update', 'rename', 'close', 'list-origins', 'import-default', 'save-default']).default('list'),
-        workspaceId: workspaceIdSchema.optional().describe('Stable UUIDv7 returned by your own create call. A rename changes only the human name, never this ID. Never modify a workspace discovered through list.'),
+        workspaceId: workspaceIdSchema.optional().describe('Stable UUIDv7 id returned by your own create call or by reopening your own archive. A rename changes only the human name, never this ID. Never modify a workspace discovered through list.'),
         name: z.string().trim().min(1).max(80).optional().describe('Human-readable workspace name for create, update, or rename.'),
         color: z.enum(BROWSER_TAB_GROUP_COLORS).optional().describe('Visible workspace color for create or update.'),
         storage: z.enum(['scratch', 'fork-default']).optional().describe('Create with clean isolated storage (default) or copy Default. Agents must not browse Default directly.'),
@@ -471,7 +472,7 @@ function createBrowserMcpServer(
       {
         ...config,
         inputSchema: {
-          workspaceId: workspaceIdSchema.describe('Stable UUIDv7 returned by your own browser_workspaces create call. Never use a listed workspace you did not create or the human Default workspace.'),
+          workspaceId: workspaceIdSchema.describe('Stable UUIDv7 id returned by your own browser_workspaces create call or by reopening your own archive. Never use a listed workspace you did not create or the human Default workspace.'),
           ...(config.inputSchema ?? {})
         }
       },
@@ -518,7 +519,7 @@ function createBrowserMcpServer(
       description: toolDescription('browser_request_user_attention'),
       inputSchema: {
         reason: z.string().trim().min(1).max(280).describe('What the user needs to do, without secrets or credentials.'),
-        tabId: z.string().optional().describe('The browser tab that needs the user, when applicable.')
+        tabId: tabIdSchema.optional().describe('The browser tab that needs the user, when applicable.')
       }
     },
     tabTool('browser_request_user_attention', async ({ reason, tabId }: UserAttentionInput) => {
@@ -553,12 +554,12 @@ function createBrowserMcpServer(
   )
   registerWorkspaceTool(
     'browser_select_tab',
-    { description: toolDescription('browser_select_tab'), inputSchema: { tabId: z.string() } },
+    { description: toolDescription('browser_select_tab'), inputSchema: { tabId: tabIdSchema } },
     tabTool('browser_select_tab', async ({ tabId }: { tabId: string }) => textResult(manager.selectTab(tabId)))
   )
   registerWorkspaceTool(
     'browser_close_tab',
-    { description: toolDescription('browser_close_tab'), inputSchema: { tabId: z.string() } },
+    { description: toolDescription('browser_close_tab'), inputSchema: { tabId: tabIdSchema } },
     tool(async ({ tabId }: { tabId: string }) => textResult(await manager.closeTab(tabId)))
   )
   registerWorkspaceTool(
@@ -662,7 +663,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_storage'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         kind: z.enum(['local-storage', 'session-storage', 'cookies']),
         action: z.enum(['list', 'get', 'set', 'delete', 'clear']).default('list'),
         key: z.string().max(512).optional().describe('Required for get, set, and delete.'),
@@ -684,7 +685,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_storage_changes'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         action: z.enum(['get', 'baseline', 'compare', 'clear']).default('get')
           .describe('Set a baseline before the interaction, compare afterward, inspect the latest report, or clear it.'),
         includeValues: z.boolean().default(false)
@@ -702,7 +703,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_storage_usage'),
       inputSchema: {
-        tabId: z.string().optional().describe('Tab in your current workspace. Defaults to the workspace active tab.')
+        tabId: tabIdSchema.optional().describe('Tab in your current workspace. Defaults to the workspace active tab.')
       }
     },
     tabTool('browser_storage_usage', async ({ tabId }: { tabId?: string }) =>
@@ -714,7 +715,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_indexeddb'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         database: z.string().min(1).max(512).optional()
           .describe('Select a database to inspect its object-store schema.'),
         objectStore: z.string().min(1).max(512).optional()
@@ -739,7 +740,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_pwa'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         cacheName: z.string().min(1).max(512).optional()
           .describe('Select one Cache Storage cache by its current website-authored name.'),
         query: z.string().max(512).default('')
@@ -763,7 +764,7 @@ function createBrowserMcpServer(
     'browser_navigate',
     {
       description: toolDescription('browser_navigate'),
-      inputSchema: { url: z.string().min(1), tabId: z.string().optional() }
+      inputSchema: { url: z.string().min(1), tabId: tabIdSchema.optional() }
     },
     tabTool('browser_navigate', async ({ url, tabId }: { url: string; tabId?: string }) => textResult(await manager.navigate(url, tabId)))
   )
@@ -773,7 +774,7 @@ function createBrowserMcpServer(
       description: toolDescription('browser_history'),
       inputSchema: {
         action: z.enum(['back', 'forward', 'reload', 'reload-ignoring-cache', 'stop']),
-        tabId: z.string().optional()
+        tabId: tabIdSchema.optional()
       }
     },
     tabTool('browser_history', async ({ action, tabId }: { action: 'back' | 'forward' | 'reload' | 'reload-ignoring-cache' | 'stop'; tabId?: string }) => {
@@ -788,7 +789,7 @@ function createBrowserMcpServer(
     'browser_snapshot',
     {
       description: toolDescription('browser_snapshot'),
-      inputSchema: { tabId: z.string().optional(), maxChars: z.number().int().min(1_000).max(100_000).optional() }
+      inputSchema: { tabId: tabIdSchema.optional(), maxChars: z.number().int().min(1_000).max(100_000).optional() }
     },
     tabTool('browser_snapshot', async ({ tabId, maxChars }: { tabId?: string; maxChars?: number }) =>
       textResult(await manager.snapshot(tabId, maxChars))
@@ -799,7 +800,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_element_inspect'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         ref: z.string().max(200).optional(),
         selector: z.string().max(1_000).optional()
       }
@@ -815,7 +816,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_click'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         ref: z.string().optional(),
         selector: z.string().optional(),
         dialogAction: z.enum(['accept', 'dismiss']).optional(),
@@ -836,7 +837,7 @@ function createBrowserMcpServer(
       description: toolDescription('browser_dialog'),
       inputSchema: {
         action: z.enum(['accept', 'dismiss']),
-        tabId: z.string().optional()
+        tabId: tabIdSchema.optional()
       }
     },
     tabTool('browser_dialog', async ({ action, tabId }: {
@@ -849,7 +850,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_type'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         ref: z.string().optional(),
         selector: z.string().optional(),
         text: z.string(),
@@ -865,7 +866,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_select'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         ref: z.string().optional(),
         selector: z.string().optional(),
         value: z.string()
@@ -880,7 +881,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_fill_form'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         fields: z.array(z.object({
           ref: z.string().optional(),
           selector: z.string().optional(),
@@ -897,7 +898,7 @@ function createBrowserMcpServer(
     'browser_hover',
     {
       description: toolDescription('browser_hover'),
-      inputSchema: { tabId: z.string().optional(), ref: z.string().optional(), selector: z.string().optional() }
+      inputSchema: { tabId: tabIdSchema.optional(), ref: z.string().optional(), selector: z.string().optional() }
     },
     tabTool('browser_hover', async (input: { tabId?: string; ref?: string; selector?: string }) => textResult(await manager.hover(input)))
   )
@@ -906,7 +907,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_drag'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         sourceRef: z.string().optional(),
         sourceSelector: z.string().optional(),
         targetRef: z.string().optional(),
@@ -926,7 +927,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_scroll'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         ref: z.string().optional(),
         selector: z.string().optional(),
         deltaX: z.number().int().min(-100_000).max(100_000).optional(),
@@ -941,7 +942,7 @@ function createBrowserMcpServer(
     'browser_press',
     {
       description: toolDescription('browser_press'),
-      inputSchema: { key: z.string().min(1), tabId: z.string().optional() }
+      inputSchema: { key: z.string().min(1), tabId: tabIdSchema.optional() }
     },
     tabTool('browser_press', async ({ key, tabId }: { key: string; tabId?: string }) => {
       await manager.press(key, tabId)
@@ -953,7 +954,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_file_upload'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         ref: z.string().optional(),
         selector: z.string().optional(),
         paths: z.array(z.string()).min(1).max(20)
@@ -968,7 +969,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_wait'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         text: z.string().optional(),
         timeoutMs: z.number().int().min(1).max(60_000).optional()
       }
@@ -987,7 +988,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_emulate'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         reset: z.boolean().optional(),
         network: z.enum(['none', 'offline', 'slow-3g', 'slow-4g', 'fast-4g']).optional(),
         cacheDisabled: z.boolean().optional()
@@ -1050,7 +1051,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_zoom'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         action: z.enum(['in', 'out', 'reset', 'set']).default('reset'),
         percent: z.number().int().min(50).max(300).optional()
       }
@@ -1066,7 +1067,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_audio'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         muted: z.boolean()
       }
     },
@@ -1080,7 +1081,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_screenshot'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         fullPage: z.boolean().optional(),
         ref: z.string().optional(),
         selector: z.string().optional(),
@@ -1116,7 +1117,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_pdf_save'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         filename: z.string().min(1).max(180).optional(),
         landscape: z.boolean().optional(),
         pageSize: z.enum(['A4', 'Letter', 'Legal']).optional()
@@ -1134,7 +1135,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_resize'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         width: z.number().int().min(320).max(7680).optional(),
         height: z.number().int().min(240).max(4320).optional(),
         reset: z.boolean().optional()
@@ -1149,7 +1150,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_accessibility_audit'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         selector: z.string().min(1).max(1_024).optional(),
         standard: z.enum(['wcag-aa', 'wcag-aaa', 'best-practice', 'all']).optional(),
         maxViolations: z.number().int().min(1).max(50).optional(),
@@ -1180,7 +1181,7 @@ function createBrowserMcpServer(
     'browser_quality_audit',
     {
       description: toolDescription('browser_quality_audit'),
-      inputSchema: { tabId: z.string().optional() }
+      inputSchema: { tabId: tabIdSchema.optional() }
     },
     tabTool('browser_quality_audit', async ({ tabId }: { tabId?: string }) =>
       textResult(await manager.qualityAudit(tabId)))
@@ -1190,7 +1191,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_performance'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         settleMs: z.number().int().min(0).max(2_000).optional(),
         action: z.enum(['measure', 'set-baseline', 'clear-baseline']).optional()
       }
@@ -1209,7 +1210,7 @@ function createBrowserMcpServer(
     'browser_design_overview',
     {
       description: toolDescription('browser_design_overview'),
-      inputSchema: { tabId: z.string().optional() }
+      inputSchema: { tabId: tabIdSchema.optional() }
     },
     tabTool('browser_design_overview', async ({ tabId }: { tabId?: string }) =>
       textResult(await manager.designOverview(tabId)))
@@ -1218,7 +1219,7 @@ function createBrowserMcpServer(
     'browser_page_metadata',
     {
       description: toolDescription('browser_page_metadata'),
-      inputSchema: { tabId: z.string().optional() }
+      inputSchema: { tabId: tabIdSchema.optional() }
     },
     tabTool('browser_page_metadata', async ({ tabId }: { tabId?: string }) =>
       textResult(await manager.pageMetadata(tabId)))
@@ -1228,7 +1229,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_memory'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         action: z.enum([
           'measure',
           'set-baseline',
@@ -1260,7 +1261,7 @@ function createBrowserMcpServer(
     'browser_security',
     {
       description: toolDescription('browser_security'),
-      inputSchema: { tabId: z.string().optional() }
+      inputSchema: { tabId: tabIdSchema.optional() }
     },
     tabTool('browser_security', async ({ tabId }: { tabId?: string }) =>
       textResult(manager.securityReport(tabId)))
@@ -1270,7 +1271,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_code_coverage'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         action: z.enum(['get', 'start', 'stop', 'clear']).default('get'),
         mode: z.enum(['function', 'block']).default('function'),
         reload: z.boolean().default(true)
@@ -1293,7 +1294,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_cpu_profile'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         action: z.enum(['get', 'start', 'stop', 'clear']).default('get')
       }
     },
@@ -1310,7 +1311,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_debug_report'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         maxConsoleMessages: z.number().int().min(0).max(100).optional(),
         maxNetworkRequests: z.number().int().min(0).max(100).optional(),
         includeSuccessfulRequests: z.boolean().optional()
@@ -1338,7 +1339,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_repro'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         action: z.enum(['start', 'get', 'stop', 'clear']).default('get'),
         format: z.enum(['json', 'playwright']).default('json')
       }
@@ -1361,7 +1362,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_dom_changes'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         action: z.enum(['start', 'get', 'stop', 'clear']).default('get')
       }
     },
@@ -1378,7 +1379,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_visual_compare'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         action: z.enum(['get', 'set-baseline', 'compare', 'clear']).default('get'),
         threshold: z.number().int().min(0).max(255).optional(),
         settleMs: z.number().int().min(0).max(2_000).optional()
@@ -1409,7 +1410,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_console'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         level: z.enum(['debug', 'info', 'warning', 'error']).optional(),
         clear: z.boolean().optional()
       }
@@ -1424,7 +1425,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_diagnostic_logs'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         action: z.enum(['get', 'set', 'clear']).default('get'),
         preserveAcrossNavigation: z.boolean().optional().describe('Required for set. When false, a new main-frame navigation clears previous Console and Network evidence before recording the new document.')
       }
@@ -1445,7 +1446,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_issues'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         action: z.enum(['list', 'clear']).default('list')
       }
     },
@@ -1457,7 +1458,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_network'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         query: z.string().max(500).optional().describe(NETWORK_FILTER_QUERY_DESCRIPTION),
         resourceType: z.string().optional(),
         sortBy: z.enum(['start-time', 'end-time', 'duration', 'waiting', 'size', 'status']).optional(),
@@ -1494,7 +1495,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_network_wait'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         urlPattern: z.string().trim().min(1).max(2_048)
           .describe('Full URL wildcard pattern such as https://api.example.com/v1/* or *://*/orders?.'),
         method: z.string().trim().min(1).max(32).optional(),
@@ -1518,7 +1519,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_network_search'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         query: z.string().min(1).max(200),
         caseSensitive: z.boolean().optional(),
         maxResults: z.number().int().min(1).max(100).optional(),
@@ -1541,7 +1542,7 @@ function createBrowserMcpServer(
       description: toolDescription('browser_network_request'),
       inputSchema: {
         requestId: z.string().min(1),
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         maxChars: z.number().int().min(1_000).max(100_000).optional(),
         copyAs: z.enum(['json', 'curl', 'fetch']).optional()
       }
@@ -1562,7 +1563,7 @@ function createBrowserMcpServer(
       description: toolDescription('browser_network_replay'),
       inputSchema: {
         requestId: z.string().min(1).describe('Current Bronom request ID returned by browser_network.'),
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         confirmSideEffects: z.boolean().default(false).describe('Required for every method except GET and HEAD. Set true only after reviewing the request and accepting that replay can repeat writes or other side effects.')
       }
     },
@@ -1577,7 +1578,7 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_network_har'),
       inputSchema: {
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         query: z.string().max(500).optional().describe(NETWORK_FILTER_QUERY_DESCRIPTION),
         resourceType: z.string().max(64).optional(),
         errorsOnly: z.boolean().optional(),
@@ -1608,7 +1609,7 @@ function createBrowserMcpServer(
       description: toolDescription('browser_network_routes'),
       inputSchema: {
         action: z.enum(['list', 'add', 'move', 'remove', 'clear']).optional(),
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         routeId: z.string().optional(),
         direction: z.enum(['up', 'down']).optional()
           .describe('Move a first-match-wins condition one position up or down. Requires action move and routeId.'),
@@ -1681,7 +1682,7 @@ function createBrowserMcpServer(
       description: toolDescription('browser_evaluate'),
       inputSchema: {
         script: z.string().min(1),
-        tabId: z.string().optional(),
+        tabId: tabIdSchema.optional(),
         dialogAction: z.enum(['accept', 'dismiss']).optional()
       }
     },

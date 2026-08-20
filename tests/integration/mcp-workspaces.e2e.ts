@@ -67,7 +67,7 @@ test('requires visible workspaces and keeps each tool inside its selected worksp
   try {
     const availableTools = await first.listTools()
     const groupsTool = availableTools.tools.find((tool) => tool.name === 'browser_workspaces')
-    expect(groupsTool?.description).toContain('Use only the workspaceId returned by your own create call')
+    expect(groupsTool?.description).toContain('Use only the id returned by your own create call, or the fresh id returned when you reopen your own archive')
     expect(groupsTool?.description).toContain('never touch the human Default workspace')
     expect(groupsTool?.inputSchema).toMatchObject({
       properties: {
@@ -158,6 +158,12 @@ test('requires visible workspaces and keeps each tool inside its selected worksp
     const firstTabId = firstState.activeTabId
     expect(firstTabId).toMatch(UUID_V7_PATTERN)
     expect(firstState.tabs).toEqual([expect.objectContaining({ id: firstTabId, workspaceId: firstGroupId })])
+    const malformedTabId = await first.callTool({
+      name: 'browser_select_tab',
+      arguments: { workspaceId: firstGroupId, tabId: 'not-a-uuid-v7' }
+    }) as CallToolResult
+    expect(malformedTabId.isError).toBe(true)
+    expect(text(malformedTabId)).toContain('Tab ID must be a UUIDv7')
 
     const secondOpened = await second.callTool({
       name: 'browser_new_tab',
@@ -221,9 +227,21 @@ test('rejects duplicate human names instead of reusing another workspace identit
   }
 })
 
-test('caps active workspaces so abandoned zero-tab profiles cannot grow without bound', async ({ mcpPort, mcpToken }) => {
+test('caps new and restored workspaces so profiles cannot grow without bound', async ({ mcpPort, mcpToken }) => {
   const client = await connectClient('workspace-limit', mcpPort, mcpToken)
   try {
+    const archivedWorkspaceId = await createWorkspace(client, 'Archived at the limit')
+    await client.callTool({
+      name: 'browser_new_tab',
+      arguments: { workspaceId: archivedWorkspaceId, url: 'data:text/html,<title>Archived limit tab</title>' }
+    })
+    const archiveResult = await client.callTool({
+      name: 'browser_saved_workspaces',
+      arguments: { action: 'save', workspaceId: archivedWorkspaceId }
+    }) as CallToolResult
+    expect(archiveResult.isError, text(archiveResult)).not.toBe(true)
+    const archivedWorkspace = JSON.parse(text(archiveResult)) as { id: string }
+
     for (let index = 1; index < 50; index += 1) {
       const result = await client.callTool({
         name: 'browser_workspaces',
@@ -237,6 +255,18 @@ test('caps active workspaces so abandoned zero-tab profiles cannot grow without 
     }) as CallToolResult
     expect(overflow.isError).toBe(true)
     expect(text(overflow)).toContain('up to 50 active workspaces')
+
+    const restoredOverflow = await client.callTool({
+      name: 'browser_saved_workspaces',
+      arguments: { action: 'open', savedWorkspaceId: archivedWorkspace.id }
+    }) as CallToolResult
+    expect(restoredOverflow.isError).toBe(true)
+    expect(text(restoredOverflow)).toContain('up to 50 active workspaces')
+    const savedAfterRejectedRestore = await client.callTool({
+      name: 'browser_saved_workspaces',
+      arguments: { action: 'list' }
+    }) as CallToolResult
+    expect(JSON.parse(text(savedAfterRejectedRestore))).toContainEqual(expect.objectContaining({ id: archivedWorkspace.id }))
   } finally {
     await client.close()
   }
@@ -345,9 +375,7 @@ test('restores workspace identity and tabs after an application restart', async 
   }
 })
 
-test('migrates legacy human tabs into the durable Default workspace', async ({ profileDirectory, mcpPort }) => {
-  const legacyWorkspaceId = '8a513dbb-7f70-451e-8e27-f6c1d92168aa'
-  const duplicateLegacyWorkspaceId = 'f49d5e95-0e88-4120-b152-fb060ee0eff3'
+test('drops legacy tab state and starts with a fresh UUIDv7 workspace format', async ({ profileDirectory, mcpPort }) => {
   await writeFile(join(profileDirectory, 'tabs.json'), `${JSON.stringify({
     activeTabId: 'legacy-human-tab',
     splitView: {
@@ -358,18 +386,11 @@ test('migrates legacy human tabs into the durable Default workspace', async ({ p
     },
     mcpTabGroups: [
       {
-        id: legacyWorkspaceId,
+        id: '8a513dbb-7f70-451e-8e27-f6c1d92168aa',
         name: 'Legacy agent workspace',
         color: 'cyan',
         createdAt: '2026-08-14T09:00:00.000Z',
         lastUsedAt: '2026-08-14T09:01:00.000Z'
-      },
-      {
-        id: duplicateLegacyWorkspaceId,
-        name: ' legacy AGENT workspace ',
-        color: 'pink',
-        createdAt: '2026-08-14T09:02:00.000Z',
-        lastUsedAt: '2026-08-14T09:03:00.000Z'
       }
     ],
     tabs: [
@@ -382,69 +403,46 @@ test('migrates legacy human tabs into the durable Default workspace', async ({ p
         id: 'legacy-agent-tab',
         title: 'Legacy agent tab',
         url: 'data:text/html,<title>Legacy agent tab</title><h1>Agent</h1>',
-        mcpGroupId: legacyWorkspaceId
+        mcpGroupId: '8a513dbb-7f70-451e-8e27-f6c1d92168aa'
       }
     ]
   }, null, 2)}\n`, 'utf8')
 
   const instance = await launchBronom(profileDirectory, mcpPort)
   try {
-    await expect.poll(() => instance.window.evaluate(`window.bronom.getState().then((state) => ({
-      defaultWorkspace: state.mcpTabGroups.find((workspace) => workspace.isDefault),
-      legacyWorkspace: state.mcpTabGroups.find((workspace) => workspace.name === 'Legacy agent workspace'),
-      workspaceNames: state.mcpTabGroups.map((workspace) => workspace.name),
-      humanTab: state.tabs.find((tab) => tab.title === 'Legacy human tab'),
-      agentTab: state.tabs.find((tab) => tab.title === 'Legacy agent tab')
-    }))`)).toMatchObject({
-      defaultWorkspace: {
-        name: 'Default',
-        isDefault: true,
-        storageKind: 'default',
-        tabCount: 1
-      },
-      legacyWorkspace: {
-        name: 'Legacy agent workspace',
-        isDefault: false,
-        storageKind: 'isolated',
-        tabCount: 1
-      },
-      workspaceNames: expect.arrayContaining(['Default', 'Legacy agent workspace', 'legacy AGENT workspace (2)'])
-    })
-    const migrated = await instance.window.evaluate(`window.bronom.getState().then((state) => ({
+    const fresh = await instance.window.evaluate(`window.bronom.getState().then((state) => ({
       defaultWorkspaceId: state.mcpTabGroups.find((workspace) => workspace.isDefault)?.id,
-      legacyWorkspaceId: state.mcpTabGroups.find((workspace) => workspace.name === 'Legacy agent workspace')?.id,
+      workspaceNames: state.mcpTabGroups.map((workspace) => workspace.name),
       activeTabId: state.activeTabId,
       splitView: state.splitView,
-      humanTab: state.tabs.find((tab) => tab.title === 'Legacy human tab'),
-      agentTab: state.tabs.find((tab) => tab.title === 'Legacy agent tab')
+      tabs: state.tabs.map((tab) => ({ id: tab.id, title: tab.title, url: tab.url }))
     }))`) as {
       defaultWorkspaceId?: string
-      legacyWorkspaceId?: string
+      workspaceNames: string[]
       activeTabId?: string
       splitView?: { firstTabId: string; secondTabId: string }
-      humanTab?: { id: string; mcpGroupId?: string }
-      agentTab?: { id: string; mcpGroupId?: string }
+      tabs: Array<{ id: string; title: string; url: string }>
     }
-    expect(migrated.defaultWorkspaceId).toMatch(UUID_V7_PATTERN)
-    expect(migrated.legacyWorkspaceId).toMatch(UUID_V7_PATTERN)
-    expect(migrated.legacyWorkspaceId).not.toBe(legacyWorkspaceId)
-    expect(migrated.humanTab?.id).toMatch(UUID_V7_PATTERN)
-    expect(migrated.agentTab?.id).toMatch(UUID_V7_PATTERN)
-    expect(migrated.humanTab?.mcpGroupId).toBe(migrated.defaultWorkspaceId)
-    expect(migrated.agentTab?.mcpGroupId).toBe(migrated.legacyWorkspaceId)
-    expect(migrated.activeTabId).toBe(migrated.humanTab?.id)
-    expect(migrated.splitView).toMatchObject({
-      firstTabId: migrated.humanTab?.id,
-      secondTabId: migrated.agentTab?.id
-    })
+    expect(fresh.defaultWorkspaceId).toMatch(UUID_V7_PATTERN)
+    expect(fresh.workspaceNames).toEqual(['Default'])
+    expect(fresh.splitView).toBeUndefined()
+    expect(fresh.tabs).toEqual([expect.objectContaining({
+      id: expect.stringMatching(UUID_V7_PATTERN),
+      title: 'Bronom Home',
+      url: 'bronom://home/'
+    })])
+    expect(fresh.activeTabId).toBe(fresh.tabs[0]!.id)
     await expect.poll(async () => {
       const persisted = JSON.parse(await readFile(join(profileDirectory, 'tabs.json'), 'utf8')) as {
-        mcpTabGroups?: Array<{ id: string; name: string; storageId?: string }>
+        version?: number
+        tabs?: Array<{ id: string; title: string }>
+        mcpTabGroups?: Array<{ id: string; name: string }>
       }
-      return persisted.mcpTabGroups?.find((workspace) => workspace.name === 'Legacy agent workspace')
+      return persisted
     }).toMatchObject({
-      id: expect.stringMatching(UUID_V7_PATTERN),
-      storageId: expect.stringMatching(/^[0-9a-f-]{36}$/)
+      version: 2,
+      tabs: [expect.objectContaining({ id: expect.stringMatching(UUID_V7_PATTERN), title: 'Bronom Home' })],
+      mcpTabGroups: [expect.objectContaining({ id: expect.stringMatching(UUID_V7_PATTERN), name: 'Default' })]
     })
   } finally {
     await closeBronom(instance.app)
