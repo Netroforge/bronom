@@ -4,6 +4,8 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-08-20
+
 ### Changed
 
 - Keep open tabs out of address suggestions so entering or selecting an address always navigates the current tab and duplicate website addresses remain allowed; use tab search when the intent is to switch tabs.
