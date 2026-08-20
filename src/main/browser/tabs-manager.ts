@@ -618,6 +618,12 @@ interface BrowserSavedTabGroupInternal extends BrowserSavedTabGroupState {
   origins: string[]
 }
 
+interface BrowserWorkspaceOperation {
+  action: string
+  blocksNewTabs: boolean
+  token: symbol
+}
+
 interface BrowserNetworkRequestRecord extends BrowserNetworkRequest {
   captureSequence: number
   cdpRequestId?: string
@@ -807,6 +813,9 @@ export class BrowserTabsManager {
   private readonly tabs = new Map<string, BrowserTab>()
   private readonly mcpTabGroups = new Map<string, BrowserTabGroup>()
   private readonly savedTabGroups = new Map<string, BrowserSavedTabGroupInternal>()
+  private readonly workspaceOperations = new Map<string, BrowserWorkspaceOperation>()
+  private readonly savedWorkspaceOperations = new Map<string, BrowserWorkspaceOperation>()
+  private workspaceStorageOperation: BrowserWorkspaceOperation | null = null
   private readonly store: TabStateStore
   private activeTabId: string | null = null
   private splitView: BrowserSplitViewState | null = null
@@ -1057,26 +1066,28 @@ export class BrowserTabsManager {
     }
     this.mcpTabGroups.set(group.id, group)
     if (storage === 'fork-default') {
-      try {
-        const defaultGroup = this.defaultHumanGroupId ? this.mcpTabGroups.get(this.defaultHumanGroupId) : undefined
-        const selectedOrigins = normalizeWorkspaceStorageOrigins(origins ?? defaultGroup?.origins ?? [])
-        await transferWorkspaceStorage({
-          sourcePartition: this.options.partition,
-          targetPartition: workspacePartition(this.options.partition, storageId),
-          origins: selectedOrigins,
-          copyAllCookies: origins === undefined,
-          copyLocalStorage: true,
-          configureSession: this.options.configureSession
-        })
-        group.origins = selectedOrigins
-      } catch (error) {
-        this.mcpTabGroups.delete(group.id)
-        await destroyWorkspaceStorage(
-          workspacePartition(this.options.partition, storageId),
-          this.options.configureSession
-        ).catch(() => undefined)
-        throw error
-      }
+      await this.withWorkspaceStorageOperation(group.id, 'creating the workspace from Default', async () => {
+        try {
+          const defaultGroup = this.defaultHumanGroupId ? this.mcpTabGroups.get(this.defaultHumanGroupId) : undefined
+          const selectedOrigins = normalizeWorkspaceStorageOrigins(origins ?? defaultGroup?.origins ?? [])
+          await transferWorkspaceStorage({
+            sourcePartition: this.options.partition,
+            targetPartition: workspacePartition(this.options.partition, storageId),
+            origins: selectedOrigins,
+            copyAllCookies: origins === undefined,
+            copyLocalStorage: true,
+            configureSession: this.options.configureSession
+          })
+          group.origins = selectedOrigins
+        } catch (error) {
+          this.mcpTabGroups.delete(group.id)
+          await destroyWorkspaceStorage(
+            workspacePartition(this.options.partition, storageId),
+            this.options.configureSession
+          ).catch(() => undefined)
+          throw error
+        }
+      }, true)
     }
     this.changed()
     return this.requireMcpTabGroup(group.id)
@@ -1090,6 +1101,7 @@ export class BrowserTabsManager {
     if (updates.name === undefined && updates.color === undefined) throw new TypeError('A workspace name or color is required.')
     const group = this.mcpTabGroups.get(groupId)
     if (!group) throw new Error(`Unknown workspace: ${groupId}. List workspaces with browser_workspaces or create one first.`)
+    this.assertWorkspaceIdle(groupId)
     if (updates.name !== undefined) {
       const name = normalizedWorkspaceName(updates.name)
       if (group.id === this.defaultHumanGroupId && name !== group.name) {
@@ -1163,29 +1175,31 @@ export class BrowserTabsManager {
     if (!workspace) throw new Error(`Unknown workspace: ${options.workspaceId}.`)
     if (workspace.id === this.defaultHumanGroupId) throw new Error('Default already is the shared workspace.')
     if (!workspace.storageId) throw new Error('This legacy workspace must finish isolation before storage can be transferred.')
-    const defaultWorkspace = this.defaultHumanGroupId ? this.mcpTabGroups.get(this.defaultHumanGroupId) : undefined
-    if (!defaultWorkspace) throw new Error('Default workspace is unavailable.')
-    const origins = normalizeWorkspaceStorageOrigins(options.origins ?? (
-      options.direction === 'from-default' ? defaultWorkspace.origins : workspace.origins
-    ))
-    const isolatedPartition = workspacePartition(this.options.partition, workspace.storageId)
-    const result = await transferWorkspaceStorage({
-      sourcePartition: options.direction === 'from-default' ? this.options.partition : isolatedPartition,
-      targetPartition: options.direction === 'from-default' ? isolatedPartition : this.options.partition,
-      origins,
-      copyAllCookies: options.origins === undefined,
-      copyLocalStorage: true,
-      configureSession: this.options.configureSession
+    return this.withWorkspaceStorageOperation(workspace.id, 'copying workspace storage', async () => {
+      const defaultWorkspace = this.defaultHumanGroupId ? this.mcpTabGroups.get(this.defaultHumanGroupId) : undefined
+      if (!defaultWorkspace) throw new Error('Default workspace is unavailable.')
+      const origins = normalizeWorkspaceStorageOrigins(options.origins ?? (
+        options.direction === 'from-default' ? defaultWorkspace.origins : workspace.origins
+      ))
+      const isolatedPartition = workspacePartition(this.options.partition, workspace.storageId!)
+      const result = await transferWorkspaceStorage({
+        sourcePartition: options.direction === 'from-default' ? this.options.partition : isolatedPartition,
+        targetPartition: options.direction === 'from-default' ? isolatedPartition : this.options.partition,
+        origins,
+        copyAllCookies: options.origins === undefined,
+        copyLocalStorage: true,
+        configureSession: this.options.configureSession
+      })
+      const target = options.direction === 'from-default' ? workspace : defaultWorkspace
+      target.origins = normalizeWorkspaceStorageOrigins([...target.origins, ...origins])
+      target.lastUsedAt = new Date().toISOString()
+      this.changed()
+      return {
+        workspaceId: workspace.id,
+        direction: options.direction,
+        ...result
+      }
     })
-    const target = options.direction === 'from-default' ? workspace : defaultWorkspace
-    target.origins = normalizeWorkspaceStorageOrigins([...target.origins, ...origins])
-    target.lastUsedAt = new Date().toISOString()
-    this.changed()
-    return {
-      workspaceId: workspace.id,
-      direction: options.direction,
-      ...result
-    }
   }
 
   requireTabInMcpGroup(groupId: string, tabId?: string): string {
@@ -1229,6 +1243,12 @@ export class BrowserTabsManager {
   }
 
   async closeMcpTabGroup(groupId: string, preserveStorage = false): Promise<BrowserTabGroupState[]> {
+    return this.withWorkspaceOperation(groupId, preserveStorage ? 'archiving the workspace' : 'closing the workspace', () => (
+      this.closeMcpTabGroupInternal(groupId, preserveStorage)
+    ))
+  }
+
+  private async closeMcpTabGroupInternal(groupId: string, preserveStorage = false): Promise<BrowserTabGroupState[]> {
     const group = this.mcpTabGroups.get(groupId)
     if (!group) throw new Error(`Unknown workspace: ${groupId}.`)
     if (groupId === this.defaultHumanGroupId) throw new Error('The Default workspace cannot be closed or deleted.')
@@ -1257,36 +1277,44 @@ export class BrowserTabsManager {
   }
 
   async saveAndCloseTabGroup(groupId: string): Promise<BrowserSavedTabGroupState> {
-    const group = this.requireMcpTabGroup(groupId)
-    if (group.isDefault) throw new Error('The Default workspace cannot be archived, closed, or deleted.')
-    const tabs = this.orderedTabs().filter((tab) => tab.mcpGroupId === groupId)
-    if (!tabs.length) throw new Error(`Workspace "${group.name}" has no tabs to archive.`)
-    if (this.savedTabGroups.size >= MAX_SAVED_TAB_GROUPS) throw new Error(`Bronom can keep up to ${MAX_SAVED_TAB_GROUPS} archived workspaces.`)
-    const internalGroup = this.mcpTabGroups.get(groupId)!
-    const saved: BrowserSavedTabGroupInternal = {
-      id: uuidV7(),
-      name: group.name,
-      color: group.color,
-      savedAt: new Date().toISOString(),
-      storageOriginCount: internalGroup.origins.length,
-      ...(internalGroup.storageId ? { storageId: internalGroup.storageId } : {}),
-      origins: [...internalGroup.origins],
-      tabs: tabs.map((tab) => ({ title: tab.title, url: tab.url, pinned: tab.pinned }))
-    }
-    await this.closeMcpTabGroup(groupId, true)
-    this.savedTabGroups.set(saved.id, saved)
-    this.changed()
-    return {
-      id: saved.id,
-      name: saved.name,
-      color: saved.color,
-      savedAt: saved.savedAt,
-      storageOriginCount: saved.origins.length,
-      tabs: saved.tabs.map((tab) => ({ ...tab }))
-    }
+    return this.withWorkspaceOperation(groupId, 'archiving the workspace', async () => {
+      const group = this.requireMcpTabGroup(groupId)
+      if (group.isDefault) throw new Error('The Default workspace cannot be archived, closed, or deleted.')
+      const tabs = this.orderedTabs().filter((tab) => tab.mcpGroupId === groupId)
+      if (!tabs.length) throw new Error(`Workspace "${group.name}" has no tabs to archive.`)
+      if (this.savedTabGroups.size >= MAX_SAVED_TAB_GROUPS) throw new Error(`Bronom can keep up to ${MAX_SAVED_TAB_GROUPS} archived workspaces.`)
+      const internalGroup = this.mcpTabGroups.get(groupId)!
+      const saved: BrowserSavedTabGroupInternal = {
+        id: uuidV7(),
+        name: group.name,
+        color: group.color,
+        savedAt: new Date().toISOString(),
+        storageOriginCount: internalGroup.origins.length,
+        ...(internalGroup.storageId ? { storageId: internalGroup.storageId } : {}),
+        origins: [...internalGroup.origins],
+        tabs: tabs.map((tab) => ({ title: tab.title, url: tab.url, pinned: tab.pinned }))
+      }
+      await this.closeMcpTabGroupInternal(groupId, true)
+      this.savedTabGroups.set(saved.id, saved)
+      this.changed()
+      return {
+        id: saved.id,
+        name: saved.name,
+        color: saved.color,
+        savedAt: saved.savedAt,
+        storageOriginCount: saved.origins.length,
+        tabs: saved.tabs.map((tab) => ({ ...tab }))
+      }
+    })
   }
 
   async restoreSavedTabGroup(savedGroupId: string): Promise<BrowserTabGroupState> {
+    return this.withSavedWorkspaceOperation(savedGroupId, 'restoring the archived workspace', () => (
+      this.restoreSavedTabGroupInternal(savedGroupId)
+    ))
+  }
+
+  private async restoreSavedTabGroupInternal(savedGroupId: string): Promise<BrowserTabGroupState> {
     const saved = this.savedTabGroups.get(savedGroupId)
     if (!saved) throw new Error(`Unknown archived workspace: ${savedGroupId}.`)
     this.assertWorkspaceNameAvailable(saved.name, undefined, savedGroupId)
@@ -1307,42 +1335,47 @@ export class BrowserTabsManager {
     this.savedTabGroups.delete(savedGroupId)
     this.mcpTabGroups.set(restoredGroup.id, restoredGroup)
     const restored = this.requireMcpTabGroup(restoredGroup.id)
-    try {
-      for (const savedTab of saved.tabs) {
-        await this.createTab({
-          title: savedTab.title,
-          url: savedTab.url,
-          pinned: savedTab.pinned,
-          mcpGroupId: restored.id,
-          active: false
-        })
+    return this.withWorkspaceOperation(restored.id, 'restoring the archived workspace', async () => {
+      try {
+        for (const savedTab of saved.tabs) {
+          await this.createTab({
+            title: savedTab.title,
+            url: savedTab.url,
+            pinned: savedTab.pinned,
+            mcpGroupId: restored.id,
+            allowBusyWorkspace: true,
+            active: false
+          })
+        }
+        const tabs = [...this.tabs.values()].filter((tab) => tab.mcpGroupId === restored.id)
+        if (tabs.length) this.selectTab(tabs[tabs.length - 1]!.id)
+        this.changed()
+        return this.requireMcpTabGroup(restored.id)
+      } catch (error) {
+        // Restoring an archive must not destroy its durable workspace storage if
+        // one of the tabs fails to reopen. The archive remains available to retry.
+        await this.closeMcpTabGroupInternal(restored.id, true).catch(() => undefined)
+        this.savedTabGroups.set(savedGroupId, saved)
+        this.changed()
+        throw error
       }
-      const tabs = [...this.tabs.values()].filter((tab) => tab.mcpGroupId === restored.id)
-      if (tabs.length) this.selectTab(tabs[tabs.length - 1]!.id)
-      this.changed()
-      return this.requireMcpTabGroup(restored.id)
-    } catch (error) {
-      // Restoring an archive must not destroy its durable workspace storage if
-      // one of the tabs fails to reopen. The archive remains available to retry.
-      await this.closeMcpTabGroup(restored.id, true).catch(() => undefined)
-      this.savedTabGroups.set(savedGroupId, saved)
-      this.changed()
-      throw error
-    }
+    })
   }
 
   async deleteSavedTabGroup(savedGroupId: string): Promise<BrowserSavedTabGroupState[]> {
-    const saved = this.savedTabGroups.get(savedGroupId)
-    if (!saved) throw new Error(`Unknown saved workspace: ${savedGroupId}.`)
-    if (saved.storageId) {
-      await destroyWorkspaceStorage(
-        workspacePartition(this.options.partition, saved.storageId),
-        this.options.configureSession
-      )
-    }
-    this.savedTabGroups.delete(savedGroupId)
-    this.changed()
-    return this.listSavedTabGroups()
+    return this.withSavedWorkspaceOperation(savedGroupId, 'deleting the archived workspace', async () => {
+      const saved = this.savedTabGroups.get(savedGroupId)
+      if (!saved) throw new Error(`Unknown saved workspace: ${savedGroupId}.`)
+      if (saved.storageId) {
+        await destroyWorkspaceStorage(
+          workspacePartition(this.options.partition, saved.storageId),
+          this.options.configureSession
+        )
+      }
+      this.savedTabGroups.delete(savedGroupId)
+      this.changed()
+      return this.listSavedTabGroups()
+    })
   }
 
   getActiveTab(): BrowserTab {
@@ -5085,9 +5118,11 @@ export class BrowserTabsManager {
     loadOptions?: LoadURLOptions
     active: boolean
     mcpGroupId?: string
+    allowBusyWorkspace?: boolean
   }): Promise<BrowserTab> {
     if (this.tabs.size >= MAX_TABS) throw new Error(`Tab limit reached (${MAX_TABS})`)
     if (options.mcpGroupId && !this.mcpTabGroups.has(options.mcpGroupId)) throw new Error(`Unknown workspace: ${options.mcpGroupId}`)
+    if (options.mcpGroupId && !options.allowBusyWorkspace) this.assertWorkspaceCanOpenTab(options.mcpGroupId)
     const id = options.id ?? uuidV7()
     const url = normalizeAddress(options.url, this.options.getSearchEngine?.())
     const workspace = options.mcpGroupId ? this.mcpTabGroups.get(options.mcpGroupId) : undefined
@@ -5194,6 +5229,79 @@ export class BrowserTabsManager {
     ))
     const collision = activeCollision ?? savedCollision
     if (collision) throw new Error(`A workspace named "${name}" already exists. Workspace names must be unique.`)
+  }
+
+  private assertWorkspaceIdle(workspaceId: string): void {
+    const operation = this.workspaceOperations.get(workspaceId)
+    if (!operation) return
+    const name = this.mcpTabGroups.get(workspaceId)?.name ?? workspaceId
+    throw new Error(`Workspace "${name}" is busy ${operation.action}. Try again after that operation finishes.`)
+  }
+
+  private assertWorkspaceCanOpenTab(workspaceId: string): void {
+    const operation = this.workspaceOperations.get(workspaceId)
+    if (!operation?.blocksNewTabs) return
+    const name = this.mcpTabGroups.get(workspaceId)?.name ?? workspaceId
+    throw new Error(`Workspace "${name}" is busy ${operation.action}. Try again after that operation finishes.`)
+  }
+
+  private async withWorkspaceOperation<T>(
+    workspaceId: string,
+    action: string,
+    operation: () => Promise<T>,
+    blocksNewTabs = true
+  ): Promise<T> {
+    if (!this.mcpTabGroups.has(workspaceId)) throw new Error(`Unknown workspace: ${workspaceId}.`)
+    this.assertWorkspaceIdle(workspaceId)
+    const current: BrowserWorkspaceOperation = { action, blocksNewTabs, token: Symbol(action) }
+    this.workspaceOperations.set(workspaceId, current)
+    try {
+      return await operation()
+    } finally {
+      if (this.workspaceOperations.get(workspaceId)?.token === current.token) {
+        this.workspaceOperations.delete(workspaceId)
+      }
+    }
+  }
+
+  private async withSavedWorkspaceOperation<T>(
+    savedWorkspaceId: string,
+    action: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    if (!this.savedTabGroups.has(savedWorkspaceId)) throw new Error(`Unknown archived workspace: ${savedWorkspaceId}.`)
+    const existing = this.savedWorkspaceOperations.get(savedWorkspaceId)
+    if (existing) {
+      const name = this.savedTabGroups.get(savedWorkspaceId)?.name ?? savedWorkspaceId
+      throw new Error(`Archived workspace "${name}" is busy ${existing.action}. Try again after that operation finishes.`)
+    }
+    const current: BrowserWorkspaceOperation = { action, blocksNewTabs: true, token: Symbol(action) }
+    this.savedWorkspaceOperations.set(savedWorkspaceId, current)
+    try {
+      return await operation()
+    } finally {
+      if (this.savedWorkspaceOperations.get(savedWorkspaceId)?.token === current.token) {
+        this.savedWorkspaceOperations.delete(savedWorkspaceId)
+      }
+    }
+  }
+
+  private async withWorkspaceStorageOperation<T>(
+    workspaceId: string,
+    action: string,
+    operation: () => Promise<T>,
+    blocksNewTabs = false
+  ): Promise<T> {
+    if (this.workspaceStorageOperation) {
+      throw new Error(`Workspace storage is busy ${this.workspaceStorageOperation.action}. Try again after that operation finishes.`)
+    }
+    const current: BrowserWorkspaceOperation = { action, blocksNewTabs, token: Symbol(action) }
+    this.workspaceStorageOperation = current
+    try {
+      return await this.withWorkspaceOperation(workspaceId, action, operation, blocksNewTabs)
+    } finally {
+      if (this.workspaceStorageOperation?.token === current.token) this.workspaceStorageOperation = null
+    }
   }
 
   private attachTabEvents(tab: BrowserTab): void {

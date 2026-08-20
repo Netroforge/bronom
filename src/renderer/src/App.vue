@@ -2399,17 +2399,25 @@ function handleTabSearchKeydown(event: KeyboardEvent): void {
 }
 
 async function restoreSavedTabGroup(group: BrowserSavedTabGroupState): Promise<void> {
-  tabSearchOpen.value = false
-  await syncState(browser.restoreSavedTabGroup(group.id))
+  try {
+    await syncState(browser.restoreSavedTabGroup(group.id))
+    tabSearchOpen.value = false
+  } catch (error) {
+    showAppToast('error', 'Restore workspace failed', friendlyUiError(error, 'The archived workspace could not be restored.'))
+  }
 }
 
 async function deleteSavedTabGroup(event: MouseEvent, group: BrowserSavedTabGroupState): Promise<void> {
   event.stopPropagation()
   if (!window.confirm(`Delete archived workspace "${group.name}" and its ${group.tabs.length} saved ${group.tabs.length === 1 ? 'tab' : 'tabs'}? Its isolated browser data will also be deleted.`)) return
-  await syncState(browser.deleteSavedTabGroup(group.id))
-  tabSearchSelection.value = Math.min(tabSearchSelection.value, Math.max(0, tabSearchResults.value.length - 1))
-  await nextTick()
-  tabSearchInput.value?.focus()
+  try {
+    await syncState(browser.deleteSavedTabGroup(group.id))
+    tabSearchSelection.value = Math.min(tabSearchSelection.value, Math.max(0, tabSearchResults.value.length - 1))
+    await nextTick()
+    tabSearchInput.value?.focus()
+  } catch (error) {
+    showAppToast('error', 'Delete workspace failed', friendlyUiError(error, 'The archived workspace could not be deleted.'))
+  }
 }
 
 function tabSearchMeta(tab: BrowserTabState): string {
