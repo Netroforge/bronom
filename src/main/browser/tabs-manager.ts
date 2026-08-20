@@ -512,6 +512,10 @@ interface BrowserTab {
   audible: boolean
   muted: boolean
   view: WebContentsView
+  // Keep the WebContents handle independently from WebContentsView. Electron
+  // can invalidate the view's webContents getter during native-view teardown,
+  // while the original handle remains safe to query with isDestroyed().
+  webContents: WebContents
   consoleMessages: BrowserConsoleMessageRecord[]
   pendingRuntimeConsoleMessages: BrowserConsoleMessage[]
   networkRequests: BrowserNetworkRequestRecord[]
@@ -917,7 +921,7 @@ export class BrowserTabsManager {
     }
     this.layout()
     this.restoringLayout = false
-    if (this.activeTabId) this.tabs.get(this.activeTabId)?.view.webContents.focus()
+    if (this.activeTabId) this.tabs.get(this.activeTabId)?.webContents.focus()
     this.memorySaverTimer = setInterval(() => {
       void this.sweepMemorySaver(false).catch((error) => console.error('[browser] Memory Saver sweep failed:', error))
     }, MEMORY_SAVER_SWEEP_MS)
@@ -1339,7 +1343,7 @@ export class BrowserTabsManager {
 
   async reloadHome(): Promise<void> {
     const home = [...this.tabs.values()].find((tab) => isBronomHomeUrl(tab.url))
-    if (home) home.view.webContents.reload()
+    if (home) home.webContents.reload()
   }
 
   async manageStorage(options: BrowserStorageOptions): Promise<BrowserStorageResult> {
@@ -1364,7 +1368,7 @@ export class BrowserTabsManager {
     }
 
     const storageName = options.kind === 'local-storage' ? 'localStorage' : 'sessionStorage'
-    const raw = await tab.view.webContents.executeJavaScript(`(() => {
+    const raw = await tab.webContents.executeJavaScript(`(() => {
       const storage = window[${JSON.stringify(storageName)}];
       const action = ${JSON.stringify(action)};
       const key = ${JSON.stringify(key)};
@@ -1405,7 +1409,7 @@ export class BrowserTabsManager {
       throw new Error('IndexedDB inspection is available only for HTTP and HTTPS tabs.')
     }
     const normalized = normalizeBrowserIndexedDbOptions(options)
-    const result = await tab.view.webContents.executeJavaScriptInIsolatedWorld(
+    const result = await tab.webContents.executeJavaScriptInIsolatedWorld(
       INDEXED_DB_WORLD_ID,
       [{ code: indexedDbPageScript(normalized) }],
       false
@@ -1436,8 +1440,8 @@ export class BrowserTabsManager {
     }
 
     try {
-      const raw = await this.withDebugger(tab.view.webContents, () =>
-        tab.view.webContents.debugger.sendCommand('Storage.getUsageAndQuota', { origin: pageUrl.origin }) as Promise<{
+      const raw = await this.withDebugger(tab.webContents, () =>
+        tab.webContents.debugger.sendCommand('Storage.getUsageAndQuota', { origin: pageUrl.origin }) as Promise<{
           usage?: number
           quota?: number
           overrideActive?: boolean
@@ -1452,7 +1456,7 @@ export class BrowserTabsManager {
         raw
       })
     } catch (error) {
-      const estimate = await tab.view.webContents.executeJavaScriptInIsolatedWorld(
+      const estimate = await tab.webContents.executeJavaScriptInIsolatedWorld(
         STORAGE_USAGE_WORLD_ID,
         [{ code: `(() => navigator.storage?.estimate?.().then((value) => ({
           usage: value.usage,
@@ -1485,7 +1489,7 @@ export class BrowserTabsManager {
       throw new Error('Offline app inspection is available only for HTTP and HTTPS tabs.')
     }
     const normalized = normalizeBrowserPwaOptions(options)
-    const rawRegistrations = await tab.view.webContents.executeJavaScriptInIsolatedWorld(
+    const rawRegistrations = await tab.webContents.executeJavaScriptInIsolatedWorld(
       PWA_INSPECTOR_WORLD_ID,
       [{ code: pwaRegistrationsPageScript() }],
       false
@@ -1545,12 +1549,12 @@ export class BrowserTabsManager {
     }
 
     try {
-      await this.withDebugger(tab.view.webContents, async () => {
+      await this.withDebugger(tab.webContents, async () => {
         try {
-          const manifestResult = await tab.view.webContents.debugger.sendCommand('Page.getAppManifest') as CdpAppManifestResult
+          const manifestResult = await tab.webContents.debugger.sendCommand('Page.getAppManifest') as CdpAppManifestResult
           let installabilityErrors: CdpInstallabilityError[] = []
           try {
-            const installabilityResult = await tab.view.webContents.debugger.sendCommand('Page.getInstallabilityErrors') as {
+            const installabilityResult = await tab.webContents.debugger.sendCommand('Page.getInstallabilityErrors') as {
               installabilityErrors?: CdpInstallabilityError[]
             }
             installabilityErrors = installabilityResult.installabilityErrors ?? []
@@ -1566,7 +1570,7 @@ export class BrowserTabsManager {
           report.installabilityInspectionAvailable = false
           report.manifestInspectionError = redactDiagnosticText(error instanceof Error ? error.message : String(error)).slice(0, 1_000)
         }
-        const cacheNames = await tab.view.webContents.debugger.sendCommand('CacheStorage.requestCacheNames', {
+        const cacheNames = await tab.webContents.debugger.sendCommand('CacheStorage.requestCacheNames', {
           securityOrigin: pageUrl.origin
         }) as {
           caches?: Array<{ cacheId: string; cacheName: string }>
@@ -1585,7 +1589,7 @@ export class BrowserTabsManager {
           report.cacheInspectionError = `Cache Storage cache not found: ${redactDiagnosticText(normalized.cacheName)}`
           return
         }
-        const entriesResult = await tab.view.webContents.debugger.sendCommand('CacheStorage.requestEntries', {
+        const entriesResult = await tab.webContents.debugger.sendCommand('CacheStorage.requestEntries', {
           cacheId: selected.cacheId,
           skipCount: normalized.offset,
           pageSize: normalized.limit,
@@ -1747,7 +1751,7 @@ export class BrowserTabsManager {
   }
 
   private async captureStorageSnapshot(tab: BrowserTab, origin: string): Promise<BrowserStorageSnapshot> {
-    const domStorage = await tab.view.webContents.executeJavaScript(`(() => {
+    const domStorage = await tab.webContents.executeJavaScript(`(() => {
       const limit = ${MAX_STORAGE_SNAPSHOT_ITEMS_PER_KIND};
       const previewLimit = ${MAX_STORAGE_CHANGE_VALUE_BYTES};
       const fingerprint = (value) => {
@@ -1782,7 +1786,7 @@ export class BrowserTabsManager {
       local: { itemCount: number; entries: Array<{ key: string; fingerprint: string; valueBytes: number; valuePreview: string }> }
       session: { itemCount: number; entries: Array<{ key: string; fingerprint: string; valueBytes: number; valuePreview: string }> }
     }
-    const cookies = await tab.view.webContents.session.cookies.get({ url: tab.url })
+    const cookies = await tab.webContents.session.cookies.get({ url: tab.url })
     const cookieEntries = cookies.map((cookie) => {
       const partitionKey = 'partitionKey' in cookie && cookie.partitionKey
         ? JSON.stringify(cookie.partitionKey)
@@ -1871,12 +1875,12 @@ export class BrowserTabsManager {
     value: string | undefined,
     includeValues: boolean
   ): Promise<BrowserStorageResult> {
-    const cookies = await tab.view.webContents.session.cookies.get({ url: tab.url })
+    const cookies = await tab.webContents.session.cookies.get({ url: tab.url })
     let changed: boolean | undefined
     if (action === 'set') {
       const protectedMatch = cookies.some((cookie) => cookie.name === key && cookie.httpOnly)
       if (protectedMatch) throw new Error('HttpOnly cookies are protected and cannot be replaced by the storage manager.')
-      await tab.view.webContents.session.cookies.set({
+      await tab.webContents.session.cookies.set({
         url: pageUrl.origin,
         name: key!,
         value: value!,
@@ -1889,14 +1893,14 @@ export class BrowserTabsManager {
       const matches = cookies.filter((cookie) => cookie.name === key)
       const editable = matches.filter((cookie) => !cookie.httpOnly)
       if (matches.length && !editable.length) throw new Error('HttpOnly cookies are protected and cannot be deleted by the storage manager.')
-      for (const cookie of editable) await tab.view.webContents.session.cookies.remove(this.cookieRemovalUrl(cookie), cookie.name)
+      for (const cookie of editable) await tab.webContents.session.cookies.remove(this.cookieRemovalUrl(cookie), cookie.name)
       changed = editable.length > 0
     } else if (action === 'clear') {
       const editable = cookies.filter((cookie) => !cookie.httpOnly)
-      for (const cookie of editable) await tab.view.webContents.session.cookies.remove(this.cookieRemovalUrl(cookie), cookie.name)
+      for (const cookie of editable) await tab.webContents.session.cookies.remove(this.cookieRemovalUrl(cookie), cookie.name)
       changed = editable.length > 0
     }
-    const next = await tab.view.webContents.session.cookies.get({ url: tab.url })
+    const next = await tab.webContents.session.cookies.get({ url: tab.url })
     const selected = action === 'get' ? next.filter((cookie) => cookie.name === key) : next
     const rawItems: Array<[string, string, Omit<BrowserStorageItem, 'key' | 'value' | 'valueBytes'>]> = selected.map((cookie) => [
       cookie.name,
@@ -1997,7 +2001,7 @@ export class BrowserTabsManager {
       passwordField.focus();
       return true;
     })()`
-    return this.withAgentInput(tab.view.webContents, async () => Boolean(await tab.view.webContents.executeJavaScript(script, true)))
+    return this.withAgentInput(tab.webContents, async () => Boolean(await tab.webContents.executeJavaScript(script, true)))
   }
 
   async newTab(options: NewTabOptions = {}): Promise<BrowserState> {
@@ -2102,13 +2106,13 @@ export class BrowserTabsManager {
       this.changed(false)
       try {
         if (navigationHistory?.entries.length) {
-          await tab.view.webContents.navigationHistory.restore(navigationHistory)
+          await tab.webContents.navigationHistory.restore(navigationHistory)
         } else {
-          await tab.view.webContents.loadURL(restoreUrl)
+          await tab.webContents.loadURL(restoreUrl)
         }
       } catch (error) {
         if (isAbortedLoad(error)) return
-        await tab.view.webContents.loadURL(restoreUrl)
+        await tab.webContents.loadURL(restoreUrl)
       }
     })()
     tab.wakePromise = wake
@@ -2345,7 +2349,7 @@ export class BrowserTabsManager {
   async toggleDevTools(tabId?: string): Promise<boolean> {
     const tab = this.getTab(tabId)
     await this.wakeTab(tab.id)
-    const webContents = tab.view.webContents
+    const webContents = tab.webContents
     if (tab.url.startsWith('bronom://home')) return false
     if (this.isHumanInteractionLocked(tab)) {
       if (webContents.isDevToolsOpened()) webContents.closeDevTools()
@@ -2373,7 +2377,7 @@ export class BrowserTabsManager {
 
   selectTab(tabId: string): BrowserState {
     const next = this.getTab(tabId)
-    if (next.view.webContents.isDestroyed()) {
+    if (next.webContents.isDestroyed()) {
       throw new Error('This tab renderer is no longer available. Close the tab and reopen it from Recently closed.')
     }
     next.lastActiveAt = Date.now()
@@ -2382,7 +2386,7 @@ export class BrowserTabsManager {
       this.activeTabId = next.id
       this.markTabActiveInGroup(next)
       this.layout()
-      next.view.webContents.focus()
+      next.webContents.focus()
       this.changed()
       return this.getState()
     }
@@ -2430,7 +2434,7 @@ export class BrowserTabsManager {
     }
     this.window.contentView.addChildView(target.view)
     this.layout()
-    current.view.webContents.focus()
+    current.webContents.focus()
     this.changed()
     return this.getState()
   }
@@ -2463,20 +2467,20 @@ export class BrowserTabsManager {
     if (otherTab) this.window.contentView.removeChildView(otherTab.view)
     this.splitView = null
     this.layout()
-    activeTab.view.webContents.focus()
+    activeTab.webContents.focus()
     this.changed()
     return this.getState()
   }
 
   async closeTab(tabId: string): Promise<BrowserState> {
     const tab = this.getTab(tabId)
-    const webContents = tab.view.webContents
+    const webContents = tab.webContents
     const wasActive = tab.id === this.activeTabId
     // A WebContentsView may be destroyed independently (renderer failure,
     // devtools teardown, or an Electron close race). Purge those stale siblings
     // before any child-view transition so they cannot poison selection/layout.
     for (const candidate of [...this.tabs.values()]) {
-      if (candidate.id === tab.id || !candidate.view.webContents.isDestroyed()) continue
+      if (candidate.id === tab.id || !candidate.webContents.isDestroyed()) continue
       if (this.splitViewContains(candidate.id)) this.splitView = null
       if (this.activeTabId === candidate.id) this.activeTabId = null
       this.rememberClosedTab(candidate)
@@ -2508,13 +2512,13 @@ export class BrowserTabsManager {
     const nextId = wasActive
       ? orderedCandidates.find((candidateId) => {
         const candidate = this.tabs.get(candidateId)
-        return candidate !== undefined && candidate.id !== tab.id && !candidate.view.webContents.isDestroyed()
+        return candidate !== undefined && candidate.id !== tab.id && !candidate.webContents.isDestroyed()
       })
       : undefined
 
     if (splitPartnerId) {
       const splitPartner = this.tabs.get(splitPartnerId)
-      if (splitPartner && splitPartner.id !== nextId && !splitPartner.view.webContents.isDestroyed()) {
+      if (splitPartner && splitPartner.id !== nextId && !splitPartner.webContents.isDestroyed()) {
         this.window.contentView.removeChildView(splitPartner.view)
       }
       this.splitView = null
@@ -2533,7 +2537,7 @@ export class BrowserTabsManager {
 
     if (!this.tabs.size || (wasActive && !nextId)) {
       for (const candidate of [...this.tabs.values()]) {
-        if (!candidate.view.webContents.isDestroyed()) continue
+        if (!candidate.webContents.isDestroyed()) continue
         this.rememberClosedTab(candidate)
         this.removeTabRecord(candidate)
       }
@@ -2568,7 +2572,7 @@ export class BrowserTabsManager {
   private removeTabRecord(tab: BrowserTab): void {
     this.tabs.delete(tab.id)
     this.mcpActivitiesByTab.delete(tab.id)
-    this.webContentsToTab.delete(tab.view.webContents.id)
+    this.webContentsToTab.delete(tab.webContents.id)
     if (!tab.mcpGroupId) return
     const group = this.mcpTabGroups.get(tab.mcpGroupId)
     if (group?.activeTabId !== tab.id) return
@@ -2583,24 +2587,24 @@ export class BrowserTabsManager {
       throw new Error('Bronom Home is a human application page and cannot be opened inside an agent workspace.')
     }
     this.prepareDiagnosticNavigation(tab)
-    await tab.view.webContents.loadURL(normalized)
+    await tab.webContents.loadURL(normalized)
     return this.getState()
   }
 
   async back(tabId?: string): Promise<BrowserState> {
     const tab = this.getTab(tabId)
-    if (tab.view.webContents.navigationHistory.canGoBack()) {
+    if (tab.webContents.navigationHistory.canGoBack()) {
       this.prepareDiagnosticNavigation(tab)
-      await tab.view.webContents.navigationHistory.goBack()
+      await tab.webContents.navigationHistory.goBack()
     }
     return this.getState()
   }
 
   async forward(tabId?: string): Promise<BrowserState> {
     const tab = this.getTab(tabId)
-    if (tab.view.webContents.navigationHistory.canGoForward()) {
+    if (tab.webContents.navigationHistory.canGoForward()) {
       this.prepareDiagnosticNavigation(tab)
-      await tab.view.webContents.navigationHistory.goForward()
+      await tab.webContents.navigationHistory.goForward()
     }
     return this.getState()
   }
@@ -2620,19 +2624,19 @@ export class BrowserTabsManager {
     tab.pageProblem = undefined
     this.changed(false)
     if (pageProblem?.kind === 'load-error' || pageProblem?.kind === 'renderer-gone') {
-      await tab.view.webContents.loadURL(pageProblem.url, ignoreCache
+      await tab.webContents.loadURL(pageProblem.url, ignoreCache
         ? { extraHeaders: 'Cache-Control: no-cache\r\nPragma: no-cache\r\n' }
         : undefined).catch(() => undefined)
     } else if (pageProblem?.kind === 'unresponsive') {
-      const webContentsId = tab.view.webContents.id
+      const webContentsId = tab.webContents.id
       this.recoveringRenderers.add(webContentsId)
-      tab.view.webContents.forcefullyCrashRenderer()
-      if (ignoreCache) tab.view.webContents.reloadIgnoringCache()
-      else tab.view.webContents.reload()
+      tab.webContents.forcefullyCrashRenderer()
+      if (ignoreCache) tab.webContents.reloadIgnoringCache()
+      else tab.webContents.reload()
       setTimeout(() => this.recoveringRenderers.delete(webContentsId), 5_000).unref()
     } else {
-      if (ignoreCache) tab.view.webContents.reloadIgnoringCache()
-      else tab.view.webContents.reload()
+      if (ignoreCache) tab.webContents.reloadIgnoringCache()
+      else tab.webContents.reload()
     }
     await this.waitForPage(tab.id, 30_000)
     return this.getState()
@@ -2643,7 +2647,7 @@ export class BrowserTabsManager {
     options: { tabId?: string; forward?: boolean; findNext?: boolean } = {}
   ): Promise<{ activeMatchOrdinal: number; matches: number }> {
     if (!query || query.length > 1_000) throw new Error('Find query must contain between 1 and 1,000 characters')
-    const webContents = this.getTab(options.tabId).view.webContents
+    const webContents = this.getTab(options.tabId).webContents
     return new Promise((resolve, reject) => {
       let requestId = -1
       const cleanup = (): void => {
@@ -2674,12 +2678,12 @@ export class BrowserTabsManager {
   }
 
   stopFindInPage(tabId?: string): void {
-    const webContents = this.getTab(tabId).view.webContents
+    const webContents = this.getTab(tabId).webContents
     webContents.stopFindInPage('clearSelection')
   }
 
   setZoom(options: { tabId?: string; action: 'in' | 'out' | 'reset' | 'set'; percent?: number }): BrowserState {
-    const webContents = this.getTab(options.tabId).view.webContents
+    const webContents = this.getTab(options.tabId).webContents
     const current = Math.round(webContents.getZoomFactor() * 100)
     let percent: number
     if (options.action === 'reset') percent = 100
@@ -2698,14 +2702,14 @@ export class BrowserTabsManager {
 
   setTabMuted(tabId: string, muted: boolean): BrowserState {
     const tab = this.getTab(tabId)
-    tab.view.webContents.setAudioMuted(muted)
+    tab.webContents.setAudioMuted(muted)
     tab.muted = muted
     this.changed(false)
     return this.getState()
   }
 
   stop(tabId?: string): BrowserState {
-    this.getTab(tabId).view.webContents.stop()
+    this.getTab(tabId).webContents.stop()
     return this.getState()
   }
 
@@ -2713,7 +2717,7 @@ export class BrowserTabsManager {
     const tab = this.getTab(tabId)
     tab.humanInteractionLocked = locked
     if (this.isHumanInteractionLocked(tab)) {
-      if (tab.view.webContents.isDevToolsOpened()) tab.view.webContents.closeDevTools()
+      if (tab.webContents.isDevToolsOpened()) tab.webContents.closeDevTools()
       this.window.webContents.focus()
     }
     this.changed()
@@ -2724,7 +2728,7 @@ export class BrowserTabsManager {
     this.allHumanInteractionLocked = locked
     if (locked) {
       for (const tab of this.tabs.values()) {
-        if (tab.view.webContents.isDevToolsOpened()) tab.view.webContents.closeDevTools()
+        if (tab.webContents.isDevToolsOpened()) tab.webContents.closeDevTools()
       }
       this.window.webContents.focus()
     }
@@ -2734,14 +2738,14 @@ export class BrowserTabsManager {
 
   async snapshot(tabId?: string, maxChars = 30_000): Promise<string> {
     const tab = this.getTab(tabId)
-    return tab.view.webContents.executeJavaScript(snapshotScript(Math.min(Math.max(maxChars, 1_000), 100_000)), true)
+    return tab.webContents.executeJavaScript(snapshotScript(Math.min(Math.max(maxChars, 1_000), 100_000)), true)
   }
 
   async accessibilityAudit(options: BrowserAccessibilityAuditOptions = {}): Promise<BrowserAccessibilityAudit> {
     const tab = this.getTab(options.tabId)
     if (isBronomHomeUrl(tab.url)) throw new Error('Open a website tab before running an accessibility audit')
     const normalized = normalizeAccessibilityAuditOptions(options)
-    const result = await tab.view.webContents.executeJavaScriptInIsolatedWorld(
+    const result = await tab.webContents.executeJavaScriptInIsolatedWorld(
       ACCESSIBILITY_AUDIT_WORLD_ID,
       [{ code: accessibilityAuditPageScript(axe.source, normalized) }],
       false
@@ -2757,7 +2761,7 @@ export class BrowserTabsManager {
     const tab = this.getTab(options.tabId)
     if (isBronomHomeUrl(tab.url)) throw new Error('Open a website tab before measuring performance')
     const normalized = normalizePerformanceOptions(options)
-    const result = await tab.view.webContents.executeJavaScriptInIsolatedWorld(
+    const result = await tab.webContents.executeJavaScriptInIsolatedWorld(
       PERFORMANCE_AUDIT_WORLD_ID,
       [{ code: performanceAuditPageScript(webVitalsSource, normalized, webVitalsVersion) }],
       false
@@ -2800,7 +2804,7 @@ export class BrowserTabsManager {
   async designOverview(tabId?: string): Promise<BrowserDesignOverviewReport> {
     const tab = this.getTab(tabId)
     if (isBronomHomeUrl(tab.url)) throw new Error('Open a website tab before capturing a design overview')
-    const result = await tab.view.webContents.executeJavaScriptInIsolatedWorld(
+    const result = await tab.webContents.executeJavaScriptInIsolatedWorld(
       DESIGN_OVERVIEW_WORLD_ID,
       [{ code: designOverviewPageScript() }],
       false
@@ -2811,7 +2815,7 @@ export class BrowserTabsManager {
   async pageMetadata(tabId?: string): Promise<BrowserPageMetadataReport> {
     const tab = this.getTab(tabId)
     if (isBronomHomeUrl(tab.url)) throw new Error('Open a website tab before inspecting page metadata')
-    const result = await tab.view.webContents.executeJavaScriptInIsolatedWorld(
+    const result = await tab.webContents.executeJavaScriptInIsolatedWorld(
       PAGE_METADATA_WORLD_ID,
       [{ code: pageMetadataScript() }],
       false
@@ -2901,17 +2905,17 @@ export class BrowserTabsManager {
       }
       tab.codeCoverage = { recording }
       try {
-        await this.withDebugger(tab.view.webContents, async () => {
-          await tab.view.webContents.debugger.sendCommand('DOM.enable')
-          await tab.view.webContents.debugger.sendCommand('CSS.enable')
-          await tab.view.webContents.debugger.sendCommand('Debugger.enable')
-          await tab.view.webContents.debugger.sendCommand('Profiler.enable')
-          await tab.view.webContents.debugger.sendCommand('Profiler.startPreciseCoverage', {
+        await this.withDebugger(tab.webContents, async () => {
+          await tab.webContents.debugger.sendCommand('DOM.enable')
+          await tab.webContents.debugger.sendCommand('CSS.enable')
+          await tab.webContents.debugger.sendCommand('Debugger.enable')
+          await tab.webContents.debugger.sendCommand('Profiler.enable')
+          await tab.webContents.debugger.sendCommand('Profiler.startPreciseCoverage', {
             callCount: false,
             detailed: mode === 'block',
             allowTriggeredUpdates: false
           })
-          await tab.view.webContents.debugger.sendCommand('CSS.startRuleUsageTracking')
+          await tab.webContents.debugger.sendCommand('CSS.startRuleUsageTracking')
         })
       } catch (error) {
         tab.codeCoverage = undefined
@@ -2920,7 +2924,7 @@ export class BrowserTabsManager {
       this.changed(false)
       if (options.reload !== false) {
         this.prepareDiagnosticNavigation(tab)
-        tab.view.webContents.reloadIgnoringCache()
+        tab.webContents.reloadIgnoringCache()
       }
       return this.codeCoverageResult(tab, action)
     }
@@ -2976,8 +2980,8 @@ export class BrowserTabsManager {
     tab: BrowserTab,
     recording: NonNullable<BrowserCodeCoverageInternal['recording']>
   ): Promise<BrowserCodeCoverageReport> {
-    return this.withDebugger(tab.view.webContents, async () => {
-      const webDebugger = tab.view.webContents.debugger
+    return this.withDebugger(tab.webContents, async () => {
+      const webDebugger = tab.webContents.debugger
       let truncated = false
       try {
         const [javascript, css] = await Promise.all([
@@ -3101,8 +3105,8 @@ export class BrowserTabsManager {
   }
 
   private async discardCodeCoverageRecording(tab: BrowserTab): Promise<void> {
-    await this.withDebugger(tab.view.webContents, async () => {
-      const webDebugger = tab.view.webContents.debugger
+    await this.withDebugger(tab.webContents, async () => {
+      const webDebugger = tab.webContents.debugger
       await webDebugger.sendCommand('Profiler.stopPreciseCoverage').catch(() => undefined)
       await webDebugger.sendCommand('Profiler.disable').catch(() => undefined)
       await webDebugger.sendCommand('CSS.stopRuleUsageTracking').catch(() => undefined)
@@ -3132,10 +3136,10 @@ export class BrowserTabsManager {
         }
       }
       try {
-        await this.withDebugger(tab.view.webContents, async () => {
-          await tab.view.webContents.debugger.sendCommand('Profiler.enable')
-          await tab.view.webContents.debugger.sendCommand('Profiler.setSamplingInterval', { interval: 1_000 })
-          await tab.view.webContents.debugger.sendCommand('Profiler.start')
+        await this.withDebugger(tab.webContents, async () => {
+          await tab.webContents.debugger.sendCommand('Profiler.enable')
+          await tab.webContents.debugger.sendCommand('Profiler.setSamplingInterval', { interval: 1_000 })
+          await tab.webContents.debugger.sendCommand('Profiler.start')
         })
       } catch (error) {
         tab.cpuProfile = undefined
@@ -3156,11 +3160,11 @@ export class BrowserTabsManager {
     const recording = tab.cpuProfile?.recording
     if (!recording) throw new Error('Start a JavaScript CPU profile before stopping it')
     try {
-      const response = await this.withDebugger(tab.view.webContents, async () => {
+      const response = await this.withDebugger(tab.webContents, async () => {
         try {
-          return await tab.view.webContents.debugger.sendCommand('Profiler.stop') as { profile: CdpCpuProfile }
+          return await tab.webContents.debugger.sendCommand('Profiler.stop') as { profile: CdpCpuProfile }
         } finally {
-          await tab.view.webContents.debugger.sendCommand('Profiler.disable').catch(() => undefined)
+          await tab.webContents.debugger.sendCommand('Profiler.disable').catch(() => undefined)
         }
       })
       const summary = summarizeCpuProfile(response.profile, redactNetworkUrl)
@@ -3206,8 +3210,8 @@ export class BrowserTabsManager {
   }
 
   private async discardCpuProfileRecording(tab: BrowserTab): Promise<void> {
-    await this.withDebugger(tab.view.webContents, async () => {
-      const webDebugger = tab.view.webContents.debugger
+    await this.withDebugger(tab.webContents, async () => {
+      const webDebugger = tab.webContents.debugger
       await webDebugger.sendCommand('Profiler.stop').catch(() => undefined)
       await webDebugger.sendCommand('Profiler.disable').catch(() => undefined)
     }).catch(() => undefined)
@@ -3244,9 +3248,9 @@ export class BrowserTabsManager {
       }
       tab.memoryAllocation = { recording }
       try {
-        await this.withDebugger(tab.view.webContents, async () => {
-          await tab.view.webContents.debugger.sendCommand('HeapProfiler.enable')
-          await tab.view.webContents.debugger.sendCommand('HeapProfiler.startSampling', {
+        await this.withDebugger(tab.webContents, async () => {
+          await tab.webContents.debugger.sendCommand('HeapProfiler.enable')
+          await tab.webContents.debugger.sendCommand('HeapProfiler.startSampling', {
             samplingInterval: 32_768,
             stackDepth: 64
           })
@@ -3271,11 +3275,11 @@ export class BrowserTabsManager {
       const recording = tab.memoryAllocation?.recording
       if (!recording) throw new Error('Start memory allocation sampling before stopping it')
       try {
-        const response = await this.withDebugger(tab.view.webContents, async () => {
+        const response = await this.withDebugger(tab.webContents, async () => {
           try {
-            return await tab.view.webContents.debugger.sendCommand('HeapProfiler.stopSampling') as { profile: CdpSamplingHeapProfile }
+            return await tab.webContents.debugger.sendCommand('HeapProfiler.stopSampling') as { profile: CdpSamplingHeapProfile }
           } finally {
-            await tab.view.webContents.debugger.sendCommand('HeapProfiler.disable').catch(() => undefined)
+            await tab.webContents.debugger.sendCommand('HeapProfiler.disable').catch(() => undefined)
           }
         })
         const summary = summarizeAllocationProfile(response.profile, redactNetworkUrl)
@@ -3348,25 +3352,25 @@ export class BrowserTabsManager {
   }
 
   private async discardMemoryAllocationRecording(tab: BrowserTab): Promise<void> {
-    await this.withDebugger(tab.view.webContents, async () => {
-      const webDebugger = tab.view.webContents.debugger
+    await this.withDebugger(tab.webContents, async () => {
+      const webDebugger = tab.webContents.debugger
       await webDebugger.sendCommand('HeapProfiler.stopSampling').catch(() => undefined)
       await webDebugger.sendCommand('HeapProfiler.disable').catch(() => undefined)
     }).catch(() => undefined)
   }
 
   private async captureMemoryMeasurement(tab: BrowserTab, collectGarbage: boolean): Promise<BrowserMemoryMeasurement> {
-    return this.withDebugger(tab.view.webContents, async () => {
-      if (collectGarbage) await tab.view.webContents.debugger.sendCommand('HeapProfiler.collectGarbage')
-      await tab.view.webContents.debugger.sendCommand('Performance.enable', { timeDomain: 'timeTicks' })
+    return this.withDebugger(tab.webContents, async () => {
+      if (collectGarbage) await tab.webContents.debugger.sendCommand('HeapProfiler.collectGarbage')
+      await tab.webContents.debugger.sendCommand('Performance.enable', { timeDomain: 'timeTicks' })
       const [heap, performance] = await Promise.all([
-        tab.view.webContents.debugger.sendCommand('Runtime.getHeapUsage') as Promise<{
+        tab.webContents.debugger.sendCommand('Runtime.getHeapUsage') as Promise<{
           usedSize: number
           totalSize: number
           embedderHeapUsedSize: number
           backingStorageSize: number
         }>,
-        tab.view.webContents.debugger.sendCommand('Performance.getMetrics') as Promise<{
+        tab.webContents.debugger.sendCommand('Performance.getMetrics') as Promise<{
           metrics: Array<{ name: string; value: number }>
         }>
       ])
@@ -3417,7 +3421,7 @@ export class BrowserTabsManager {
   private async selectElement(tabId?: string): Promise<BrowserElementInspection | null> {
     const tab = this.getTab(tabId)
     if (isBronomHomeUrl(tab.url)) throw new Error('Open a website tab before selecting an element')
-    const webContents = tab.view.webContents
+    const webContents = tab.webContents
     const existing = this.elementPickerSessions.get(webContents.id)
     if (existing) {
       existing.canceled = true
@@ -3460,7 +3464,7 @@ export class BrowserTabsManager {
     const tab = this.getTab(options.tabId)
     if (isBronomHomeUrl(tab.url)) throw new Error('Open a website tab before inspecting an element')
     this.validateTarget(options)
-    const raw = await tab.view.webContents.executeJavaScriptInIsolatedWorld(
+    const raw = await tab.webContents.executeJavaScriptInIsolatedWorld(
       ELEMENT_INSPECTION_WORLD_ID,
       [{ code: elementInspectionScript(options) }],
       false
@@ -3475,18 +3479,18 @@ export class BrowserTabsManager {
 
   async cancelElementPicker(tabId?: string): Promise<boolean> {
     const tab = this.getTab(tabId)
-    const session = this.elementPickerSessions.get(tab.view.webContents.id)
+    const session = this.elementPickerSessions.get(tab.webContents.id)
     if (session) {
       session.canceled = true
       session.resolve({ canceled: true })
     }
-    return tab.view.webContents.executeJavaScript(cancelElementPickerScript(), true) as Promise<boolean>
+    return tab.webContents.executeJavaScript(cancelElementPickerScript(), true) as Promise<boolean>
   }
 
   async captureScreenshotArea(tabId?: string): Promise<{ canceled: boolean; data?: Buffer }> {
     const tab = this.getTab(tabId)
     if (isBronomHomeUrl(tab.url)) throw new Error('Open a website tab before capturing an area')
-    const webContents = tab.view.webContents
+    const webContents = tab.webContents
     const existing = this.screenshotAreaSessions.get(webContents.id)
     if (existing) {
       existing.canceled = true
@@ -3523,12 +3527,12 @@ export class BrowserTabsManager {
 
   async cancelScreenshotArea(tabId?: string): Promise<boolean> {
     const tab = this.getTab(tabId)
-    const session = this.screenshotAreaSessions.get(tab.view.webContents.id)
+    const session = this.screenshotAreaSessions.get(tab.webContents.id)
     if (session) {
       session.canceled = true
       session.resolve({ canceled: true })
     }
-    return tab.view.webContents.executeJavaScript(cancelScreenshotAreaScript(), true) as Promise<boolean>
+    return tab.webContents.executeJavaScript(cancelScreenshotAreaScript(), true) as Promise<boolean>
   }
 
   private async captureScreenshotAreaSelection(tab: BrowserTab, selection: BrowserScreenshotAreaResult): Promise<Buffer> {
@@ -3541,7 +3545,7 @@ export class BrowserTabsManager {
     if (clip.width < 2 || clip.height < 2 || viewport.width < 1 || viewport.height < 1) {
       throw new Error('Drag a larger screenshot area')
     }
-    const webContents = tab.view.webContents
+    const webContents = tab.webContents
 
     return this.withRenderableTab(tab, async () => {
       const bounds = tab.view.getBounds()
@@ -3568,7 +3572,7 @@ export class BrowserTabsManager {
   } & BrowserDialogHandlingOptions): Promise<unknown> {
     this.validateTarget(target)
     const tab = this.getTab(target.tabId)
-    const webContents = tab.view.webContents
+    const webContents = tab.webContents
     const dialogAction = target.dialogAction
     return this.withAgentInput(webContents, () => {
       if (dialogAction === undefined) return webContents.executeJavaScript(targetActionScript('click', target), true)
@@ -3592,27 +3596,27 @@ export class BrowserTabsManager {
   }): Promise<unknown> {
     this.validateTarget(target)
     const tab = this.getTab(target.tabId)
-    return this.withAgentInput(tab.view.webContents, () =>
-      tab.view.webContents.executeJavaScript(targetActionScript('type', target, target.text, target.submit), true))
+    return this.withAgentInput(tab.webContents, () =>
+      tab.webContents.executeJavaScript(targetActionScript('type', target, target.text, target.submit), true))
   }
 
   async select(target: { tabId?: string; ref?: string; selector?: string; value: string }): Promise<unknown> {
     this.validateTarget(target)
     const tab = this.getTab(target.tabId)
-    return this.withAgentInput(tab.view.webContents, () =>
-      tab.view.webContents.executeJavaScript(targetActionScript('select', target, target.value), true))
+    return this.withAgentInput(tab.webContents, () =>
+      tab.webContents.executeJavaScript(targetActionScript('select', target, target.value), true))
   }
 
   async fillForm(tabId: string | undefined, fields: BrowserFormField[]): Promise<unknown> {
     if (!fields.length || fields.length > 50) throw new Error('Provide between 1 and 50 form fields')
     for (const field of fields) this.validateTarget(field)
-    const webContents = this.getTab(tabId).view.webContents
+    const webContents = this.getTab(tabId).webContents
     return this.withAgentInput(webContents, () => webContents.executeJavaScript(fillFormScript(fields), true))
   }
 
   async hover(target: { tabId?: string; ref?: string; selector?: string }): Promise<unknown> {
     this.validateTarget(target)
-    const webContents = this.getTab(target.tabId).view.webContents
+    const webContents = this.getTab(target.tabId).webContents
     const point = await webContents.executeJavaScript(targetPointScript(target), true) as { x: number; y: number; tag: string }
     await this.withAgentInput(webContents, () => this.withDebugger(webContents, () =>
       webContents.debugger.sendCommand('Input.dispatchMouseEvent', {
@@ -3635,7 +3639,7 @@ export class BrowserTabsManager {
     const target = { ref: options.targetRef, selector: options.targetSelector }
     this.validateTarget(source)
     this.validateTarget(target)
-    const webContents = this.getTab(options.tabId).view.webContents
+    const webContents = this.getTab(options.tabId).webContents
     const from = await webContents.executeJavaScript(targetPointScript(source), true) as { x: number; y: number; tag: string }
     const to = await webContents.executeJavaScript(targetPointScript(target), true) as { x: number; y: number; tag: string }
     await this.withAgentInput(webContents, () => this.withDebugger(webContents, async () => {
@@ -3661,7 +3665,7 @@ export class BrowserTabsManager {
 
   async resizeViewport(width: number | undefined, height: number | undefined, reset: boolean, tabId?: string): Promise<unknown> {
     const tab = this.getTab(tabId)
-    const webContents = tab.view.webContents
+    const webContents = tab.webContents
     if (reset) await this.emulate({ tabId: tab.id, viewport: null })
     else {
       if (width === undefined || height === undefined) throw new Error('width and height are required unless reset is true')
@@ -3822,9 +3826,9 @@ export class BrowserTabsManager {
     if (!next.extraHttpHeaderNames?.length) delete next.extraHttpHeaderNames
     if (next.renderingDebug && !Object.values(next.renderingDebug).some(Boolean)) delete next.renderingDebug
     try {
-      await this.withDebugger(tab.view.webContents, () => this.applyEmulationState(tab, next, nextHeaders))
+      await this.withDebugger(tab.webContents, () => this.applyEmulationState(tab, next, nextHeaders))
     } catch (error) {
-      await this.withDebugger(tab.view.webContents, () => this.applyEmulationState(tab, previous, previousHeaders)).catch(() => undefined)
+      await this.withDebugger(tab.webContents, () => this.applyEmulationState(tab, previous, previousHeaders)).catch(() => undefined)
       throw error
     }
     tab.emulation = next
@@ -3845,7 +3849,7 @@ export class BrowserTabsManager {
     const target = options.ref || options.selector ? targetExpression(options) : 'document.scrollingElement'
     const deltaX = Math.min(Math.max(options.deltaX ?? 0, -100_000), 100_000)
     const deltaY = Math.min(Math.max(options.deltaY ?? 600, -100_000), 100_000)
-    return tab.view.webContents.executeJavaScript(`(() => {
+    return tab.webContents.executeJavaScript(`(() => {
       const target = ${target};
       if (!target) throw new Error('Scroll target not found.');
       if (target === document.scrollingElement) window.scrollBy({ left: ${deltaX}, top: ${deltaY}, behavior: 'instant' });
@@ -3995,7 +3999,7 @@ export class BrowserTabsManager {
 
   async networkRequests(tabId?: string, clear = false): Promise<BrowserNetworkRequest[]> {
     const tab = this.getTab(tabId)
-    if (!tab.view.webContents.isDevToolsOpened()) await this.ensureDialogMonitoring(tab)
+    if (!tab.webContents.isDevToolsOpened()) await this.ensureDialogMonitoring(tab)
     const requests = tab.networkRequests.map((request) => this.networkRequestSummary(request))
     if (clear) tab.networkRequests = []
     return requests
@@ -4205,7 +4209,7 @@ export class BrowserTabsManager {
     if (isBronomHomeUrl(tab.url)) throw new Error('Open a website tab before recording DOM changes')
     if (!['start', 'get', 'stop', 'clear'].includes(action)) throw new Error('Unsupported DOM changes action')
 
-    const result = await tab.view.webContents.executeJavaScriptInIsolatedWorld(
+    const result = await tab.webContents.executeJavaScriptInIsolatedWorld(
       DOM_CHANGES_WORLD_ID,
       [{ code: domChangesPageScript(action) }],
       false
@@ -4237,11 +4241,11 @@ export class BrowserTabsManager {
   async inspectorIssues(tabId?: string, clear = false): Promise<BrowserInspectorIssuesReport> {
     const tab = this.getTab(tabId)
     if (isBronomHomeUrl(tab.url)) throw new Error('Open a website tab before inspecting browser issues')
-    if (!clear && !tab.view.webContents.isDevToolsOpened()) {
+    if (!clear && !tab.webContents.isDevToolsOpened()) {
       await this.ensureDialogMonitoring(tab)
-      if (tab.view.webContents.debugger.isAttached()) {
+      if (tab.webContents.debugger.isAttached()) {
         try {
-          const checked = await tab.view.webContents.debugger.sendCommand('Audits.checkFormsIssues') as {
+          const checked = await tab.webContents.debugger.sendCommand('Audits.checkFormsIssues') as {
             formIssues?: unknown[]
           }
           for (const details of checked.formIssues ?? []) {
@@ -4281,7 +4285,7 @@ export class BrowserTabsManager {
       caveats: [
         'Issues are browser-generated diagnostics for the current document, not a complete quality audit.',
         'URLs are bounded and redact credentials, fragments, and security-related query values; cookie values and raw issue payloads are never returned.',
-        tab.view.webContents.isDevToolsOpened()
+        tab.webContents.isDevToolsOpened()
           ? 'Developer Tools currently owns diagnostics for this tab; close it and reload to collect new issues in Bronom.'
           : 'Reload the page before reproducing a problem when you need issues emitted during startup.'
       ]
@@ -4315,8 +4319,8 @@ export class BrowserTabsManager {
       responseBody = { available: false, reason: 'Response body was omitted from this sanitized export.' }
     } else if (request.cdpRequestId && request.bodyAvailable && !request.eventSourceMessages) {
       try {
-        const captured = await this.withDebugger(tab.view.webContents, () =>
-          tab.view.webContents.debugger.sendCommand('Network.getResponseBody', { requestId: request.cdpRequestId })
+        const captured = await this.withDebugger(tab.webContents, () =>
+          tab.webContents.debugger.sendCommand('Network.getResponseBody', { requestId: request.cdpRequestId })
         ) as { body?: string; base64Encoded?: boolean }
         responseBody = {
           available: true,
@@ -4406,8 +4410,8 @@ export class BrowserTabsManager {
     const cursor = tab.networkRequests.at(-1)
     if (!cursor) throw new Error('The captured request is no longer retained. Call browser_network again for a current request ID.')
     try {
-      await this.withDebugger(tab.view.webContents, () =>
-        tab.view.webContents.debugger.sendCommand('Network.replayXHR', { requestId: request.cdpRequestId })
+      await this.withDebugger(tab.webContents, () =>
+        tab.webContents.debugger.sendCommand('Network.replayXHR', { requestId: request.cdpRequestId })
       )
     } catch (error) {
       if (this.isUnavailableCdpMethod(error)) {
@@ -4628,7 +4632,7 @@ export class BrowserTabsManager {
       const file = await stat(path)
       if (!file.isFile()) throw new Error(`Path is not a file: ${path}`)
     }
-    const webContents = this.getTab(target.tabId).view.webContents
+    const webContents = this.getTab(target.tabId).webContents
     await this.withDebugger(webContents, async () => {
       const evaluated = await webContents.debugger.sendCommand('Runtime.evaluate', {
         expression: targetExpression(target),
@@ -4646,7 +4650,7 @@ export class BrowserTabsManager {
   }
 
   async press(key: string, tabId?: string): Promise<void> {
-    const webContents = this.getTab(tabId).view.webContents
+    const webContents = this.getTab(tabId).webContents
     await this.withAgentInput(webContents, async () => {
       webContents.focus()
       webContents.sendInputEvent({ type: 'keyDown', keyCode: key })
@@ -4656,7 +4660,7 @@ export class BrowserTabsManager {
   }
 
   async evaluate(script: string, tabId?: string, dialog: BrowserDialogHandlingOptions = {}): Promise<unknown> {
-    const webContents = this.getTab(tabId).view.webContents
+    const webContents = this.getTab(tabId).webContents
     if (dialog.promptText !== undefined) throw new Error('Text prompts are supported by browser_click; Electron does not implement prompt() evaluation')
     // DOM events dispatched by evaluated page scripts are untrusted and the
     // human picker ignores them directly. Do not mark the whole evaluation as
@@ -4670,7 +4674,7 @@ export class BrowserTabsManager {
     action: BrowserDialogAction
   }> {
     const tab = this.getTab(tabId)
-    const webContents = tab.view.webContents
+    const webContents = tab.webContents
     await this.withDebugger(webContents, () => webContents.debugger.sendCommand('Page.handleJavaScriptDialog', {
       accept: action === 'accept'
     }))
@@ -4690,7 +4694,7 @@ export class BrowserTabsManager {
   private async captureVisual(tab: BrowserTab, settleMs: number): Promise<BrowserVisualCapture> {
     return this.withRenderableTab(tab, async () => {
       if (settleMs > 0) await new Promise<void>((resolve) => setTimeout(resolve, settleMs))
-      const captured = await tab.view.webContents.capturePage()
+      const captured = await tab.webContents.capturePage()
       if (captured.isEmpty()) throw new Error('Could not capture the visible page for comparison')
       const original = captured.getSize()
       const bounded = boundedScreenshotSize(
@@ -4710,7 +4714,7 @@ export class BrowserTabsManager {
       return {
         snapshot: {
           capturedAt: new Date().toISOString(),
-          url: tab.view.webContents.getURL() || tab.url,
+          url: tab.webContents.getURL() || tab.url,
           width: size.width,
           height: size.height
         },
@@ -4731,7 +4735,7 @@ export class BrowserTabsManager {
       action,
       tabId: tab.id,
       title: tab.title,
-      url: tab.view.webContents.getURL() || tab.url,
+      url: tab.webContents.getURL() || tab.url,
       threshold
     }
 
@@ -4847,7 +4851,7 @@ export class BrowserTabsManager {
     }
     if (hasTarget && options.clip) throw new Error('Provide an element target or clip rectangle, not both')
     return this.withRenderableTab(tab, async () => {
-      const webContents = tab.view.webContents
+      const webContents = tab.webContents
       if (hasTarget || options.clip) {
         const requestedClip = hasTarget
           ? await webContents.executeJavaScript(`(async () => {
@@ -4937,7 +4941,7 @@ export class BrowserTabsManager {
   async savePdf(options: BrowserPdfOptions = {}): Promise<BrowserPdfExport> {
     const tab = this.getTab(options.tabId)
     const filename = pdfFilename(options.filename, tab.title)
-    const data = await this.withRenderableTab(tab, () => tab.view.webContents.printToPDF({
+    const data = await this.withRenderableTab(tab, () => tab.webContents.printToPDF({
       landscape: options.landscape ?? false,
       pageSize: options.pageSize ?? 'Letter',
       printBackground: true,
@@ -4949,7 +4953,7 @@ export class BrowserTabsManager {
 
   async waitForPage(tabId?: string, timeoutMs = 30_000): Promise<void> {
     const tab = this.getTab(tabId)
-    const webContents = tab.view.webContents
+    const webContents = tab.webContents
     if (webContents.isDestroyed()) throw new Error('The tab closed while waiting for the page.')
     try {
       if (!tab.loading && !webContents.isLoading()) return
@@ -4987,7 +4991,7 @@ export class BrowserTabsManager {
 
   async waitForText(text: string, tabId?: string, timeoutMs = 30_000): Promise<boolean> {
     const tab = this.getTab(tabId)
-    const webContents = tab.view.webContents
+    const webContents = tab.webContents
     const deadline = Date.now() + Math.min(Math.max(timeoutMs, 1), 60_000)
     while (Date.now() < deadline) {
       if (!this.tabs.has(tab.id) || webContents.isDestroyed()) {
@@ -5121,9 +5125,9 @@ export class BrowserTabsManager {
     for (const tab of this.tabs.values()) {
       this.clearReproRecording(tab)
       try {
-        if (!tab.view.webContents.isDestroyed()) {
-          this.detachDialogMonitoring(tab.view.webContents)
-          tab.view.webContents.close()
+        if (!tab.webContents.isDestroyed()) {
+          this.detachDialogMonitoring(tab.webContents)
+          tab.webContents.close()
         }
       } catch {
         // The parent BrowserWindow may already have destroyed its child views during shutdown.
@@ -5189,6 +5193,7 @@ export class BrowserTabsManager {
       audible: false,
       muted: false,
       view,
+      webContents: view.webContents,
       consoleMessages: [],
       pendingRuntimeConsoleMessages: [],
       networkRequests: [],
@@ -5354,7 +5359,7 @@ export class BrowserTabsManager {
   }
 
   private attachTabEvents(tab: BrowserTab): void {
-    const webContents = tab.view.webContents
+    const webContents = tab.webContents
     webContents.on('focus', () => {
       if (this.restoringLayout) return
       tab.lastActiveAt = Date.now()
@@ -5766,7 +5771,7 @@ export class BrowserTabsManager {
   }
 
   private showContextMenu(tab: BrowserTab, params: ContextMenuParams): void {
-    const webContents = tab.view.webContents
+    const webContents = tab.webContents
     if (webContents.isDestroyed()) return
     const groups: MenuItemConstructorOptions[][] = []
     const reportActionFailure = (action: string, error: unknown): void => {
@@ -5956,7 +5961,7 @@ export class BrowserTabsManager {
         } else {
           const parsed = new URL(faviconUrl)
           if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') continue
-          const response = await tab.view.webContents.session.fetch(parsed.href, {
+          const response = await tab.webContents.session.fetch(parsed.href, {
             credentials: 'omit',
             signal: AbortSignal.timeout(5_000)
           })
@@ -5981,7 +5986,7 @@ export class BrowserTabsManager {
         }
         if (image.isEmpty()) continue
         const dataUrl = `data:image/png;base64,${image.resize({ width: 32, height: 32, quality: 'best' }).toPNG().toString('base64')}`
-        if (this.destroyed || tab.view.webContents.isDestroyed() || tab.faviconRequestId !== requestId) return
+        if (this.destroyed || tab.webContents.isDestroyed() || tab.faviconRequestId !== requestId) return
         tab.faviconDataUrl = dataUrl
         this.changed(false)
         return
@@ -5992,7 +5997,7 @@ export class BrowserTabsManager {
   }
 
   private watchCredentialSubmission(tab: BrowserTab): void {
-    if (!this.options.onCredentialSubmitted || isBronomHomeUrl(tab.url) || tab.view.webContents.isDestroyed()) return
+    if (!this.options.onCredentialSubmitted || isBronomHomeUrl(tab.url) || tab.webContents.isDestroyed()) return
     const script = `(() => new Promise((resolve) => {
       if (window.__bronomCredentialWatcherActive) { resolve(null); return; }
       window.__bronomCredentialWatcherActive = true;
@@ -6019,7 +6024,7 @@ export class BrowserTabsManager {
       document.addEventListener('submit', onSubmit, true);
       window.addEventListener('pagehide', () => finish(null), { once: true });
     }))()`
-    void tab.view.webContents.executeJavaScript(script, true)
+    void tab.webContents.executeJavaScript(script, true)
       .then((candidate: BrowserCredentialCandidate | null) => {
         if (!candidate || Date.now() - tab.lastHumanInteractionAt > 15_000) return
         let currentOrigin: string | null = null
@@ -6041,13 +6046,13 @@ export class BrowserTabsManager {
     if (tab.loading) return 'A loading tab cannot sleep.'
     if (tab.audible) return 'A tab playing audio stays active.'
     if (tab.dialog) return 'A tab with an open dialog stays active.'
-    if (tab.view.webContents.isDevToolsOpened() || this.devToolsOpening.has(tab.view.webContents.id)) {
+    if (tab.webContents.isDevToolsOpened() || this.devToolsOpening.has(tab.webContents.id)) {
       return 'A tab with Developer Tools open stays active.'
     }
     if (
-      this.screenshotAreaSessions.has(tab.view.webContents.id)
-      || this.elementPickerSessions.has(tab.view.webContents.id)
-      || this.agentInputWebContents.has(tab.view.webContents.id)
+      this.screenshotAreaSessions.has(tab.webContents.id)
+      || this.elementPickerSessions.has(tab.webContents.id)
+      || this.agentInputWebContents.has(tab.webContents.id)
     ) {
       return 'A tab with an active interaction stays active.'
     }
@@ -6065,7 +6070,7 @@ export class BrowserTabsManager {
 
   private async hasChangedFormState(tab: BrowserTab): Promise<boolean> {
     try {
-      return await tab.view.webContents.executeJavaScript(`(() => {
+      return await tab.webContents.executeJavaScript(`(() => {
         const inputs = [...document.querySelectorAll('input')];
         if (inputs.some((input) => {
           const type = (input.getAttribute('type') || 'text').toLowerCase();
@@ -6089,7 +6094,7 @@ export class BrowserTabsManager {
   }
 
   private watchUnsavedFormEdits(tab: BrowserTab): void {
-    void tab.view.webContents.executeJavaScript(`(() => {
+    void tab.webContents.executeJavaScript(`(() => {
       if (window.__bronomFormEditTrackingInstalled) return;
       window.__bronomFormEditTrackingInstalled = true;
       window.__bronomContentEditableDirty = false;
@@ -6121,16 +6126,16 @@ export class BrowserTabsManager {
     tab.pendingHistoryUrl = null
     this.changed(false)
     try {
-      await tab.view.webContents.loadURL(SLEEPING_PAGE_URL)
-      await this.withDebugger(tab.view.webContents, () =>
-        tab.view.webContents.debugger.sendCommand('HeapProfiler.collectGarbage')
+      await tab.webContents.loadURL(SLEEPING_PAGE_URL)
+      await this.withDebugger(tab.webContents, () =>
+        tab.webContents.debugger.sendCommand('HeapProfiler.collectGarbage')
       )
     } catch (error) {
       tab.sleeping = false
       const navigationHistory = tab.sleepNavigationHistory
       tab.sleepNavigationHistory = undefined
       if (navigationHistory?.entries.length) {
-        await tab.view.webContents.navigationHistory.restore(navigationHistory).catch(() => undefined)
+        await tab.webContents.navigationHistory.restore(navigationHistory).catch(() => undefined)
       }
       if (reportBlocked) throw error
       console.warn(`[browser] Could not put tab ${tab.id} to sleep:`, error)
@@ -6151,7 +6156,7 @@ export class BrowserTabsManager {
 
   private toState(tab: BrowserTab): BrowserTabState {
     const navigation = this.navigationHistorySnapshot(tab)
-    const webContentsDestroyed = tab.view.webContents.isDestroyed()
+    const webContentsDestroyed = tab.webContents.isDestroyed()
     return {
       id: tab.id,
       title: tab.title,
@@ -6164,11 +6169,11 @@ export class BrowserTabsManager {
       sleeping: tab.sleeping,
       humanInteractionLocked: tab.humanInteractionLocked,
       preserveDiagnosticLogs: tab.preserveDiagnosticLogs,
-      zoomPercent: webContentsDestroyed ? 100 : Math.round(tab.view.webContents.getZoomFactor() * 100),
+      zoomPercent: webContentsDestroyed ? 100 : Math.round(tab.webContents.getZoomFactor() * 100),
       ...(tab.faviconDataUrl ? { faviconDataUrl: tab.faviconDataUrl } : {}),
       audible: tab.audible,
       muted: tab.muted,
-      devToolsOpen: !webContentsDestroyed && tab.view.webContents.isDevToolsOpened(),
+      devToolsOpen: !webContentsDestroyed && tab.webContents.isDevToolsOpened(),
       ...(this.hasEmulationOverrides(tab.emulation) ? { emulation: this.cloneEmulationState(tab.emulation) } : {}),
       ...(tab.networkRoutes.length ? { networkRouteCount: tab.networkRoutes.length } : {}),
       ...(tab.inspectorIssues.length ? { inspectorIssueCount: tab.inspectorIssues.length } : {}),
@@ -6341,21 +6346,21 @@ export class BrowserTabsManager {
   }
 
   private async applyNetworkRoutes(tab: BrowserTab): Promise<void> {
-    const scheduled = this.networkRouteRefreshTimers.get(tab.view.webContents.id)
+    const scheduled = this.networkRouteRefreshTimers.get(tab.webContents.id)
     if (scheduled) clearTimeout(scheduled)
-    this.networkRouteRefreshTimers.delete(tab.view.webContents.id)
-    await this.withDebugger(tab.view.webContents, async () => {
+    this.networkRouteRefreshTimers.delete(tab.webContents.id)
+    await this.withDebugger(tab.webContents, async () => {
       const interceptionRoutes = tab.networkRoutes.filter((route) => route.behavior !== 'throttle')
       if (!interceptionRoutes.length) {
-        await tab.view.webContents.debugger.sendCommand('Fetch.disable').catch((error) => {
+        await tab.webContents.debugger.sendCommand('Fetch.disable').catch((error) => {
           if (!this.isUnavailableCdpMethod(error)) throw error
         })
       } else {
-        await tab.view.webContents.debugger.sendCommand('Fetch.enable', {
+        await tab.webContents.debugger.sendCommand('Fetch.enable', {
           patterns: [...new Set(interceptionRoutes.map((route) => route.urlPattern))].map((urlPattern) => ({ urlPattern }))
         })
       }
-      await this.applyNetworkEmulation(tab.view.webContents, tab.emulation.network, tab.networkRoutes)
+      await this.applyNetworkEmulation(tab.webContents, tab.emulation.network, tab.networkRoutes)
     })
   }
 
@@ -6364,12 +6369,12 @@ export class BrowserTabsManager {
   }
 
   private shouldBlockHumanKeyboardInput(tab: BrowserTab): boolean {
-    return this.isHumanInteractionLocked(tab) && !this.agentInputWebContents.has(tab.view.webContents.id)
+    return this.isHumanInteractionLocked(tab) && !this.agentInputWebContents.has(tab.webContents.id)
   }
 
   private shouldBlockHumanMouseInput(tab: BrowserTab, mouse: Electron.MouseInputEvent): boolean {
     void mouse
-    return this.isHumanInteractionLocked(tab) && !this.agentInputWebContents.has(tab.view.webContents.id)
+    return this.isHumanInteractionLocked(tab) && !this.agentInputWebContents.has(tab.webContents.id)
   }
 
   private queueScreenshotAreaMouseInput(
@@ -6409,8 +6414,8 @@ export class BrowserTabsManager {
       session.current = undefined
     }
     const queued = session.inputQueue.catch(() => undefined).then(async () => {
-      if (session.canceled || this.screenshotAreaSessions.get(tab.view.webContents.id) !== session) return
-      await tab.view.webContents.executeJavaScript(screenshotAreaNativeInputScript(
+      if (session.canceled || this.screenshotAreaSessions.get(tab.webContents.id) !== session) return
+      await tab.webContents.executeJavaScript(screenshotAreaNativeInputScript(
         type,
         mouse.x,
         mouse.y,
@@ -6422,13 +6427,13 @@ export class BrowserTabsManager {
     if (fallbackSelection) {
       const selection = fallbackSelection
       void queued.catch(() => undefined).then(() => {
-        if (!session.canceled && this.screenshotAreaSessions.get(tab.view.webContents.id) === session) {
+        if (!session.canceled && this.screenshotAreaSessions.get(tab.webContents.id) === session) {
           session.resolve(selection)
         }
       })
     }
     void queued.catch((error) => {
-      if (!session.canceled && this.screenshotAreaSessions.get(tab.view.webContents.id) === session) {
+      if (!session.canceled && this.screenshotAreaSessions.get(tab.webContents.id) === session) {
         console.error('[browser] Could not forward screenshot selection input:', error)
       }
     })
@@ -6445,8 +6450,8 @@ export class BrowserTabsManager {
     const shouldSelect = type === 'up' && session.pointerDown
     if (type === 'up') session.pointerDown = false
     const queued = session.inputQueue.catch(() => undefined).then(async () => {
-      if (session.canceled || this.elementPickerSessions.get(tab.view.webContents.id) !== session) return
-      await tab.view.webContents.executeJavaScript(elementPickerNativeInputScript(
+      if (session.canceled || this.elementPickerSessions.get(tab.webContents.id) !== session) return
+      await tab.webContents.executeJavaScript(elementPickerNativeInputScript(
         type,
         mouse.x,
         mouse.y,
@@ -6454,7 +6459,7 @@ export class BrowserTabsManager {
         Math.max(1, bounds.height)
       ), true).catch(() => false)
       if (!shouldSelect || session.settled || session.canceled) return
-      const inspection = await tab.view.webContents.executeJavaScriptInIsolatedWorld(
+      const inspection = await tab.webContents.executeJavaScriptInIsolatedWorld(
         ELEMENT_INSPECTION_WORLD_ID,
         [{ code: elementPickerInspectionAtPointScript(
           mouse.x,
@@ -6464,13 +6469,13 @@ export class BrowserTabsManager {
         ) }],
         false
       )
-      if (!session.canceled && this.elementPickerSessions.get(tab.view.webContents.id) === session) {
+      if (!session.canceled && this.elementPickerSessions.get(tab.webContents.id) === session) {
         session.resolve({ canceled: false, inspection })
       }
     })
     session.inputQueue = queued
     void queued.catch((error) => {
-      if (!session.canceled && this.elementPickerSessions.get(tab.view.webContents.id) === session) {
+      if (!session.canceled && this.elementPickerSessions.get(tab.webContents.id) === session) {
         console.error('[browser] Could not forward element picker input:', error)
       }
     })
@@ -6566,8 +6571,8 @@ export class BrowserTabsManager {
     tab: BrowserTab,
     point?: { x: number; y: number; viewportWidth: number; viewportHeight: number }
   ): Promise<BrowserReproTarget | null> {
-    if (tab.view.webContents.isDestroyed()) return null
-    const target = await tab.view.webContents.executeJavaScript(reproTargetScript(point), true) as BrowserReproTarget | null
+    if (tab.webContents.isDestroyed()) return null
+    const target = await tab.webContents.executeJavaScript(reproTargetScript(point), true) as BrowserReproTarget | null
     if (!target?.selector || !target.tag) return null
     const clean = (value: string | undefined, limit: number): string | undefined => {
       if (!value) return undefined
@@ -6590,7 +6595,7 @@ export class BrowserTabsManager {
 
   private observeReproMouse(tab: BrowserTab, mouse: Electron.MouseInputEvent): void {
     const recording = tab.reproRecording
-    if (!recording?.active || this.agentInputWebContents.has(tab.view.webContents.id)) return
+    if (!recording?.active || this.agentInputWebContents.has(tab.webContents.id)) return
     if (mouse.type === 'mouseDown' && (mouse.button === undefined || mouse.button === 'left')) {
       const bounds = tab.view.getBounds()
       recording.pendingPointer = {
@@ -6624,7 +6629,7 @@ export class BrowserTabsManager {
 
   private observeReproKeyboard(tab: BrowserTab, input: Electron.Input): void {
     const recording = tab.reproRecording
-    if (!recording?.active || input.type !== 'keyDown' || input.isAutoRepeat || this.agentInputWebContents.has(tab.view.webContents.id)) return
+    if (!recording?.active || input.type !== 'keyDown' || input.isAutoRepeat || this.agentInputWebContents.has(tab.webContents.id)) return
     const hasCommandModifier = input.control || input.meta || input.alt
     const editsValue = !hasCommandModifier && (input.key.length === 1 || ['Backspace', 'Delete'].includes(input.key))
     const allowedKey = ['Enter', 'Tab', 'Escape', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', ' ']
@@ -6668,8 +6673,8 @@ export class BrowserTabsManager {
 
   private async captureReproScroll(tab: BrowserTab): Promise<void> {
     const recording = tab.reproRecording
-    if (!recording?.active || tab.view.webContents.isDestroyed()) return
-    const scroll = await tab.view.webContents.executeJavaScript(reproScrollScript(), true) as { x: number; y: number }
+    if (!recording?.active || tab.webContents.isDestroyed()) return
+    const scroll = await tab.webContents.executeJavaScript(reproScrollScript(), true) as { x: number; y: number }
     if (!Number.isFinite(scroll.x) || !Number.isFinite(scroll.y)) return
     const normalized = { x: Math.round(scroll.x), y: Math.round(scroll.y) }
     const last = [...recording.steps].reverse().find((step) => step.kind === 'scroll')
@@ -6706,7 +6711,7 @@ export class BrowserTabsManager {
   }
 
   private async withRenderableTab<T>(tab: BrowserTab, operation: () => Promise<T>): Promise<T> {
-    const webContents = tab.view.webContents
+    const webContents = tab.webContents
     const webContentsId = webContents.id
     const tabIsLive = (): boolean => (
       !this.destroyed
@@ -6873,7 +6878,7 @@ export class BrowserTabsManager {
             mobile: false,
             touch: false
           },
-      zoomPercent: Math.round(tab.view.webContents.getZoomFactor() * 100),
+      zoomPercent: Math.round(tab.webContents.getZoomFactor() * 100),
       userAgentOverridden: tab.emulation.userAgent !== undefined,
       localeOverridden: tab.emulation.locale !== undefined,
       timezoneOverridden: tab.emulation.timezoneId !== undefined,
@@ -6889,7 +6894,7 @@ export class BrowserTabsManager {
       emulation,
       extraHttpHeaders: Object.fromEntries(Object.entries(tab.emulationExtraHttpHeaders).sort(([left], [right]) => left.localeCompare(right))),
       viewport: { width: bounds.width, height: bounds.height },
-      zoomPercent: Math.round(tab.view.webContents.getZoomFactor() * 100)
+      zoomPercent: Math.round(tab.webContents.getZoomFactor() * 100)
     })).digest('hex')
   }
 
@@ -6918,7 +6923,7 @@ export class BrowserTabsManager {
     state: BrowserEmulationState,
     extraHttpHeaders = tab.emulationExtraHttpHeaders
   ): Promise<void> {
-    const webContents = tab.view.webContents
+    const webContents = tab.webContents
     await webContents.debugger.sendCommand('Network.enable')
     await webContents.debugger.sendCommand('Network.setCacheDisabled', {
       cacheDisabled: state.cacheDisabled
@@ -7167,7 +7172,7 @@ export class BrowserTabsManager {
   }
 
   private ensureDialogMonitoring(tab: BrowserTab): Promise<void> {
-    const webContents = tab.view.webContents
+    const webContents = tab.webContents
     const existing = this.dialogMonitorAttachPromises.get(webContents.id)
     if (existing) return existing
     const attaching = (async () => {
@@ -7211,7 +7216,7 @@ export class BrowserTabsManager {
   }
 
   private async openDevTools(tab: BrowserTab): Promise<void> {
-    const webContents = tab.view.webContents
+    const webContents = tab.webContents
     if (webContents.isDestroyed() || webContents.isDevToolsOpened()) return
     // Electron allows either a CDP debugger client or DevTools to own a page. Remove active
     // interceptions before handing ownership to DevTools so the UI never shows inactive mocks.
@@ -7235,7 +7240,7 @@ export class BrowserTabsManager {
   private async inspectElement(tab: BrowserTab, x: number, y: number): Promise<void> {
     if (this.isHumanInteractionLocked(tab)) return
     await this.openDevTools(tab)
-    const webContents = tab.view.webContents
+    const webContents = tab.webContents
     if (!webContents.isDestroyed()) webContents.inspectElement(Math.round(x), Math.round(y))
   }
 
@@ -7608,7 +7613,7 @@ export class BrowserTabsManager {
     const requestId = details.requestId
     const url = details.request?.url
     const method = details.request?.method?.toUpperCase()
-    if (!requestId || !url || !method || tab.view.webContents.isDestroyed()) return
+    if (!requestId || !url || !method || tab.webContents.isDestroyed()) return
 
     const route = tab.networkRoutes.find((candidate) => (
       (!candidate.method || candidate.method === method)
@@ -7617,21 +7622,21 @@ export class BrowserTabsManager {
 
     try {
       if (!route) {
-        await tab.view.webContents.debugger.sendCommand('Fetch.continueRequest', { requestId })
+        await tab.webContents.debugger.sendCommand('Fetch.continueRequest', { requestId })
         return
       }
       if (route.behavior === 'throttle') {
-        await tab.view.webContents.debugger.sendCommand('Fetch.continueRequest', { requestId })
+        await tab.webContents.debugger.sendCommand('Fetch.continueRequest', { requestId })
         return
       }
       if (route.behavior === 'abort') {
-        await tab.view.webContents.debugger.sendCommand('Fetch.failRequest', {
+        await tab.webContents.debugger.sendCommand('Fetch.failRequest', {
           requestId,
           errorReason: route.abort
         })
       } else {
         const responseHeaders = Object.entries(route.responseHeaders ?? {}).map(([name, value]) => ({ name, value }))
-        await tab.view.webContents.debugger.sendCommand('Fetch.fulfillRequest', {
+        await tab.webContents.debugger.sendCommand('Fetch.fulfillRequest', {
           requestId,
           responseCode: route.response?.status ?? 200,
           responseHeaders,
@@ -7645,14 +7650,14 @@ export class BrowserTabsManager {
       this.changed(false)
     } catch (error) {
       console.error('[browser] Could not apply network route:', error)
-      if (!tab.view.webContents.isDestroyed() && tab.view.webContents.debugger.isAttached()) {
-        await tab.view.webContents.debugger.sendCommand('Fetch.continueRequest', { requestId }).catch(() => undefined)
+      if (!tab.webContents.isDestroyed() && tab.webContents.debugger.isAttached()) {
+        await tab.webContents.debugger.sendCommand('Fetch.continueRequest', { requestId }).catch(() => undefined)
       }
     }
   }
 
   private queueNetworkRouteRequest(tab: BrowserTab, params: unknown): void {
-    const webContentsId = tab.view.webContents.id
+    const webContentsId = tab.webContents.id
     const previous = this.networkRouteQueues.get(webContentsId) ?? Promise.resolve()
     const queued = previous
       .catch(() => undefined)
@@ -7667,19 +7672,19 @@ export class BrowserTabsManager {
   }
 
   private scheduleNetworkRouteRefresh(tab: BrowserTab): void {
-    const webContentsId = tab.view.webContents.id
+    const webContentsId = tab.webContents.id
     const previous = this.networkRouteRefreshTimers.get(webContentsId)
     if (previous) clearTimeout(previous)
     const timer = setTimeout(() => {
       this.networkRouteRefreshTimers.delete(webContentsId)
-      if (this.destroyed || tab.view.webContents.isDestroyed()) return
+      if (this.destroyed || tab.webContents.isDestroyed()) return
       if (this.networkRouteQueues.has(webContentsId)) {
         this.scheduleNetworkRouteRefresh(tab)
         return
       }
       // Let fulfilled response bodies reach the page before changing Fetch patterns.
       void this.applyNetworkRoutes(tab).catch((error: unknown) => {
-        if (!this.destroyed && !tab.view.webContents.isDestroyed()) {
+        if (!this.destroyed && !tab.webContents.isDestroyed()) {
           console.error('[browser] Could not refresh network route patterns:', error)
         }
       })

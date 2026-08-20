@@ -39,8 +39,12 @@ describe('buildLocalAddressSuggestions', () => {
     ])
   })
 
-  it('does not suggest anything for an empty unscoped query or an unknown address', () => {
-    expect(buildLocalAddressSuggestions({ query: '', bookmarks, history })).toEqual([])
+  it('shows recent history on an empty query and nothing for an unknown address', () => {
+    expect(buildLocalAddressSuggestions({ query: '', bookmarks, history })).toEqual([
+      expect.objectContaining({ kind: 'history', title: 'Old docs visit', visitCount: 4 }),
+      expect.objectContaining({ kind: 'history', title: 'Project release notes', visitCount: 2 }),
+      expect.objectContaining({ kind: 'bookmark', title: 'Design reference' })
+    ])
     expect(buildLocalAddressSuggestions({ query: 'current', bookmarks, history })).toEqual([])
   })
 })

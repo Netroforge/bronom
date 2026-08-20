@@ -77,7 +77,6 @@ function matches(title: string, url: string, terms: string[]): boolean {
 
 export function buildLocalAddressSuggestions(input: AddressSuggestionInput): AddressSuggestion[] {
   const { scope, terms } = parseQuery(input.query)
-  if (scope === 'all' && !terms.length) return []
   const limit = Math.max(1, Math.min(20, Math.trunc(input.limit ?? 8)))
   const suggestions: AddressSuggestion[] = []
   const seen = new Set<string>()
@@ -90,12 +89,12 @@ export function buildLocalAddressSuggestions(input: AddressSuggestionInput): Add
     suggestions.push(suggestion)
   }
 
-  if (scope === 'all' || scope === 'bookmarks') {
+  const addBookmarks = (): void => {
     for (const bookmark of input.bookmarks) {
       add({ id: `bookmark:${bookmark.id}`, kind: 'bookmark', title: bookmark.title, url: bookmark.url })
     }
   }
-  if (scope === 'all' || scope === 'history') {
+  const addHistory = (): void => {
     for (const entry of input.history) {
       add({
         id: `history:${entry.id}`,
@@ -105,6 +104,17 @@ export function buildLocalAddressSuggestions(input: AddressSuggestionInput): Add
         visitCount: entry.visitCount
       })
     }
+  }
+
+  // With no query, behave like a browser's address bar: show recent visits
+  // immediately, then saved bookmarks that are not already represented. Once
+  // the user types, keep bookmarks first as an explicit saved destination.
+  if (scope === 'all' && !terms.length) {
+    addHistory()
+    addBookmarks()
+  } else {
+    if (scope === 'all' || scope === 'bookmarks') addBookmarks()
+    if (scope === 'all' || scope === 'history') addHistory()
   }
   return suggestions
 }

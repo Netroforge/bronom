@@ -678,6 +678,39 @@ test('recovers a crashed website renderer in a fresh process', async ({ appWindo
   }
 })
 
+test('keeps shell state usable when Electron destroys a tab WebContents independently', async ({
+  appWindow,
+  electronApp
+}) => {
+  const url = 'data:text/html,<title>Native teardown fixture</title><main>Native teardown fixture</main>'
+  const created = await appWindow.evaluate(`window.bronom.newTab({ url: ${JSON.stringify(url)}, active: true })`) as BrowserState
+  const tabId = created.activeTabId
+  expect(tabId).toBeTruthy()
+  await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.find((tab) => tab.active)?.title)'))
+    .toBe('Native teardown fixture')
+  await expect.poll(() => electronApp.evaluate(({ webContents }, requestedUrl) => {
+    const page = webContents.getAllWebContents().find((contents) => contents.getURL() === requestedUrl)
+    return page?.debugger.isAttached() ?? false
+  }, url)).toBe(true)
+
+  await electronApp.evaluate(({ webContents }, requestedUrl) => {
+    const page = webContents.getAllWebContents().find((contents) => contents.getURL() === requestedUrl)
+    if (!page) throw new Error('Native teardown fixture WebContents was not found')
+    page.close()
+  }, url)
+
+  await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => (
+    state.tabs.find((tab) => tab.id === ${JSON.stringify(tabId)})?.devToolsOpen
+  ))`)).toBe(false)
+  await appWindow.evaluate(`window.bronom.closeTab(${JSON.stringify(tabId)})`)
+  await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => (
+    state.tabs.some((tab) => tab.id === ${JSON.stringify(tabId)})
+  ))`)).toBe(false)
+
+  const recovery = await appWindow.evaluate(`window.bronom.newTab({ url: 'about:blank', active: true })`) as BrowserState
+  expect(recovery.tabs.some((tab) => tab.id === recovery.activeTabId)).toBe(true)
+})
+
 test('puts Help in the native application menu and opens shell dialogs above every page', async ({ appWindow, electronApp }) => {
   const menuItems = await electronApp.evaluate(({ Menu }) => {
     const menu = Menu.getApplicationMenu()
@@ -934,11 +967,22 @@ test('floats bookmark and history suggestions above pages while allowing duplica
     const listbox = appWindow.locator('#address-suggestions')
     const options = listbox.locator('[role="option"]')
     const requestCountBeforeTyping = requests.length
-    // Reproduce normal human input: focus the empty address bar, pause, then
-    // type. The website view must never move to make room for suggestions.
+    // Reproduce normal human input: focusing an empty address bar must show
+    // recent local destinations immediately. The website view must never move
+    // to make room for the native suggestion overlay.
     await address.focus()
     await address.fill('')
-    await expect(listbox).toBeHidden()
+    await expect(address).toHaveAttribute('aria-expanded', 'true')
+    await expect(options).toHaveCount(2)
+    await expect(options.nth(0)).toContainText('History')
+    await expect(options.nth(1)).toContainText('History')
+    await expect.poll(addressOverlay).toMatchObject({
+      attached: true,
+      topmost: true,
+      visible: true,
+      optionCount: 2,
+      text: expect.stringContaining('Local only')
+    })
     await appWindow.waitForTimeout(100)
     const browserViewYWithoutPopup = await browserViewY()
     expect(browserViewYWithoutPopup).toBeDefined()

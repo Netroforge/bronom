@@ -4,6 +4,16 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Show recent local browsing history as soon as the address bar is focused or cleared, while continuing to navigate the exact typed address on Enter unless a suggestion was explicitly selected.
+
+### Fixed
+
+- Retain each tab's stable Electron `WebContents` handle independently from its native view so externally destroyed renderers cannot crash state publication or prevent the stale tab from closing.
+- Cancel MCP page and text waits promptly when their tab closes, preserve correct timeout semantics, and prevent hidden screenshot or visual-comparison cleanup from reattaching a destroyed native view.
+- Detach the topmost native address-suggestion overlay before opening Settings, Help, the command palette, workspace editing, or the saved-account chooser.
+
 ## [1.6.2] - 2026-08-20
 
 ### Changed
