@@ -71,6 +71,19 @@ describe('SettingsStore', () => {
     })
   })
 
+  it('serializes concurrent saves and keeps the last queued settings', async () => {
+    const { path, store } = await createStore()
+    const settings = Array.from({ length: 20 }, (_value, index) => ({
+      ...DEFAULT_SETTINGS,
+      mcpPort: 48_000 + index,
+      interfaceScale: index % 2 === 0 ? 1 as const : 1.1 as const
+    }))
+
+    await Promise.all(settings.map((value) => store.save(value)))
+
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(settings.at(-1))
+  })
+
   it('uses safe defaults for missing, malformed, and unsupported values', async () => {
     const { path, store } = await createStore()
     expect(await store.load()).toEqual(DEFAULT_SETTINGS)

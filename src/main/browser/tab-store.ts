@@ -86,6 +86,8 @@ function persistedWorkspaceStorageId(value: unknown): string | undefined {
 }
 
 export class TabStateStore {
+  private saveQueue: Promise<void> = Promise.resolve()
+
   constructor(private readonly path: string) {}
 
   async load(): Promise<PersistedBrowserState | null> {
@@ -249,10 +251,15 @@ export class TabStateStore {
     }
   }
 
-  async save(state: PersistedBrowserState): Promise<void> {
-    await mkdir(dirname(this.path), { recursive: true })
-    const temporaryPath = `${this.path}.tmp`
-    await writeFile(temporaryPath, `${JSON.stringify(state, null, 2)}\n`, 'utf8')
-    await rename(temporaryPath, this.path)
+  save(state: PersistedBrowserState): Promise<void> {
+    const contents = `${JSON.stringify(state, null, 2)}\n`
+    const operation = this.saveQueue.then(async () => {
+      await mkdir(dirname(this.path), { recursive: true })
+      const temporaryPath = `${this.path}.tmp`
+      await writeFile(temporaryPath, contents, 'utf8')
+      await rename(temporaryPath, this.path)
+    })
+    this.saveQueue = operation.catch(() => undefined)
+    return operation
   }
 }

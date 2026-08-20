@@ -94,6 +94,19 @@ describe('TabStateStore', () => {
     })
   })
 
+  it('serializes concurrent saves and keeps the last queued browser state', async () => {
+    const { path, store } = await createStore()
+    const states = Array.from({ length: 20 }, (_value, index) => {
+      const state = currentState()
+      state.tabs[1]!.title = `Checkout ${index}`
+      return state
+    })
+
+    await Promise.all(states.map((state) => store.save(state)))
+
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(states.at(-1))
+  })
+
   it('drops unversioned legacy tab state instead of migrating or restoring it', async () => {
     const { path, store } = await createStore()
     await mkdir(join(path, '..'), { recursive: true })

@@ -21,6 +21,8 @@ const isRectangle = (value: unknown): value is Rectangle => {
 }
 
 export class WindowStateStore {
+  private saveQueue: Promise<void> = Promise.resolve()
+
   constructor(private readonly path: string) {}
 
   async load(): Promise<SavedWindowState | null> {
@@ -40,11 +42,16 @@ export class WindowStateStore {
     }
   }
 
-  async save(state: SavedWindowState): Promise<void> {
-    await mkdir(dirname(this.path), { recursive: true })
-    const temporaryPath = `${this.path}.tmp`
-    await writeFile(temporaryPath, `${JSON.stringify(state, null, 2)}\n`, 'utf8')
-    await rename(temporaryPath, this.path)
+  save(state: SavedWindowState): Promise<void> {
+    const contents = `${JSON.stringify(state, null, 2)}\n`
+    const operation = this.saveQueue.then(async () => {
+      await mkdir(dirname(this.path), { recursive: true })
+      const temporaryPath = `${this.path}.tmp`
+      await writeFile(temporaryPath, contents, 'utf8')
+      await rename(temporaryPath, this.path)
+    })
+    this.saveQueue = operation.catch(() => undefined)
+    return operation
   }
 }
 

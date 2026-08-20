@@ -38,6 +38,8 @@ export function isDownloadDirectory(value: unknown): value is string {
 }
 
 export class SettingsStore {
+  private saveQueue: Promise<void> = Promise.resolve()
+
   constructor(private readonly path: string) {}
 
   async load(): Promise<AppSettings> {
@@ -84,10 +86,15 @@ export class SettingsStore {
     }
   }
 
-  async save(settings: AppSettings): Promise<void> {
-    await mkdir(dirname(this.path), { recursive: true })
-    const temporaryPath = `${this.path}.tmp`
-    await writeFile(temporaryPath, `${JSON.stringify(settings, null, 2)}\n`, 'utf8')
-    await rename(temporaryPath, this.path)
+  save(settings: AppSettings): Promise<void> {
+    const contents = `${JSON.stringify(settings, null, 2)}\n`
+    const operation = this.saveQueue.then(async () => {
+      await mkdir(dirname(this.path), { recursive: true })
+      const temporaryPath = `${this.path}.tmp`
+      await writeFile(temporaryPath, contents, 'utf8')
+      await rename(temporaryPath, this.path)
+    })
+    this.saveQueue = operation.catch(() => undefined)
+    return operation
   }
 }
