@@ -4,6 +4,8 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ## [Unreleased]
 
+## [1.6.4] - 2026-08-21
+
 ### Fixed
 
 - Keep a stable renderer reference for the native address-suggestion overlay so an independently destroyed overlay can be recreated without touching an invalid Electron child view.
