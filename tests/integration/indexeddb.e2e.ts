@@ -73,20 +73,20 @@ test('inspects bounded IndexedDB schema and records for people and grouped agent
   const client = await connectClient(mcpPort, mcpToken)
   try {
     const groupResult = await client.callTool({
-      name: 'browser_tab_groups',
+      name: 'browser_workspaces',
       arguments: { action: 'create', name: 'IndexedDB inspection' }
     }) as CallToolResult
-    const groupId = (JSON.parse(text(groupResult)) as { id: string }).id
+    const workspaceId = (JSON.parse(text(groupResult)) as { id: string }).id
     const opened = await client.callTool({
       name: 'browser_new_tab',
-      arguments: { groupId, url: `http://127.0.0.1:${address.port}/` }
+      arguments: { workspaceId, url: `http://127.0.0.1:${address.port}/` }
     }) as CallToolResult
     const tabId = (JSON.parse(text(opened)) as { activeTabId: string }).activeTabId
-    await client.callTool({ name: 'browser_wait', arguments: { groupId, tabId, text: 'IndexedDB ready' } })
+    await client.callTool({ name: 'browser_wait', arguments: { workspaceId, tabId, text: 'IndexedDB ready' } })
 
     const databasesResult = await client.callTool({
       name: 'browser_indexeddb',
-      arguments: { groupId, tabId }
+      arguments: { workspaceId, tabId }
     }) as CallToolResult
     expect(databasesResult.isError, text(databasesResult)).not.toBe(true)
     expect(JSON.parse(text(databasesResult))).toMatchObject({
@@ -98,7 +98,7 @@ test('inspects bounded IndexedDB schema and records for people and grouped agent
 
     const schemaResult = await client.callTool({
       name: 'browser_indexeddb',
-      arguments: { groupId, tabId, database: 'app-cache' }
+      arguments: { workspaceId, tabId, database: 'app-cache' }
     }) as CallToolResult
     const schema = JSON.parse(text(schemaResult)) as {
       selectedDatabase: { objectStores: Array<{ name: string; entryCount: number; indexes: Array<{ name: string }> }> }
@@ -111,7 +111,7 @@ test('inspects bounded IndexedDB schema and records for people and grouped agent
     await appWindow.getByRole('button', { name: 'Block human interaction in this tab' }).click()
     const recordsResult = await client.callTool({
       name: 'browser_indexeddb',
-      arguments: { groupId, tabId, database: 'app-cache', objectStore: 'settings', limit: 1 }
+      arguments: { workspaceId, tabId, database: 'app-cache', objectStore: 'settings', limit: 1 }
     }) as CallToolResult
     const records = JSON.parse(text(recordsResult)) as {
       entries: Array<{ key: string; valueType: string; valuePreview?: string }>
@@ -124,7 +124,7 @@ test('inspects bounded IndexedDB schema and records for people and grouped agent
 
     const valuesResult = await client.callTool({
       name: 'browser_indexeddb',
-      arguments: { groupId, tabId, database: 'app-cache', objectStore: 'settings', limit: 3, includeValues: true }
+      arguments: { workspaceId, tabId, database: 'app-cache', objectStore: 'settings', limit: 3, includeValues: true }
     }) as CallToolResult
     const values = JSON.parse(text(valuesResult)) as {
       entries: Array<{ key: string; valuePreview: string }>

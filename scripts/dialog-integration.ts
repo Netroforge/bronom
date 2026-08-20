@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { useMcpTabGroup } from './mcp-tab-group.js'
+import { useMcpWorkspace } from './mcp-workspace.js'
 
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url))
 const electronPath = join(repositoryRoot, 'node_modules/electron/dist/electron')
@@ -92,7 +92,7 @@ try {
     requestInit: { headers: { authorization } }
   })
   await client.connect(transport)
-  await useMcpTabGroup(client, 'Dialog integration')
+  await useMcpWorkspace(client, 'Dialog integration')
 
   const created = await client.callTool({
     name: 'browser_new_tab',

@@ -96,6 +96,8 @@ describe('TabStateStore', () => {
     expect(await store.load()).toEqual({
       ...state,
       allHumanInteractionLocked: false,
+      mcpTabGroups: state.mcpTabGroups.map((workspace) => ({ ...workspace, origins: [] })),
+      savedTabGroups: state.savedTabGroups.map((workspace) => ({ ...workspace, origins: [] })),
       tabs: [{ ...state.tabs[0], pinned: false, humanInteractionLocked: false }]
     })
   })
@@ -143,6 +145,52 @@ describe('TabStateStore', () => {
     expect((await store.load())?.mcpTabGroups).toEqual([expect.objectContaining({
       id: groupId,
       color: defaultTabGroupColor(groupId)
+    })])
+  })
+
+  it('sanitizes corrupt workspace storage metadata without discarding the profile', async () => {
+    const { path, store } = await createStore()
+    const validStorageId = '8e3da8ea-cba4-41c2-9619-a6e04a493a44'
+    await mkdir(join(path, '..'), { recursive: true })
+    await writeFile(path, JSON.stringify({
+      activeTabId: null,
+      tabs: [],
+      mcpTabGroups: [{
+        id: 'active-workspace',
+        name: 'Recovered workspace',
+        color: 'blue',
+        createdAt: '2026-08-20T10:00:00.000Z',
+        lastUsedAt: '2026-08-20T10:01:00.000Z',
+        storageId: '../shared-profile',
+        origins: [
+          'https://shop.example/checkout',
+          'not a URL',
+          'file:///tmp/private',
+          'https://shop.example/account',
+          'http://localhost:4173/path'
+        ]
+      }],
+      savedTabGroups: [{
+        id: 'saved-workspace',
+        name: 'Archived workspace',
+        color: 'green',
+        savedAt: '2026-08-20T10:02:00.000Z',
+        storageId: validStorageId,
+        origins: ['https://docs.example/path', 'javascript:alert(1)'],
+        tabs: [{ title: 'Docs', url: 'https://docs.example' }]
+      }]
+    }), 'utf8')
+
+    const loaded = await store.load()
+    expect(loaded?.mcpTabGroups).toEqual([expect.objectContaining({
+      id: 'active-workspace',
+      origins: ['http://localhost:4173', 'https://shop.example']
+    })])
+    expect(loaded?.mcpTabGroups?.[0]).not.toHaveProperty('storageId')
+    expect(loaded?.savedTabGroups).toEqual([expect.objectContaining({
+      id: 'saved-workspace',
+      storageId: validStorageId,
+      origins: ['https://docs.example']
     })])
   })
 

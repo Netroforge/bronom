@@ -17,6 +17,7 @@ import type {
   BrowserNetworkRequestSortBy,
   BrowserNetworkRequestSortDirection,
   BrowserNetworkWaitOptions,
+  BrowserState,
   BrowsingDataSiteSummary,
   McpServerStatus,
   McpTabActivity
@@ -26,6 +27,9 @@ import { formatNetworkRequestCopy, type BrowserNetworkRequestCopyFormat } from '
 import { sortNetworkRequests } from '../../shared/network-request-sort.js'
 import { filterNetworkRequests, normalizeNetworkHarOptions } from '../../shared/network-har.js'
 import { formatReproAsPlaywright } from '../../shared/repro-export.js'
+import { isUuidV7 } from '../uuid-v7.js'
+
+const workspaceIdSchema = z.string().refine(isUuidV7, 'Workspace ID must be a UUIDv7.')
 
 export interface BookmarkOperations {
   list: () => BrowserBookmark[]
@@ -43,8 +47,8 @@ export interface HistoryOperations {
 export type SiteDataType = 'cookies-and-storage' | 'cache' | 'history'
 
 export interface SiteDataOperations {
-  inspect: (origin: string) => Promise<BrowsingDataSiteSummary>
-  clear: (origin: string, dataTypes: SiteDataType[]) => Promise<{
+  inspect: (workspaceId: string, origin: string) => Promise<BrowsingDataSiteSummary>
+  clear: (workspaceId: string, origin: string, dataTypes: SiteDataType[]) => Promise<{
     origin: string
     cleared: SiteDataType[]
     remaining: BrowsingDataSiteSummary
@@ -150,24 +154,24 @@ export function assertMcpToolRegistrationContract(
 
 export const BROWSER_TOOL_CATALOG: BrowserToolDefinition[] = [
   {
-    name: 'browser_tab_groups',
+    name: 'browser_workspaces',
     category: 'Session',
-    description: 'Start every workflow by creating a fresh named tab group. Use only the groupId returned by your own create call for the whole task. Listing is for awareness only: never use, rename, recolor, or close a listed group you did not create, and never touch the human Default group marked isDefault.'
+    description: 'Start every workflow by creating a fresh uniquely named workspace. Its stable workspaceId is UUIDv7 identity; renaming changes only the human-readable unique name. New workspaces use clean isolated storage unless create requests fork-default with optional HTTP(S) origins. Use list-origins, import-default, or save-default for explicit storage copies. Use only the workspaceId returned by your own create call for the whole task. Listing is for awareness only: never use, rename, recolor, or close a listed workspace you did not create, and never touch the human Default workspace marked isDefault.'
   },
   {
-    name: 'browser_saved_tab_groups',
+    name: 'browser_saved_workspaces',
     category: 'Session',
-    description: 'Archive your own task group for later or reopen an archive into a fresh visible groupId. Listing is for awareness only: never open or delete a saved group you did not create.'
+    description: 'Archive your own task workspace for later or reopen an archive into a fresh visible workspaceId. Listing is for awareness only: never open or delete a saved workspace you did not create.'
   },
-  { name: 'browser_status', category: 'Session', description: 'Show the current tab group, endpoint, tabs, and active group tab.' },
+  { name: 'browser_status', category: 'Session', description: 'Show the current workspace, endpoint, tabs, and active workspace tab.' },
   { name: 'browser_show', category: 'Session', description: 'Show and focus the visible Bronom window.' },
   {
     name: 'browser_request_user_attention',
     category: 'Session',
     description: 'Pulse the Bronom tray icon when a person must complete a manual browser step.'
   },
-  { name: 'browser_tabs', category: 'Session', description: 'List tabs and navigation state in the selected agent tab group.' },
-  { name: 'browser_new_tab', category: 'Session', description: 'Open a visible tab inside the selected agent tab group.' },
+  { name: 'browser_tabs', category: 'Session', description: 'List tabs and navigation state in the selected agent workspace.' },
+  { name: 'browser_new_tab', category: 'Session', description: 'Open a visible tab inside the selected agent workspace.' },
   { name: 'browser_select_tab', category: 'Session', description: 'Select the visible active tab.' },
   { name: 'browser_close_tab', category: 'Session', description: 'Close a tab and keep the browser session alive.' },
   { name: 'browser_bookmarks', category: 'Session', description: 'List, save, rename, remove, or open local browser bookmarks.' },
@@ -175,12 +179,12 @@ export const BROWSER_TOOL_CATALOG: BrowserToolDefinition[] = [
   {
     name: 'browser_site_data',
     category: 'Session',
-    description: 'Inspect or clear selected cookies, storage, cache, or history for one explicit website origin.'
+    description: 'Inspect or clear selected cookies, storage, cache, or history for one explicit website origin inside the selected workspace.'
   },
   {
     name: 'browser_storage',
     category: 'Inspection',
-    description: 'Inspect or edit bounded local storage, session storage, and non-HttpOnly cookies in one group tab.'
+    description: 'Inspect or edit bounded local storage, session storage, and non-HttpOnly cookies in one workspace tab.'
   },
   {
     name: 'browser_storage_changes',
@@ -190,17 +194,17 @@ export const BROWSER_TOOL_CATALOG: BrowserToolDefinition[] = [
   {
     name: 'browser_storage_usage',
     category: 'Inspection',
-    description: 'Inspect aggregate usage, quota, and browser-defined storage-category byte counts for one group tab. The report is read-only and never returns stored keys, values, filenames, or response bodies.'
+    description: 'Inspect aggregate usage, quota, and browser-defined storage-category byte counts for one workspace tab. The report is read-only and never returns stored keys, values, filenames, or response bodies.'
   },
   {
     name: 'browser_indexeddb',
     category: 'Inspection',
-    description: 'Inspect bounded IndexedDB databases, object-store schemas, indexes, counts, keys, and optional record previews for one group tab. Values are omitted by default and the tool is read-only.'
+    description: 'Inspect bounded IndexedDB databases, object-store schemas, indexes, counts, keys, and optional record previews for one workspace tab. Values are omitted by default and the tool is read-only.'
   },
   {
     name: 'browser_pwa',
     category: 'Inspection',
-    description: 'Inspect service-worker registrations and bounded Cache Storage entries for one group tab. Cached response bodies and headers are omitted by default, and the tool is read-only.'
+    description: 'Inspect service-worker registrations and bounded Cache Storage entries for one workspace tab. Cached response bodies and headers are omitted by default, and the tool is read-only.'
   },
   { name: 'browser_navigate', category: 'Navigation', description: 'Navigate to a URL or search phrase.' },
   { name: 'browser_history', category: 'Navigation', description: 'Go back, forward, reload normally or without cache, or stop loading.' },
@@ -229,16 +233,16 @@ export const BROWSER_TOOL_CATALOG: BrowserToolDefinition[] = [
   { name: 'browser_design_overview', category: 'Inspection', description: 'Summarize bounded computed colors, typography, media queries, and likely text-contrast issues without returning page text or CSS source.' },
   { name: 'browser_page_metadata', category: 'Inspection', description: 'Inspect bounded title, canonical, robots, social cards, alternates, icons, headings, and structured-data types without returning body content or full JSON-LD.' },
   { name: 'browser_security', category: 'Inspection', description: 'Inspect the current main document transport, TLS connection, and bounded certificate metadata without returning raw certificates.' },
-  { name: 'browser_code_coverage', category: 'Inspection', description: 'Record bounded JavaScript and CSS usage in one group tab and report unused bytes without returning source code.' },
-  { name: 'browser_cpu_profile', category: 'Inspection', description: 'Record bounded JavaScript CPU samples in one group tab and report the hottest functions by direct self time without returning source code, arguments, or page content.' },
+  { name: 'browser_code_coverage', category: 'Inspection', description: 'Record bounded JavaScript and CSS usage in one workspace tab and report unused bytes without returning source code.' },
+  { name: 'browser_cpu_profile', category: 'Inspection', description: 'Record bounded JavaScript CPU samples in one workspace tab and report the hottest functions by direct self time without returning source code, arguments, or page content.' },
   { name: 'browser_memory', category: 'Inspection', description: 'Compare bounded JavaScript heap and DOM counters against a per-tab runtime baseline, or sample the functions retaining live allocations, without returning object values, source code, or page content.' },
-  { name: 'browser_debug_report', category: 'Inspection', description: 'Summarize bounded console and network evidence for one group tab in a copy-ready, security-filtered report.' },
-  { name: 'browser_repro', category: 'Inspection', description: 'Start, inspect, stop, clear, or export a privacy-safe human reproduction timeline for one group tab; typed values are never recorded, and Playwright exports require explicit safe test inputs.' },
-  { name: 'browser_dom_changes', category: 'Inspection', description: 'Record bounded structural DOM mutations in one group tab without returning page text, markup, IDs, classes, or values.' },
-  { name: 'browser_visual_compare', category: 'Inspection', description: 'Set a volatile viewport baseline, compare the same group tab later, and return changed-pixel metrics plus a chat-ready diff PNG.' },
+  { name: 'browser_debug_report', category: 'Inspection', description: 'Summarize bounded console and network evidence for one workspace tab in a copy-ready, security-filtered report.' },
+  { name: 'browser_repro', category: 'Inspection', description: 'Start, inspect, stop, clear, or export a privacy-safe human reproduction timeline for one workspace tab; typed values are never recorded, and Playwright exports require explicit safe test inputs.' },
+  { name: 'browser_dom_changes', category: 'Inspection', description: 'Record bounded structural DOM mutations in one workspace tab without returning page text, markup, IDs, classes, or values.' },
+  { name: 'browser_visual_compare', category: 'Inspection', description: 'Set a volatile viewport baseline, compare the same workspace tab later, and return changed-pixel metrics plus a chat-ready diff PNG.' },
   { name: 'browser_issues', category: 'Inspection', description: 'List or clear bounded Chromium Issues such as CORS, CSP, mixed-content, cookie, deprecation, quirks-mode, and stylesheet problems.' },
   { name: 'browser_console', category: 'Inspection', description: 'Read or clear bounded sanitized console entries with repeat counts, distinct uncaught exceptions, and structured call stacks from a tab.' },
-  { name: 'browser_diagnostic_logs', category: 'Inspection', description: 'Inspect, preserve across navigation, or clear the bounded Console and Network evidence for one group tab.' },
+  { name: 'browser_diagnostic_logs', category: 'Inspection', description: 'Inspect, preserve across navigation, or clear the bounded Console and Network evidence for one workspace tab.' },
   { name: 'browser_network', category: 'Inspection', description: 'Read, search, property-filter, sort, limit, or clear bounded network request metadata, including duration, TTFB, and the exact browser, prefetch, disk-cache, or service-worker response source, from a tab.' },
   { name: 'browser_network_wait', category: 'Inspection', description: 'Wait without polling for a retained or future network request matching a URL pattern and optional method, resource type, status, or lifecycle phase; use a prior request ID cursor when an endpoint may repeat.' },
   { name: 'browser_network_search', category: 'Inspection', description: 'Search bounded sanitized URLs, headers, payloads, responses, retained WebSocket text, and server-sent events across recent requests; returns request IDs and short matching snippets for follow-up inspection.' },
@@ -275,7 +279,30 @@ function safeValue(value: unknown): unknown {
   }
 }
 
-function scopeBrowserStateResult(result: CallToolResult, state: unknown): CallToolResult {
+function mcpWorkspaceTab<T extends { mcpGroupId?: string; mcpGroupName?: string }>(tab: T): Omit<T, 'mcpGroupId' | 'mcpGroupName'> & {
+  workspaceId?: string
+  workspaceName?: string
+} {
+  const { mcpGroupId, mcpGroupName, ...rest } = tab
+  return {
+    ...rest,
+    ...(mcpGroupId ? { workspaceId: mcpGroupId } : {}),
+    ...(mcpGroupName ? { workspaceName: mcpGroupName } : {})
+  }
+}
+
+function mcpWorkspaceState(state: BrowserState): Record<string, unknown> {
+  const { tabs, closedTabs, mcpTabGroups, savedTabGroups, ...rest } = state
+  return {
+    ...rest,
+    tabs: tabs.map(mcpWorkspaceTab),
+    closedTabs: closedTabs.map(mcpWorkspaceTab),
+    workspaces: mcpTabGroups,
+    savedWorkspaces: savedTabGroups
+  }
+}
+
+function scopeBrowserStateResult(result: CallToolResult, state: BrowserState): CallToolResult {
   if (result.isError) return result
   return {
     ...result,
@@ -284,7 +311,8 @@ function scopeBrowserStateResult(result: CallToolResult, state: unknown): CallTo
       try {
         const value = JSON.parse(item.text) as Record<string, unknown>
         if (!Array.isArray(value.tabs) || typeof value.profilePath !== 'string') return item
-        return { ...item, text: JSON.stringify({ ...value, ...(state as Record<string, unknown>) }, null, 2) }
+        const { tabs: _tabs, closedTabs: _closedTabs, mcpTabGroups: _groups, savedTabGroups: _savedGroups, ...valueRest } = value
+        return { ...item, text: JSON.stringify({ ...valueRest, ...mcpWorkspaceState(state) }, null, 2) }
       } catch {
         return item
       }
@@ -340,69 +368,92 @@ function createBrowserMcpServer(
     registeredToolNames.push(name)
     return name
   }
+  const requireAgentWorkspace = (workspaceId: string): ReturnType<BrowserTabsManager['requireMcpTabGroup']> => {
+    const workspace = manager.requireMcpTabGroup(workspaceId)
+    if (workspace.isDefault) {
+      throw new Error('The human Default workspace is not available through MCP. Create a fresh agent workspace with browser_workspaces first.')
+    }
+    return workspace
+  }
   baseRegisterTool(
-    recordToolRegistration('browser_tab_groups'),
+    recordToolRegistration('browser_workspaces'),
     {
-      description: toolDescription('browser_tab_groups'),
+      description: toolDescription('browser_workspaces'),
       inputSchema: {
-        action: z.enum(['list', 'create', 'update', 'rename', 'close']).default('list'),
-        groupId: z.string().uuid().optional().describe('Group ID returned by your own create call in this workflow. Never modify a group discovered through list.'),
-        name: z.string().trim().min(1).max(80).optional().describe('Human-readable group name for create, update, or rename.'),
-        color: z.enum(BROWSER_TAB_GROUP_COLORS).optional().describe('Visible group color for create or update.')
+        action: z.enum(['list', 'create', 'update', 'rename', 'close', 'list-origins', 'import-default', 'save-default']).default('list'),
+        workspaceId: workspaceIdSchema.optional().describe('Stable UUIDv7 returned by your own create call. A rename changes only the human name, never this ID. Never modify a workspace discovered through list.'),
+        name: z.string().trim().min(1).max(80).optional().describe('Human-readable workspace name for create, update, or rename.'),
+        color: z.enum(BROWSER_TAB_GROUP_COLORS).optional().describe('Visible workspace color for create or update.'),
+        storage: z.enum(['scratch', 'fork-default']).optional().describe('Create with clean isolated storage (default) or copy Default. Agents must not browse Default directly.'),
+        origins: z.array(z.string().url()).max(100).optional().describe('Optional HTTP(S) origins to copy during create, import-default, or save-default. Omit to copy all known workspace cookies and local storage.')
       }
     },
-    tool(async ({ action, groupId, name, color }: {
-      action: 'list' | 'create' | 'update' | 'rename' | 'close'
-      groupId?: string
+    tool(async ({ action, workspaceId, name, color, storage, origins }: {
+      action: 'list' | 'create' | 'update' | 'rename' | 'close' | 'list-origins' | 'import-default' | 'save-default'
+      workspaceId?: string
       name?: string
       color?: BrowserTabGroupColor
+      storage?: 'scratch' | 'fork-default'
+      origins?: string[]
     }) => {
       if (action === 'list') return textResult(manager.listMcpTabGroups())
       if (action === 'create') {
-        if (!name) throw new TypeError('name is required to create a tab group')
-        return textResult(manager.createMcpTabGroup(name, color))
+        if (!name) throw new TypeError('name is required to create a workspace')
+        if (origins !== undefined && storage !== 'fork-default') {
+          throw new TypeError('origins can be selected only when storage is fork-default')
+        }
+        return textResult(await manager.createMcpTabGroup(name, color, storage, origins))
       }
-      if (!groupId) throw new TypeError(`groupId is required to ${action} a tab group`)
+      if (!workspaceId) throw new TypeError(`workspaceId is required to ${action} a workspace`)
+      requireAgentWorkspace(workspaceId)
       if (action === 'rename') {
-        if (!name) throw new TypeError('name is required to rename a tab group')
-        return textResult(manager.renameMcpTabGroup(groupId, name))
+        if (!name) throw new TypeError('name is required to rename a workspace')
+        return textResult(manager.renameMcpTabGroup(workspaceId, name))
       }
       if (action === 'update') {
-        if (!name && !color) throw new TypeError('name or color is required to update a tab group')
-        return textResult(manager.updateMcpTabGroup(groupId, { name, color }))
+        if (!name && !color) throw new TypeError('name or color is required to update a workspace')
+        return textResult(manager.updateMcpTabGroup(workspaceId, { name, color }))
       }
-      return textResult(await manager.closeMcpTabGroup(groupId))
+      if (action === 'list-origins') return textResult(manager.listWorkspaceStorageOrigins(workspaceId))
+      if (action === 'import-default' || action === 'save-default') {
+        return textResult(await manager.transferWorkspaceStorage({
+          workspaceId,
+          direction: action === 'import-default' ? 'from-default' : 'to-default',
+          ...(origins !== undefined ? { origins } : {})
+        }))
+      }
+      return textResult(await manager.closeMcpTabGroup(workspaceId))
     })
   )
 
   baseRegisterTool(
-    recordToolRegistration('browser_saved_tab_groups'),
+    recordToolRegistration('browser_saved_workspaces'),
     {
-      description: toolDescription('browser_saved_tab_groups'),
+      description: toolDescription('browser_saved_workspaces'),
       inputSchema: {
         action: z.enum(['list', 'save', 'open', 'delete']).default('list'),
-        groupId: z.string().uuid().optional().describe('Your active groupId. Required only for save.'),
-        savedGroupId: z.string().uuid().optional().describe('Saved group ID returned by your own save call. Required for open or delete.')
+        workspaceId: workspaceIdSchema.optional().describe('Your active UUIDv7 workspaceId. Required only for save.'),
+        savedWorkspaceId: workspaceIdSchema.optional().describe('Archived UUIDv7 workspace ID returned by your own save call. Required for open or delete.')
       }
     },
-    tool(async ({ action, groupId, savedGroupId }: {
+    tool(async ({ action, workspaceId, savedWorkspaceId }: {
       action: 'list' | 'save' | 'open' | 'delete'
-      groupId?: string
-      savedGroupId?: string
+      workspaceId?: string
+      savedWorkspaceId?: string
     }) => {
       if (action === 'list') return textResult(manager.listSavedTabGroups())
       if (action === 'save') {
-        if (!groupId) throw new TypeError('groupId is required to save a tab group')
-        manager.requireMcpTabGroup(groupId)
-        return textResult(await manager.saveAndCloseTabGroup(groupId))
+        if (!workspaceId) throw new TypeError('workspaceId is required to save a workspace')
+        requireAgentWorkspace(workspaceId)
+        return textResult(await manager.saveAndCloseTabGroup(workspaceId))
       }
-      if (!savedGroupId) throw new TypeError(`savedGroupId is required to ${action} a saved tab group`)
-      if (action === 'open') return textResult(await manager.restoreSavedTabGroup(savedGroupId))
-      return textResult(manager.deleteSavedTabGroup(savedGroupId))
+      if (!savedWorkspaceId) throw new TypeError(`savedWorkspaceId is required to ${action} a saved workspace`)
+      if (action === 'open') return textResult(await manager.restoreSavedTabGroup(savedWorkspaceId))
+      return textResult(await manager.deleteSavedTabGroup(savedWorkspaceId))
     })
   )
 
-  const toolsWithoutTabTarget = new Set([
+  const toolsWithoutWorkspaceTabTarget = new Set([
     'browser_status',
     'browser_tabs',
     'browser_new_tab',
@@ -411,7 +462,7 @@ function createBrowserMcpServer(
     'browser_site_data',
     'browser_downloads'
   ])
-  const registerGroupTool = <T extends object>(name: string, config: {
+  const registerWorkspaceTool = <T extends object>(name: string, config: {
     description?: string
     inputSchema?: Record<string, z.ZodType>
   }, handler: (input: T) => Promise<CallToolResult>): void => {
@@ -420,39 +471,39 @@ function createBrowserMcpServer(
       {
         ...config,
         inputSchema: {
-          groupId: z.string().uuid().describe('Tab group ID returned by your own browser_tab_groups create call for this workflow. Never use a listed group you did not create or the human Default group.'),
+          workspaceId: workspaceIdSchema.describe('Stable UUIDv7 returned by your own browser_workspaces create call. Never use a listed workspace you did not create or the human Default workspace.'),
           ...(config.inputSchema ?? {})
         }
       },
       tool(async (input: Record<string, unknown>) => {
-        const groupId = input.groupId
-        if (typeof groupId !== 'string') throw new TypeError('groupId is required. Create your own group with browser_tab_groups first and use only its returned ID.')
-        manager.requireMcpTabGroup(groupId)
-        const resolvedTabId = toolsWithoutTabTarget.has(name)
+        const workspaceId = input.workspaceId
+        if (typeof workspaceId !== 'string') throw new TypeError('workspaceId is required. Create your own workspace with browser_workspaces first and use only its returned ID.')
+        requireAgentWorkspace(workspaceId)
+        const resolvedTabId = toolsWithoutWorkspaceTabTarget.has(name)
           ? undefined
-          : manager.requireTabInMcpGroup(groupId, typeof input.tabId === 'string' ? input.tabId : undefined)
+          : manager.requireTabInMcpGroup(workspaceId, typeof input.tabId === 'string' ? input.tabId : undefined)
         if (resolvedTabId) await manager.wakeTab(resolvedTabId)
-        const result = toolsWithoutTabTarget.has(name)
+        const result = toolsWithoutWorkspaceTabTarget.has(name)
           ? await handler(input as unknown as T)
           : await handler({
             ...input,
             tabId: resolvedTabId
           } as unknown as T)
-        return scopeBrowserStateResult(result, manager.getMcpGroupState(groupId))
+        return scopeBrowserStateResult(result, manager.getMcpGroupState(workspaceId))
       })
     )
   }
 
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_status',
     { description: toolDescription('browser_status'), inputSchema: {} },
-    tool(async ({ groupId }: { groupId?: string }) => {
+    tool(async ({ workspaceId }: { workspaceId?: string }) => {
       const attention = getUserAttention()
-      const visibleAttention = attention?.tabId && manager.tabBelongsToMcpGroup(groupId!, attention.tabId) ? attention : null
-      return textResult({ ...manager.getMcpGroupState(groupId!), userAttention: visibleAttention })
+      const visibleAttention = attention?.tabId && manager.tabBelongsToMcpGroup(workspaceId!, attention.tabId) ? attention : null
+      return textResult({ ...mcpWorkspaceState(manager.getMcpGroupState(workspaceId!)), userAttention: visibleAttention })
     })
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_show',
     { description: toolDescription('browser_show'), inputSchema: {} },
     tool(async ({ tabId }: { tabId?: string }) => {
@@ -461,7 +512,7 @@ function createBrowserMcpServer(
       return textResult('Browser window is visible and focused.')
     })
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_request_user_attention',
     {
       description: toolDescription('browser_request_user_attention'),
@@ -477,40 +528,40 @@ function createBrowserMcpServer(
       return textResult(requestUserAttention({ reason, tabId }))
     })
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_tabs',
     { description: toolDescription('browser_tabs'), inputSchema: {} },
-    tool(async ({ groupId }: { groupId?: string }) => textResult(manager.getMcpGroupState(groupId!).tabs))
+    tool(async ({ workspaceId }: { workspaceId?: string }) => textResult(manager.getMcpGroupState(workspaceId!).tabs.map(mcpWorkspaceTab)))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_new_tab',
     {
       description: toolDescription('browser_new_tab'),
       inputSchema: { url: z.string().optional(), active: z.boolean().optional() }
     },
-    tool(async ({ groupId, url, active }: { groupId?: string; url?: string; active?: boolean }) => {
+    tool(async ({ workspaceId, url, active }: { workspaceId?: string; url?: string; active?: boolean }) => {
       const existingTabIds = new Set(manager.getState().tabs.map((tab) => tab.id))
-      const next = await manager.newTab({ url, active, mcpGroupId: groupId! })
+      const next = await manager.newTab({ url, active, mcpGroupId: workspaceId! })
       const createdTab = next.tabs.find((tab) => !existingTabIds.has(tab.id))
       if (createdTab) {
         const activityId = randomUUID()
         onTabActivity?.({ activityId, tabId: createdTab.id, toolName: 'browser_new_tab', phase: 'started', occurredAt: Date.now() })
         onTabActivity?.({ activityId, tabId: createdTab.id, toolName: 'browser_new_tab', phase: 'finished', occurredAt: Date.now() })
       }
-      return textResult(manager.getMcpGroupState(groupId!))
+      return textResult(mcpWorkspaceState(manager.getMcpGroupState(workspaceId!)))
     })
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_select_tab',
     { description: toolDescription('browser_select_tab'), inputSchema: { tabId: z.string() } },
     tabTool('browser_select_tab', async ({ tabId }: { tabId: string }) => textResult(manager.selectTab(tabId)))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_close_tab',
     { description: toolDescription('browser_close_tab'), inputSchema: { tabId: z.string() } },
     tool(async ({ tabId }: { tabId: string }) => textResult(await manager.closeTab(tabId)))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_bookmarks',
     {
       description: toolDescription('browser_bookmarks'),
@@ -522,8 +573,8 @@ function createBrowserMcpServer(
         active: z.boolean().optional().describe('Whether an opened bookmark becomes the active tab.')
       }
     },
-    tool(async ({ groupId, action, id, url, title, active }: {
-      groupId?: string
+    tool(async ({ workspaceId, action, id, url, title, active }: {
+      workspaceId?: string
       action: 'list' | 'add' | 'rename' | 'remove' | 'open'
       id?: string
       url?: string
@@ -543,10 +594,10 @@ function createBrowserMcpServer(
       if (action === 'remove') return textResult(await bookmarks.remove(id))
       const bookmark = bookmarks.list().find((candidate) => candidate.id === id)
       if (!bookmark) throw new Error(`Bookmark not found: ${id}`)
-      return textResult(await manager.newTab({ url: bookmark.url, active, mcpGroupId: groupId! }))
+      return textResult(await manager.newTab({ url: bookmark.url, active, mcpGroupId: workspaceId! }))
     })
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_visit_history',
     {
       description: toolDescription('browser_visit_history'),
@@ -558,8 +609,8 @@ function createBrowserMcpServer(
         active: z.boolean().optional().describe('Whether a reopened history entry becomes the active tab.')
       }
     },
-    tool(async ({ groupId, action, id, query, limit, active }: {
-      groupId?: string
+    tool(async ({ workspaceId, action, id, query, limit, active }: {
+      workspaceId?: string
       action: 'list' | 'remove' | 'clear' | 'open'
       id?: string
       query?: string
@@ -581,10 +632,10 @@ function createBrowserMcpServer(
       if (action === 'remove') return textResult(await history.remove(id))
       const entry = history.list().find((candidate) => candidate.id === id)
       if (!entry) throw new Error(`History entry not found: ${id}`)
-      return textResult(await manager.newTab({ url: entry.url, active, mcpGroupId: groupId! }))
+      return textResult(await manager.newTab({ url: entry.url, active, mcpGroupId: workspaceId! }))
     })
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_site_data',
     {
       description: toolDescription('browser_site_data'),
@@ -595,17 +646,18 @@ function createBrowserMcpServer(
           .describe('Required for clear. Cookies and storage may sign the user out; open pages are not reloaded.')
       }
     },
-    tool(async ({ action, origin, dataTypes }: {
+    tool(async ({ workspaceId, action, origin, dataTypes }: {
+      workspaceId?: string
       action: 'inspect' | 'clear'
       origin: string
       dataTypes?: SiteDataType[]
     }) => {
-      if (action === 'inspect') return textResult(await siteData.inspect(origin))
+      if (action === 'inspect') return textResult(await siteData.inspect(workspaceId!, origin))
       if (!dataTypes?.length) throw new TypeError('dataTypes must select at least one category to clear')
-      return textResult(await siteData.clear(origin, [...new Set(dataTypes)]))
+      return textResult(await siteData.clear(workspaceId!, origin, [...new Set(dataTypes)]))
     })
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_storage',
     {
       description: toolDescription('browser_storage'),
@@ -627,7 +679,7 @@ function createBrowserMcpServer(
       includeValues: boolean
     }) => textResult(await manager.manageStorage({ tabId, kind, action, key, value, includeValues })))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_storage_changes',
     {
       description: toolDescription('browser_storage_changes'),
@@ -645,19 +697,19 @@ function createBrowserMcpServer(
       includeValues: boolean
     }) => textResult(await manager.storageChanges(action, tabId, includeValues)))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_storage_usage',
     {
       description: toolDescription('browser_storage_usage'),
       inputSchema: {
-        tabId: z.string().optional().describe('Tab in your current group. Defaults to the group active tab.')
+        tabId: z.string().optional().describe('Tab in your current workspace. Defaults to the workspace active tab.')
       }
     },
     tabTool('browser_storage_usage', async ({ tabId }: { tabId?: string }) =>
       textResult(await manager.inspectStorageUsage(tabId))
     )
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_indexeddb',
     {
       description: toolDescription('browser_indexeddb'),
@@ -682,7 +734,7 @@ function createBrowserMcpServer(
       includeValues: boolean
     }) => textResult(await manager.inspectIndexedDb({ tabId, database, objectStore, offset, limit, includeValues })))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_pwa',
     {
       description: toolDescription('browser_pwa'),
@@ -707,7 +759,7 @@ function createBrowserMcpServer(
       includeHeaders: boolean
     }) => textResult(await manager.inspectPwa({ tabId, cacheName, query, offset, limit, includeHeaders })))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_navigate',
     {
       description: toolDescription('browser_navigate'),
@@ -715,7 +767,7 @@ function createBrowserMcpServer(
     },
     tabTool('browser_navigate', async ({ url, tabId }: { url: string; tabId?: string }) => textResult(await manager.navigate(url, tabId)))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_history',
     {
       description: toolDescription('browser_history'),
@@ -732,7 +784,7 @@ function createBrowserMcpServer(
       return textResult(manager.stop(tabId))
     })
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_snapshot',
     {
       description: toolDescription('browser_snapshot'),
@@ -742,7 +794,7 @@ function createBrowserMcpServer(
       textResult(await manager.snapshot(tabId, maxChars))
     )
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_element_inspect',
     {
       description: toolDescription('browser_element_inspect'),
@@ -758,7 +810,7 @@ function createBrowserMcpServer(
       selector?: string
     }) => textResult(await manager.elementInspection(options)))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_click',
     {
       description: toolDescription('browser_click'),
@@ -778,7 +830,7 @@ function createBrowserMcpServer(
       promptText?: string
     }) => textResult(await manager.click(input)))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_dialog',
     {
       description: toolDescription('browser_dialog'),
@@ -792,7 +844,7 @@ function createBrowserMcpServer(
       tabId?: string
     }) => textResult(await manager.handleDialog(action, tabId)))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_type',
     {
       description: toolDescription('browser_type'),
@@ -808,7 +860,7 @@ function createBrowserMcpServer(
       textResult(await manager.type(input))
     )
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_select',
     {
       description: toolDescription('browser_select'),
@@ -823,7 +875,7 @@ function createBrowserMcpServer(
       textResult(await manager.select(input))
     )
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_fill_form',
     {
       description: toolDescription('browser_fill_form'),
@@ -841,7 +893,7 @@ function createBrowserMcpServer(
       fields: Array<{ ref?: string; selector?: string; value: string | boolean }>
     }) => textResult(await manager.fillForm(tabId, fields)))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_hover',
     {
       description: toolDescription('browser_hover'),
@@ -849,7 +901,7 @@ function createBrowserMcpServer(
     },
     tabTool('browser_hover', async (input: { tabId?: string; ref?: string; selector?: string }) => textResult(await manager.hover(input)))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_drag',
     {
       description: toolDescription('browser_drag'),
@@ -869,7 +921,7 @@ function createBrowserMcpServer(
       targetSelector?: string
     }) => textResult(await manager.drag(input)))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_scroll',
     {
       description: toolDescription('browser_scroll'),
@@ -885,7 +937,7 @@ function createBrowserMcpServer(
       textResult(await manager.scroll(input))
     )
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_press',
     {
       description: toolDescription('browser_press'),
@@ -896,7 +948,7 @@ function createBrowserMcpServer(
       return textResult(`Pressed ${key}`)
     })
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_file_upload',
     {
       description: toolDescription('browser_file_upload'),
@@ -911,7 +963,7 @@ function createBrowserMcpServer(
       textResult(await manager.uploadFiles(input, input.paths))
     )
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_wait',
     {
       description: toolDescription('browser_wait'),
@@ -930,7 +982,7 @@ function createBrowserMcpServer(
       return textResult('Page is no longer loading.')
     })
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_emulate',
     {
       description: toolDescription('browser_emulate'),
@@ -993,7 +1045,7 @@ function createBrowserMcpServer(
     },
     tabTool('browser_emulate', async (options: BrowserEmulationOptions) => textResult(await manager.emulate(options)))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_zoom',
     {
       description: toolDescription('browser_zoom'),
@@ -1009,7 +1061,7 @@ function createBrowserMcpServer(
       percent?: number
     }) => textResult(await manager.setZoom({ tabId, action, percent })))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_audio',
     {
       description: toolDescription('browser_audio'),
@@ -1023,7 +1075,7 @@ function createBrowserMcpServer(
       return textResult(manager.setTabMuted(resolvedTabId, muted))
     })
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_screenshot',
     {
       description: toolDescription('browser_screenshot'),
@@ -1059,7 +1111,7 @@ function createBrowserMcpServer(
       return { content: [{ type: 'image', data: image.data.toString('base64'), mimeType: image.mimeType }] }
     })
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_pdf_save',
     {
       description: toolDescription('browser_pdf_save'),
@@ -1077,7 +1129,7 @@ function createBrowserMcpServer(
       pageSize?: 'A4' | 'Letter' | 'Legal'
     }) => textResult(await manager.savePdf(options)))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_resize',
     {
       description: toolDescription('browser_resize'),
@@ -1092,7 +1144,7 @@ function createBrowserMcpServer(
       textResult(await manager.resizeViewport(width, height, reset ?? false, tabId))
     )
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_accessibility_audit',
     {
       description: toolDescription('browser_accessibility_audit'),
@@ -1124,7 +1176,7 @@ function createBrowserMcpServer(
       maxNodesPerViolation
     })))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_quality_audit',
     {
       description: toolDescription('browser_quality_audit'),
@@ -1133,7 +1185,7 @@ function createBrowserMcpServer(
     tabTool('browser_quality_audit', async ({ tabId }: { tabId?: string }) =>
       textResult(await manager.qualityAudit(tabId)))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_performance',
     {
       description: toolDescription('browser_performance'),
@@ -1153,7 +1205,7 @@ function createBrowserMcpServer(
       action?: 'measure' | 'set-baseline' | 'clear-baseline'
     }) => textResult(await manager.performanceReport({ tabId, settleMs, action })))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_design_overview',
     {
       description: toolDescription('browser_design_overview'),
@@ -1162,7 +1214,7 @@ function createBrowserMcpServer(
     tabTool('browser_design_overview', async ({ tabId }: { tabId?: string }) =>
       textResult(await manager.designOverview(tabId)))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_page_metadata',
     {
       description: toolDescription('browser_page_metadata'),
@@ -1171,7 +1223,7 @@ function createBrowserMcpServer(
     tabTool('browser_page_metadata', async ({ tabId }: { tabId?: string }) =>
       textResult(await manager.pageMetadata(tabId)))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_memory',
     {
       description: toolDescription('browser_memory'),
@@ -1204,7 +1256,7 @@ function createBrowserMcpServer(
       collectGarbage: boolean
     }) => textResult(await manager.memoryReport({ tabId, action, collectGarbage })))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_security',
     {
       description: toolDescription('browser_security'),
@@ -1213,7 +1265,7 @@ function createBrowserMcpServer(
     tabTool('browser_security', async ({ tabId }: { tabId?: string }) =>
       textResult(manager.securityReport(tabId)))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_code_coverage',
     {
       description: toolDescription('browser_code_coverage'),
@@ -1236,7 +1288,7 @@ function createBrowserMcpServer(
       reload: boolean
     }) => textResult(await manager.codeCoverage({ tabId, action, mode, reload })))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_cpu_profile',
     {
       description: toolDescription('browser_cpu_profile'),
@@ -1253,7 +1305,7 @@ function createBrowserMcpServer(
       action: 'get' | 'start' | 'stop' | 'clear'
     }) => textResult(await manager.cpuProfile({ tabId, action })))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_debug_report',
     {
       description: toolDescription('browser_debug_report'),
@@ -1281,7 +1333,7 @@ function createBrowserMcpServer(
       includeSuccessfulRequests
     })))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_repro',
     {
       description: toolDescription('browser_repro'),
@@ -1304,7 +1356,7 @@ function createBrowserMcpServer(
       return textResult(format === 'playwright' ? formatReproAsPlaywright(recording) : recording)
     })
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_dom_changes',
     {
       description: toolDescription('browser_dom_changes'),
@@ -1321,7 +1373,7 @@ function createBrowserMcpServer(
       action: 'start' | 'get' | 'stop' | 'clear'
     }) => textResult(await manager.domChanges(action, tabId)))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_visual_compare',
     {
       description: toolDescription('browser_visual_compare'),
@@ -1352,7 +1404,7 @@ function createBrowserMcpServer(
       }
     })
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_console',
     {
       description: toolDescription('browser_console'),
@@ -1367,7 +1419,7 @@ function createBrowserMcpServer(
       return textResult(level ? messages.filter((message) => message.level === level) : messages)
     })
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_diagnostic_logs',
     {
       description: toolDescription('browser_diagnostic_logs'),
@@ -1388,7 +1440,7 @@ function createBrowserMcpServer(
       return textResult(manager.setDiagnosticLogPreservation(tabId!, preserveAcrossNavigation))
     })
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_issues',
     {
       description: toolDescription('browser_issues'),
@@ -1400,7 +1452,7 @@ function createBrowserMcpServer(
     tabTool('browser_issues', async ({ tabId, action }: { tabId?: string; action: 'list' | 'clear' }) =>
       textResult(await manager.inspectorIssues(tabId, action === 'clear')))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_network',
     {
       description: toolDescription('browser_network'),
@@ -1437,7 +1489,7 @@ function createBrowserMcpServer(
       return textResult(limit === undefined ? sorted : sorted.slice(0, limit))
     })
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_network_wait',
     {
       description: toolDescription('browser_network_wait'),
@@ -1461,7 +1513,7 @@ function createBrowserMcpServer(
     tabTool('browser_network_wait', async (options: BrowserNetworkWaitOptions) =>
       textResult(await manager.waitForNetworkRequest(options)))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_network_search',
     {
       description: toolDescription('browser_network_search'),
@@ -1483,7 +1535,7 @@ function createBrowserMcpServer(
       maxBodyChars?: number
     }) => textResult(await manager.networkSearch(options)))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_network_request',
     {
       description: toolDescription('browser_network_request'),
@@ -1504,7 +1556,7 @@ function createBrowserMcpServer(
       return textResult(copyAs && copyAs !== 'json' ? formatNetworkRequestCopy(details, copyAs) : details)
     })
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_network_replay',
     {
       description: toolDescription('browser_network_replay'),
@@ -1520,7 +1572,7 @@ function createBrowserMcpServer(
       confirmSideEffects?: boolean
     }) => textResult(await manager.replayNetworkRequest(tabId, requestId, confirmSideEffects === true)))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_network_har',
     {
       description: toolDescription('browser_network_har'),
@@ -1550,7 +1602,7 @@ function createBrowserMcpServer(
       ? await manager.saveNetworkHar({ ...options, filename })
       : await manager.networkHar(options)))
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_network_routes',
     {
       description: toolDescription('browser_network_routes'),
@@ -1610,7 +1662,7 @@ function createBrowserMcpServer(
       return textResult(await manager.addNetworkRoute(tabId, { urlPattern, method, times, response, abort, throttle }))
     })
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_downloads',
     {
       description: toolDescription('browser_downloads'),
@@ -1623,7 +1675,7 @@ function createBrowserMcpServer(
       textResult(manager.manageDownloads(action ?? 'list', downloadId))
     )
   )
-  registerGroupTool(
+  registerWorkspaceTool(
     'browser_evaluate',
     {
       description: toolDescription('browser_evaluate'),

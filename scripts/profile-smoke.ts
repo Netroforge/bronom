@@ -1,7 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { useMcpTabGroup } from './mcp-tab-group.js'
+import { useMcpWorkspace } from './mcp-workspace.js'
 
 type ProfilePhase = 'write' | 'read' | 'cleanup'
 
@@ -33,7 +33,7 @@ const client = new Client({ name: 'bronom-profile-smoke', version: '1.0.0' })
 await client.connect(new StreamableHTTPClientTransport(endpoint, {
   requestInit: { headers: { authorization: `Bearer ${token}` } }
 }))
-const groupId = await useMcpTabGroup(client, 'Profile smoke')
+const workspaceId = await useMcpWorkspace(client, 'Profile smoke')
 
 function text(result: CallToolResult): string {
   const content = result.content.find((item) => item.type === 'text')
@@ -69,11 +69,11 @@ try {
   }
   if (typedPhase === 'cleanup') {
     const closed = await client.callTool({
-      name: 'browser_tab_groups',
-      arguments: { action: 'close', groupId }
+      name: 'browser_workspaces',
+      arguments: { action: 'close', workspaceId }
     }) as CallToolResult
     if (closed.isError) throw new Error(text(closed))
-    console.log('Persistent profile smoke data and its tab group were removed.')
+    console.log('Persistent profile smoke data and its workspace were removed.')
   } else {
     console.log(`Persistent profile ${typedPhase} phase passed: localStorage and cookie are present.`)
   }

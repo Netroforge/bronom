@@ -9,7 +9,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { BROWSER_TOOL_CATALOG } from '../../src/main/mcp/server.js'
 import { expect, test } from './fixtures.js'
-import { useMcpTabGroup } from '../../scripts/mcp-tab-group.js'
+import { useMcpWorkspace } from '../../scripts/mcp-workspace.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -443,14 +443,14 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       })
       .toBe(true)
     await client.connect(transport)
-    await useMcpTabGroup(client, 'Capability tests')
+    await useMcpWorkspace(client, 'Capability tests')
     const tools = await client.listTools()
     expect(tools.tools.map((tool) => ({ name: tool.name, description: tool.description })).sort((left, right) => left.name.localeCompare(right.name)))
       .toEqual(BROWSER_TOOL_CATALOG.map((tool) => ({ name: tool.name, description: tool.description })).sort((left, right) => left.name.localeCompare(right.name)))
     for (const availableTool of tools.tools) {
-      if (availableTool.name === 'browser_tab_groups' || availableTool.name === 'browser_saved_tab_groups') continue
+      if (availableTool.name === 'browser_workspaces' || availableTool.name === 'browser_saved_workspaces') continue
       const required = (availableTool.inputSchema as { required?: unknown }).required
-      expect(required, `${availableTool.name} must require groupId`).toEqual(expect.arrayContaining(['groupId']))
+      expect(required, `${availableTool.name} must require workspaceId`).toEqual(expect.arrayContaining(['workspaceId']))
     }
 
     const defaultDiagnosticLogs = await client.callTool({ name: 'browser_diagnostic_logs', arguments: { action: 'get' } }) as CallToolResult
@@ -1177,7 +1177,7 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     const storagePanel = appWindow.getByRole('dialog', { name: /Site storage/ })
     await expect(storagePanel).toBeVisible()
     await expect(storagePanel).toContainText('bronom-mcp-site-data')
-    await expect(storagePanel).toContainText('Shared by origin across groups')
+    await expect(storagePanel).toContainText('Shared by origin in this workspace')
     await storagePanel.getByRole('button', { name: 'Session', exact: true }).click()
     await expect(storagePanel).toContainText('first-tab-only')
 

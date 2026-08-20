@@ -4,7 +4,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { expect, test } from './fixtures.js'
-import { useMcpTabGroup } from '../../scripts/mcp-tab-group.js'
+import { useMcpWorkspace } from '../../scripts/mcp-workspace.js'
 
 function text(result: CallToolResult): string {
   const content = result.content.find((item) => item.type === 'text')
@@ -32,7 +32,7 @@ test('captures screenshots and saves a PDF while Bronom is hidden in the tray', 
       }
     }).toBe(true)
     await client.connect(transport)
-    await useMcpTabGroup(client, 'Screenshot tray tests')
+    await useMcpWorkspace(client, 'Screenshot tray tests')
     const status = await client.callTool({ name: 'browser_status', arguments: {} }) as CallToolResult
     const tabId = JSON.parse(text(status)).activeTabId as string
 

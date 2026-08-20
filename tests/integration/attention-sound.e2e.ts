@@ -1,7 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { expect, test } from './fixtures.js'
-import { useMcpTabGroup } from '../../scripts/mcp-tab-group.js'
+import { useMcpWorkspace } from '../../scripts/mcp-workspace.js'
 
 test('previews and plays the selected Foley cue for user attention', async ({
   appWindow,
@@ -41,7 +41,7 @@ test('previews and plays the selected Foley cue for user attention', async ({
   })
   try {
     await client.connect(transport)
-    await useMcpTabGroup(client, 'Attention sound tests')
+    await useMcpWorkspace(client, 'Attention sound tests')
     await client.callTool({
       name: 'browser_request_user_attention',
       arguments: { reason: 'Please complete this manual step.' }

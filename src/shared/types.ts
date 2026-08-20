@@ -258,6 +258,8 @@ export interface BrowserTabGroupState {
   tabCount: number
   activeTabId: string | null
   isDefault: boolean
+  storageKind: 'default' | 'isolated'
+  storageOriginCount: number
 }
 
 export interface BrowserTabGroupUpdate {
@@ -276,7 +278,30 @@ export interface BrowserSavedTabGroupState {
   name: string
   color: BrowserTabGroupColor
   savedAt: string
+  storageOriginCount: number
   tabs: BrowserSavedTabGroupTab[]
+}
+
+export interface BrowserWorkspaceCreateOptions {
+  name: string
+  color?: BrowserTabGroupColor
+  storage: 'scratch' | 'fork-default'
+  origins?: string[]
+}
+
+export interface BrowserWorkspaceStorageTransferOptions {
+  workspaceId: string
+  direction: 'from-default' | 'to-default'
+  origins?: string[]
+}
+
+export interface BrowserWorkspaceStorageTransferResult {
+  workspaceId: string
+  direction: 'from-default' | 'to-default'
+  cookieCount: number
+  localStorageOriginCount: number
+  localStorageItemCount: number
+  origins: string[]
 }
 
 export interface BrowserClosedTabState {
@@ -2094,9 +2119,12 @@ export interface BronomApi {
   setTabSleeping(tabId: string, sleeping: boolean): Promise<BrowserState>
   sleepInactiveTabs(): Promise<BrowserState>
   reorderTab(tabId: string, targetTabId: string, placement: 'before' | 'after'): Promise<BrowserState>
+  createWorkspace(options: BrowserWorkspaceCreateOptions): Promise<BrowserState>
   renameTabGroup(groupId: string, name: string): Promise<BrowserState>
   updateTabGroup(groupId: string, updates: BrowserTabGroupUpdate): Promise<BrowserState>
-  moveTabToGroup(tabId: string, groupId?: string): Promise<BrowserState>
+  listWorkspaceStorageOrigins(workspaceId: string): Promise<string[]>
+  transferWorkspaceStorage(options: BrowserWorkspaceStorageTransferOptions): Promise<BrowserWorkspaceStorageTransferResult>
+  closeWorkspace(workspaceId: string): Promise<BrowserState>
   saveAndCloseTabGroup(groupId: string): Promise<BrowserState>
   restoreSavedTabGroup(savedGroupId: string): Promise<BrowserState>
   deleteSavedTabGroup(savedGroupId: string): Promise<BrowserState>

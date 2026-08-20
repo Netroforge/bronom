@@ -10,6 +10,7 @@ import {
   BrowserWindow,
   Menu,
   nativeImage,
+  session,
   shell,
   WebContentsView,
   type ContextMenuParams,
@@ -149,6 +150,7 @@ import {
 } from '../../shared/memory-saver.js'
 import { resolveViewportPreset } from '../../shared/viewport-presets.js'
 import { isValidBrowserLocale, isValidBrowserTimezone } from '../../shared/browser-environment.js'
+import { isUuidV7, uuidV7 } from '../uuid-v7.js'
 import type {
   BrowserEmulationOptions,
   BrowserEmulationState,
@@ -236,6 +238,9 @@ import type {
   BrowserSavedTabGroupState,
   BrowserState,
   BrowserTabGroupState,
+  BrowserWorkspaceCreateOptions,
+  BrowserWorkspaceStorageTransferOptions,
+  BrowserWorkspaceStorageTransferResult,
   BrowserTabState,
   McpTabActivity,
   NewTabOptions
@@ -262,11 +267,47 @@ import {
 } from './page-scripts.js'
 import { TabStateStore, type PersistedBrowserState } from './tab-store.js'
 import { normalizeAddress } from './url.js'
+import {
+  destroyWorkspaceStorage,
+  normalizeWorkspaceStorageOrigins,
+  transferWorkspaceStorage,
+  workspacePartition
+} from './workspace-storage.js'
 
 export const BRONOM_HOME_URL = 'bronom://home/'
 const MAX_TABS = 50
 const MAX_SAVED_TAB_GROUPS = 50
+const MAX_ACTIVE_WORKSPACES = 50
 const MAX_CLOSED_TABS = MAX_TABS
+const MAX_WORKSPACE_NAME_LENGTH = 80
+
+function normalizedWorkspaceName(name: string): string {
+  const normalized = name.trim().normalize('NFC')
+  if (!normalized) throw new TypeError('Workspace name cannot be empty.')
+  if (normalized.length > MAX_WORKSPACE_NAME_LENGTH) {
+    throw new TypeError(`Workspace name cannot exceed ${MAX_WORKSPACE_NAME_LENGTH} characters.`)
+  }
+  return normalized
+}
+
+function workspaceNameKey(name: string): string {
+  return name.trim().normalize('NFKC').toLowerCase()
+}
+
+function uniquePersistedWorkspaceName(name: string, usedNames: Set<string>): string {
+  const normalized = name.trim().normalize('NFC').slice(0, MAX_WORKSPACE_NAME_LENGTH) || 'Workspace'
+  if (!usedNames.has(workspaceNameKey(normalized))) {
+    usedNames.add(workspaceNameKey(normalized))
+    return normalized
+  }
+  for (let suffix = 2; ; suffix += 1) {
+    const marker = ` (${suffix})`
+    const candidate = `${normalized.slice(0, MAX_WORKSPACE_NAME_LENGTH - marker.length).trimEnd()}${marker}`
+    if (usedNames.has(workspaceNameKey(candidate))) continue
+    usedNames.add(workspaceNameKey(candidate))
+    return candidate
+  }
+}
 const MAX_DOWNLOAD_HISTORY = 200
 const MAX_FAVICON_BYTES = 512 * 1024
 const MAX_NETWORK_TOTAL_BUFFER_BYTES = 8 * 1024 * 1024
@@ -568,6 +609,13 @@ interface BrowserTabGroup {
   createdAt: string
   lastUsedAt: string
   activeTabId: string | null
+  storageId?: string
+  origins: string[]
+}
+
+interface BrowserSavedTabGroupInternal extends BrowserSavedTabGroupState {
+  storageId?: string
+  origins: string[]
 }
 
 interface BrowserNetworkRequestRecord extends BrowserNetworkRequest {
@@ -752,12 +800,13 @@ export interface TabsManagerOptions {
   onPageVisited?: (visit: { url: string; title: string }) => void
   onStateChanged?: (state: BrowserState) => void
   onDownloadsChanged?: (downloads: BrowserDownloadState[]) => void
+  configureSession?: (browserSession: Session) => void
 }
 
 export class BrowserTabsManager {
   private readonly tabs = new Map<string, BrowserTab>()
   private readonly mcpTabGroups = new Map<string, BrowserTabGroup>()
-  private readonly savedTabGroups = new Map<string, BrowserSavedTabGroupState>()
+  private readonly savedTabGroups = new Map<string, BrowserSavedTabGroupInternal>()
   private readonly store: TabStateStore
   private activeTabId: string | null = null
   private splitView: BrowserSplitViewState | null = null
@@ -774,8 +823,8 @@ export class BrowserTabsManager {
   private readonly mcpActivitiesByTab = new Map<string, Set<string>>()
   private toolbarHeight: number
   private contentInsets = { top: 0, right: 0, bottom: 0, left: 0 }
-  private networkHooksInstalled = false
-  private downloadHooksInstalled = false
+  private readonly networkHookSessions = new WeakSet<Session>()
+  private readonly downloadHookSessions = new WeakSet<Session>()
   private readonly webContentsToTab = new Map<number, string>()
   private readonly downloads = new Map<string, BrowserDownloadState>()
   private readonly downloadItems = new Map<string, DownloadItem>()
@@ -810,50 +859,121 @@ export class BrowserTabsManager {
     this.restoringLayout = true
     const saved = await this.store.load()
     this.allHumanInteractionLocked = saved?.allHumanInteractionLocked === true
-    for (const group of saved?.mcpTabGroups ?? []) this.mcpTabGroups.set(group.id, { ...group, activeTabId: group.activeTabId ?? null })
-    for (const group of saved?.savedTabGroups ?? []) {
-      this.savedTabGroups.set(group.id, {
+    const persistedGroups = saved?.mcpTabGroups ?? []
+    const persistedTabs = saved?.tabs ?? []
+    const usedWorkspaceIds = new Set<string>()
+    const migratedWorkspaceIdByOriginal = new Map<string, string>()
+    const originalWorkspaceIdByMigrated = new Map<string, string>()
+    const persistedDefaultGroup = saved?.defaultHumanGroupId
+      ? persistedGroups.find((group) => group.id === saved.defaultHumanGroupId)
+      : undefined
+    const orderedPersistedGroups = persistedDefaultGroup
+      ? [persistedDefaultGroup, ...persistedGroups.filter((group) => group !== persistedDefaultGroup)]
+      : persistedGroups
+    const usedWorkspaceNames = new Set<string>(['default'])
+    const usedTabIds = new Set<string>()
+    const migratedTabIdByOriginal = new Map<string, string>()
+    const migratedTabIds = persistedTabs.map((tab) => {
+      const id = isUuidV7(tab.id) && !usedTabIds.has(tab.id) ? tab.id : uuidV7()
+      usedTabIds.add(id)
+      if (!migratedTabIdByOriginal.has(tab.id)) migratedTabIdByOriginal.set(tab.id, id)
+      return id
+    })
+
+    for (const group of orderedPersistedGroups) {
+      const id = isUuidV7(group.id) && !usedWorkspaceIds.has(group.id) ? group.id : uuidV7()
+      usedWorkspaceIds.add(id)
+      if (!migratedWorkspaceIdByOriginal.has(group.id)) migratedWorkspaceIdByOriginal.set(group.id, id)
+      originalWorkspaceIdByMigrated.set(id, group.id)
+      const isDefault = group === persistedDefaultGroup
+      this.mcpTabGroups.set(id, {
         ...group,
+        id,
+        name: isDefault ? 'Default' : uniquePersistedWorkspaceName(group.name, usedWorkspaceNames),
+        activeTabId: group.activeTabId ? migratedTabIdByOriginal.get(group.activeTabId) ?? null : null,
+        origins: normalizeWorkspaceStorageOrigins(group.origins ?? [])
+      })
+    }
+    for (const group of saved?.savedTabGroups ?? []) {
+      const id = isUuidV7(group.id) && !usedWorkspaceIds.has(group.id) ? group.id : uuidV7()
+      usedWorkspaceIds.add(id)
+      this.savedTabGroups.set(id, {
+        ...group,
+        id,
+        name: uniquePersistedWorkspaceName(group.name, usedWorkspaceNames),
+        storageOriginCount: group.origins?.length ?? 0,
+        origins: normalizeWorkspaceStorageOrigins(group.origins ?? []),
         tabs: group.tabs.map((tab) => ({ title: tab.title, url: tab.url, pinned: tab.pinned === true }))
       })
     }
-    this.defaultHumanGroupId = saved?.defaultHumanGroupId && this.mcpTabGroups.has(saved.defaultHumanGroupId)
-      ? saved.defaultHumanGroupId
+    const migratedDefaultGroupId = saved?.defaultHumanGroupId
+      ? migratedWorkspaceIdByOriginal.get(saved.defaultHumanGroupId)
+      : undefined
+    this.defaultHumanGroupId = migratedDefaultGroupId && this.mcpTabGroups.has(migratedDefaultGroupId)
+      ? migratedDefaultGroupId
       : null
-    if (saved?.tabs.length) {
+    // Default represents the shared durable browser profile even before the
+    // first human website tab is opened, so it must always be listable.
+    this.ensureDefaultHumanGroup()
+    for (const group of this.mcpTabGroups.values()) {
+      if (group.id === this.defaultHumanGroupId || group.storageId) continue
+      // Older releases stored every group in Default. Do not copy that shared
+      // state forward: legacy agent workspaces restart in a fresh partition.
+      group.storageId = randomUUID()
+      const originalGroupId = originalWorkspaceIdByMigrated.get(group.id)
+      group.origins = normalizeWorkspaceStorageOrigins([
+        ...group.origins,
+        ...persistedTabs
+          .filter((tab) => tab.mcpGroupId === originalGroupId && isWebUrl(tab.url))
+          .map((tab) => new URL(tab.url).origin)
+      ])
+    }
+    if (persistedTabs.length) {
       let restoredHome = false
-      for (const tab of saved.tabs) {
+      for (const [index, tab] of persistedTabs.entries()) {
         if (this.tabs.size >= MAX_TABS) break
         if (isBronomHomeUrl(tab.url)) {
           if (restoredHome) continue
           restoredHome = true
         }
         await this.createTab({
-          id: tab.id,
+          id: migratedTabIds[index],
           title: isBronomHomeUrl(tab.url) ? undefined : tab.title,
           url: isBronomHomeUrl(tab.url) ? BRONOM_HOME_URL : tab.url,
           pinned: tab.pinned === true && !isBronomHomeUrl(tab.url),
           humanInteractionLocked: tab.humanInteractionLocked === true,
-          mcpGroupId: tab.mcpGroupId && this.mcpTabGroups.has(tab.mcpGroupId) ? tab.mcpGroupId : undefined,
+          mcpGroupId: isBronomHomeUrl(tab.url)
+            ? undefined
+            : tab.mcpGroupId && migratedWorkspaceIdByOriginal.has(tab.mcpGroupId)
+              ? migratedWorkspaceIdByOriginal.get(tab.mcpGroupId)
+              : this.ensureDefaultHumanGroup(),
           suppressInitialHistory: true,
           active: false
         })
       }
       const fallbackId = this.tabs.keys().next().value as string | undefined
       if (fallbackId) {
-        const restoredActiveTabId = saved.activeTabId && this.tabs.has(saved.activeTabId) ? saved.activeTabId : fallbackId
+        const migratedActiveTabId = saved?.activeTabId ? migratedTabIdByOriginal.get(saved.activeTabId) : undefined
+        const restoredActiveTabId = migratedActiveTabId && this.tabs.has(migratedActiveTabId) ? migratedActiveTabId : fallbackId
         this.selectTab(restoredActiveTabId)
-        const savedSplit = saved.splitView
+        const savedSplit = saved?.splitView
+        const migratedSplit = savedSplit
+          ? {
+              ...savedSplit,
+              firstTabId: migratedTabIdByOriginal.get(savedSplit.firstTabId) ?? '',
+              secondTabId: migratedTabIdByOriginal.get(savedSplit.secondTabId) ?? ''
+            }
+          : undefined
         if (
-          savedSplit
-          && this.tabs.has(savedSplit.firstTabId)
-          && this.tabs.has(savedSplit.secondTabId)
-          && !isBronomHomeUrl(this.tabs.get(savedSplit.firstTabId)!.url)
-          && !isBronomHomeUrl(this.tabs.get(savedSplit.secondTabId)!.url)
-          && (restoredActiveTabId === savedSplit.firstTabId || restoredActiveTabId === savedSplit.secondTabId)
+          migratedSplit
+          && this.tabs.has(migratedSplit.firstTabId)
+          && this.tabs.has(migratedSplit.secondTabId)
+          && !isBronomHomeUrl(this.tabs.get(migratedSplit.firstTabId)!.url)
+          && !isBronomHomeUrl(this.tabs.get(migratedSplit.secondTabId)!.url)
+          && (restoredActiveTabId === migratedSplit.firstTabId || restoredActiveTabId === migratedSplit.secondTabId)
         ) {
-          this.splitView = { ...savedSplit }
-          const otherTabId = restoredActiveTabId === savedSplit.firstTabId ? savedSplit.secondTabId : savedSplit.firstTabId
+          this.splitView = migratedSplit
+          const otherTabId = restoredActiveTabId === migratedSplit.firstTabId ? migratedSplit.secondTabId : migratedSplit.firstTabId
           this.window.contentView.addChildView(this.tabs.get(otherTabId)!.view)
         }
       }
@@ -885,32 +1005,81 @@ export class BrowserTabsManager {
 
   listMcpTabGroups(): BrowserTabGroupState[] {
     return [...this.mcpTabGroups.values()].map((group) => ({
-      ...group,
+      id: group.id,
+      name: group.name,
+      color: group.color,
+      createdAt: group.createdAt,
+      lastUsedAt: group.lastUsedAt,
+      activeTabId: group.activeTabId,
       tabCount: [...this.tabs.values()].filter((tab) => tab.mcpGroupId === group.id).length,
-      isDefault: group.id === this.defaultHumanGroupId
+      isDefault: group.id === this.defaultHumanGroupId,
+      storageKind: group.id === this.defaultHumanGroupId ? 'default' : 'isolated',
+      storageOriginCount: group.origins.length
     }))
   }
 
   listSavedTabGroups(): BrowserSavedTabGroupState[] {
     return [...this.savedTabGroups.values()]
       .sort((first, second) => second.savedAt.localeCompare(first.savedAt))
-      .map((group) => ({ ...group, tabs: group.tabs.map((tab) => ({ ...tab })) }))
+      .map((group) => ({
+        id: group.id,
+        name: group.name,
+        color: group.color,
+        savedAt: group.savedAt,
+        storageOriginCount: group.origins.length,
+        tabs: group.tabs.map((tab) => ({ ...tab }))
+      }))
   }
 
-  createMcpTabGroup(name: string, color?: BrowserTabGroupColor): BrowserTabGroupState {
+  async createMcpTabGroup(
+    name: string,
+    color?: BrowserTabGroupColor,
+    storage: 'scratch' | 'fork-default' = 'scratch',
+    origins?: string[]
+  ): Promise<BrowserTabGroupState> {
+    const normalizedName = normalizedWorkspaceName(name)
+    this.assertWorkspaceNameAvailable(normalizedName)
+    if (this.mcpTabGroups.size >= MAX_ACTIVE_WORKSPACES) {
+      throw new Error(`Bronom can keep up to ${MAX_ACTIVE_WORKSPACES} active workspaces, including Default.`)
+    }
     const now = new Date().toISOString()
-    const id = randomUUID()
+    const id = uuidV7()
+    const storageId = randomUUID()
     const group: BrowserTabGroup = {
       id,
-      name: name.trim(),
+      name: normalizedName,
       color: color ?? defaultTabGroupColor(id),
       createdAt: now,
       lastUsedAt: now,
-      activeTabId: null
+      activeTabId: null,
+      storageId,
+      origins: []
     }
     this.mcpTabGroups.set(group.id, group)
+    if (storage === 'fork-default') {
+      try {
+        const defaultGroup = this.defaultHumanGroupId ? this.mcpTabGroups.get(this.defaultHumanGroupId) : undefined
+        const selectedOrigins = normalizeWorkspaceStorageOrigins(origins ?? defaultGroup?.origins ?? [])
+        await transferWorkspaceStorage({
+          sourcePartition: this.options.partition,
+          targetPartition: workspacePartition(this.options.partition, storageId),
+          origins: selectedOrigins,
+          copyAllCookies: origins === undefined,
+          copyLocalStorage: true,
+          configureSession: this.options.configureSession
+        })
+        group.origins = selectedOrigins
+      } catch (error) {
+        this.mcpTabGroups.delete(group.id)
+        await destroyWorkspaceStorage(
+          workspacePartition(this.options.partition, storageId),
+          this.options.configureSession
+        ).catch(() => undefined)
+        throw error
+      }
+    }
     this.changed()
-    return { ...group, tabCount: 0, isDefault: false }
+    return this.requireMcpTabGroup(group.id)
   }
 
   renameMcpTabGroup(groupId: string, name: string): BrowserTabGroupState {
@@ -918,58 +1087,116 @@ export class BrowserTabsManager {
   }
 
   updateMcpTabGroup(groupId: string, updates: { name?: string; color?: BrowserTabGroupColor }): BrowserTabGroupState {
-    if (updates.name !== undefined && !updates.name.trim()) throw new TypeError('Tab group name cannot be empty.')
-    if (updates.name === undefined && updates.color === undefined) throw new TypeError('A tab group name or color is required.')
+    if (updates.name === undefined && updates.color === undefined) throw new TypeError('A workspace name or color is required.')
     const group = this.mcpTabGroups.get(groupId)
-    if (!group) throw new Error(`Unknown tab group: ${groupId}. List groups with browser_tab_groups or create one first.`)
-    if (updates.name !== undefined) group.name = updates.name.trim()
+    if (!group) throw new Error(`Unknown workspace: ${groupId}. List workspaces with browser_workspaces or create one first.`)
+    if (updates.name !== undefined) {
+      const name = normalizedWorkspaceName(updates.name)
+      if (group.id === this.defaultHumanGroupId && name !== group.name) {
+        throw new Error('The Default workspace cannot be renamed.')
+      }
+      this.assertWorkspaceNameAvailable(name, group.id)
+      group.name = name
+    }
     if (updates.color !== undefined) group.color = updates.color
     group.lastUsedAt = new Date().toISOString()
     this.changed()
     return this.listMcpTabGroups().find((candidate) => candidate.id === groupId)!
   }
 
-  moveTabToMcpGroup(tabId: string, groupId?: string): BrowserState {
-    const tab = this.getTab(tabId)
-    if (isBronomHomeUrl(tab.url)) throw new Error('Bronom Home cannot be added to a tab group.')
-    if (groupId) this.requireMcpTabGroup(groupId)
-    const previousGroupId = tab.mcpGroupId
-    if (previousGroupId === groupId) return this.getState()
-    tab.mcpGroupId = groupId
-    if (previousGroupId) {
-      const previous = this.mcpTabGroups.get(previousGroupId)
-      if (previous?.activeTabId === tab.id) {
-        previous.activeTabId = [...this.tabs.values()].find((candidate) => candidate.mcpGroupId === previousGroupId)?.id ?? null
-      }
+  requireMcpTabGroup(groupId: string): BrowserTabGroupState {
+    const group = this.mcpTabGroups.get(groupId)
+    if (!group) throw new Error(`Unknown workspace: ${groupId}. List workspaces with browser_workspaces or create one first.`)
+    return {
+      id: group.id,
+      name: group.name,
+      color: group.color,
+      createdAt: group.createdAt,
+      lastUsedAt: group.lastUsedAt,
+      activeTabId: group.activeTabId,
+      tabCount: [...this.tabs.values()].filter((tab) => tab.mcpGroupId === group.id).length,
+      isDefault: group.id === this.defaultHumanGroupId,
+      storageKind: group.id === this.defaultHumanGroupId ? 'default' : 'isolated',
+      storageOriginCount: group.origins.length
     }
-    if (groupId) {
-      const group = this.mcpTabGroups.get(groupId)!
-      group.activeTabId = tab.id
-      group.lastUsedAt = new Date().toISOString()
+  }
+
+  async createWorkspace(options: BrowserWorkspaceCreateOptions): Promise<BrowserState> {
+    if (!options.name.trim()) throw new TypeError('Workspace name cannot be empty.')
+    this.ensureDefaultHumanGroup()
+    const workspace = await this.createMcpTabGroup(options.name, options.color, options.storage, options.origins)
+    try {
+      await this.createTab({ url: 'about:blank', active: true, mcpGroupId: workspace.id })
+      return this.getState()
+    } catch (error) {
+      await this.closeMcpTabGroup(workspace.id).catch(() => undefined)
+      throw error
     }
-    this.changed()
+  }
+
+  async closeWorkspace(workspaceId: string): Promise<BrowserState> {
+    await this.closeMcpTabGroup(workspaceId)
     return this.getState()
   }
 
-  requireMcpTabGroup(groupId: string): BrowserTabGroupState {
-    const group = this.mcpTabGroups.get(groupId)
-    if (!group) throw new Error(`Unknown tab group: ${groupId}. List groups with browser_tab_groups or create one first.`)
+  listWorkspaceStorageOrigins(workspaceId: string): string[] {
+    const workspace = this.mcpTabGroups.get(workspaceId)
+    if (!workspace) throw new Error(`Unknown workspace: ${workspaceId}.`)
+    return [...workspace.origins]
+  }
+
+  workspaceSession(workspaceId: string): Session {
+    const workspace = this.mcpTabGroups.get(workspaceId)
+    if (!workspace) throw new Error(`Unknown workspace: ${workspaceId}.`)
+    const partition = workspace.storageId
+      ? workspacePartition(this.options.partition, workspace.storageId)
+      : this.options.partition
+    const browserSession = session.fromPartition(partition, { cache: true })
+    this.options.configureSession?.(browserSession)
+    return browserSession
+  }
+
+  async transferWorkspaceStorage(
+    options: BrowserWorkspaceStorageTransferOptions
+  ): Promise<BrowserWorkspaceStorageTransferResult> {
+    const workspace = this.mcpTabGroups.get(options.workspaceId)
+    if (!workspace) throw new Error(`Unknown workspace: ${options.workspaceId}.`)
+    if (workspace.id === this.defaultHumanGroupId) throw new Error('Default already is the shared workspace.')
+    if (!workspace.storageId) throw new Error('This legacy workspace must finish isolation before storage can be transferred.')
+    const defaultWorkspace = this.defaultHumanGroupId ? this.mcpTabGroups.get(this.defaultHumanGroupId) : undefined
+    if (!defaultWorkspace) throw new Error('Default workspace is unavailable.')
+    const origins = normalizeWorkspaceStorageOrigins(options.origins ?? (
+      options.direction === 'from-default' ? defaultWorkspace.origins : workspace.origins
+    ))
+    const isolatedPartition = workspacePartition(this.options.partition, workspace.storageId)
+    const result = await transferWorkspaceStorage({
+      sourcePartition: options.direction === 'from-default' ? this.options.partition : isolatedPartition,
+      targetPartition: options.direction === 'from-default' ? isolatedPartition : this.options.partition,
+      origins,
+      copyAllCookies: options.origins === undefined,
+      copyLocalStorage: true,
+      configureSession: this.options.configureSession
+    })
+    const target = options.direction === 'from-default' ? workspace : defaultWorkspace
+    target.origins = normalizeWorkspaceStorageOrigins([...target.origins, ...origins])
+    target.lastUsedAt = new Date().toISOString()
+    this.changed()
     return {
-      ...group,
-      tabCount: [...this.tabs.values()].filter((tab) => tab.mcpGroupId === group.id).length,
-      isDefault: group.id === this.defaultHumanGroupId
+      workspaceId: workspace.id,
+      direction: options.direction,
+      ...result
     }
   }
 
   requireTabInMcpGroup(groupId: string, tabId?: string): string {
     const group = this.mcpTabGroups.get(groupId)
-    if (!group) throw new Error(`Unknown tab group: ${groupId}. List groups with browser_tab_groups or create one first.`)
+    if (!group) throw new Error(`Unknown workspace: ${groupId}. List workspaces with browser_workspaces or create one first.`)
     const resolvedTabId = tabId
       ?? (group.activeTabId && this.tabs.get(group.activeTabId)?.mcpGroupId === groupId ? group.activeTabId : undefined)
       ?? [...this.tabs.values()].find((tab) => tab.mcpGroupId === groupId)?.id
-    if (!resolvedTabId) throw new Error(`Tab group "${group.name}" has no tabs. Open one with browser_new_tab.`)
+    if (!resolvedTabId) throw new Error(`Workspace "${group.name}" has no tabs. Open one with browser_new_tab.`)
     const tab = this.tabs.get(resolvedTabId)
-    if (!tab || tab.mcpGroupId !== groupId) throw new Error(`Tab ${resolvedTabId} does not belong to tab group "${group.name}".`)
+    if (!tab || tab.mcpGroupId !== groupId) throw new Error(`Tab ${resolvedTabId} does not belong to workspace "${group.name}".`)
     group.activeTabId = resolvedTabId
     group.lastUsedAt = new Date().toISOString()
     return resolvedTabId
@@ -1001,44 +1228,85 @@ export class BrowserTabsManager {
     }
   }
 
-  async closeMcpTabGroup(groupId: string): Promise<BrowserTabGroupState[]> {
-    this.requireMcpTabGroup(groupId)
+  async closeMcpTabGroup(groupId: string, preserveStorage = false): Promise<BrowserTabGroupState[]> {
+    const group = this.mcpTabGroups.get(groupId)
+    if (!group) throw new Error(`Unknown workspace: ${groupId}.`)
+    if (groupId === this.defaultHumanGroupId) throw new Error('The Default workspace cannot be closed or deleted.')
     const tabIds = [...this.tabs.values()].filter((tab) => tab.mcpGroupId === groupId).map((tab) => tab.id)
     await this.closeTabs(tabIds)
     for (let index = this.closedTabs.length - 1; index >= 0; index -= 1) {
       if (this.closedTabs[index]?.mcpGroupId === groupId) this.closedTabs.splice(index, 1)
     }
+    if (!preserveStorage && group.storageId) {
+      try {
+        await destroyWorkspaceStorage(
+          workspacePartition(this.options.partition, group.storageId),
+          this.options.configureSession
+        )
+      } catch (error) {
+        // Keep the now-empty workspace addressable so deletion can be retried;
+        // dropping it here would orphan private profile data on disk.
+        group.activeTabId = null
+        this.changed()
+        throw error
+      }
+    }
     this.mcpTabGroups.delete(groupId)
-    if (this.defaultHumanGroupId === groupId) this.defaultHumanGroupId = null
     this.changed()
     return this.listMcpTabGroups()
   }
 
   async saveAndCloseTabGroup(groupId: string): Promise<BrowserSavedTabGroupState> {
     const group = this.requireMcpTabGroup(groupId)
-    if (group.isDefault) throw new Error('The sticky Default group cannot be closed. Move its tabs into another group first.')
+    if (group.isDefault) throw new Error('The Default workspace cannot be archived, closed, or deleted.')
     const tabs = this.orderedTabs().filter((tab) => tab.mcpGroupId === groupId)
-    if (!tabs.length) throw new Error(`Tab group "${group.name}" has no tabs to save.`)
-    if (this.savedTabGroups.size >= MAX_SAVED_TAB_GROUPS) throw new Error(`Bronom can keep up to ${MAX_SAVED_TAB_GROUPS} saved tab groups.`)
-    const saved: BrowserSavedTabGroupState = {
-      id: randomUUID(),
+    if (!tabs.length) throw new Error(`Workspace "${group.name}" has no tabs to archive.`)
+    if (this.savedTabGroups.size >= MAX_SAVED_TAB_GROUPS) throw new Error(`Bronom can keep up to ${MAX_SAVED_TAB_GROUPS} archived workspaces.`)
+    const internalGroup = this.mcpTabGroups.get(groupId)!
+    const saved: BrowserSavedTabGroupInternal = {
+      id: uuidV7(),
       name: group.name,
       color: group.color,
       savedAt: new Date().toISOString(),
+      storageOriginCount: internalGroup.origins.length,
+      ...(internalGroup.storageId ? { storageId: internalGroup.storageId } : {}),
+      origins: [...internalGroup.origins],
       tabs: tabs.map((tab) => ({ title: tab.title, url: tab.url, pinned: tab.pinned }))
     }
+    await this.closeMcpTabGroup(groupId, true)
     this.savedTabGroups.set(saved.id, saved)
-    await this.closeMcpTabGroup(groupId)
-    return { ...saved, tabs: saved.tabs.map((tab) => ({ ...tab })) }
+    this.changed()
+    return {
+      id: saved.id,
+      name: saved.name,
+      color: saved.color,
+      savedAt: saved.savedAt,
+      storageOriginCount: saved.origins.length,
+      tabs: saved.tabs.map((tab) => ({ ...tab }))
+    }
   }
 
   async restoreSavedTabGroup(savedGroupId: string): Promise<BrowserTabGroupState> {
     const saved = this.savedTabGroups.get(savedGroupId)
-    if (!saved) throw new Error(`Unknown saved tab group: ${savedGroupId}.`)
+    if (!saved) throw new Error(`Unknown archived workspace: ${savedGroupId}.`)
+    this.assertWorkspaceNameAvailable(saved.name, undefined, savedGroupId)
     if (this.tabs.size + saved.tabs.length > MAX_TABS) {
       throw new Error(`Restoring "${saved.name}" would exceed the ${MAX_TABS}-tab limit.`)
     }
-    const restored = this.createMcpTabGroup(saved.name, saved.color)
+    const now = new Date().toISOString()
+    const restoredGroup: BrowserTabGroup = {
+      id: uuidV7(),
+      name: saved.name,
+      color: saved.color,
+      createdAt: now,
+      lastUsedAt: now,
+      activeTabId: null,
+      storageId: saved.storageId ?? randomUUID(),
+      origins: [...saved.origins]
+    }
+    this.savedTabGroups.delete(savedGroupId)
+    this.mcpTabGroups.set(restoredGroup.id, restoredGroup)
+    const restored = this.requireMcpTabGroup(restoredGroup.id)
     try {
       for (const savedTab of saved.tabs) {
         await this.createTab({
@@ -1051,17 +1319,28 @@ export class BrowserTabsManager {
       }
       const tabs = [...this.tabs.values()].filter((tab) => tab.mcpGroupId === restored.id)
       if (tabs.length) this.selectTab(tabs[tabs.length - 1]!.id)
-      this.savedTabGroups.delete(savedGroupId)
       this.changed()
       return this.requireMcpTabGroup(restored.id)
     } catch (error) {
-      await this.closeMcpTabGroup(restored.id).catch(() => undefined)
+      // Restoring an archive must not destroy its durable workspace storage if
+      // one of the tabs fails to reopen. The archive remains available to retry.
+      await this.closeMcpTabGroup(restored.id, true).catch(() => undefined)
+      this.savedTabGroups.set(savedGroupId, saved)
+      this.changed()
       throw error
     }
   }
 
-  deleteSavedTabGroup(savedGroupId: string): BrowserSavedTabGroupState[] {
-    if (!this.savedTabGroups.delete(savedGroupId)) throw new Error(`Unknown saved tab group: ${savedGroupId}.`)
+  async deleteSavedTabGroup(savedGroupId: string): Promise<BrowserSavedTabGroupState[]> {
+    const saved = this.savedTabGroups.get(savedGroupId)
+    if (!saved) throw new Error(`Unknown saved workspace: ${savedGroupId}.`)
+    if (saved.storageId) {
+      await destroyWorkspaceStorage(
+        workspacePartition(this.options.partition, saved.storageId),
+        this.options.configureSession
+      )
+    }
+    this.savedTabGroups.delete(savedGroupId)
     this.changed()
     return this.listSavedTabGroups()
   }
@@ -1140,8 +1419,8 @@ export class BrowserTabsManager {
       changed: ['set', 'delete', 'clear'].includes(action) ? raw.changed : undefined,
       truncated: raw.itemCount > MAX_STORAGE_ITEMS || bounded.truncated || undefined,
       note: options.kind === 'session-storage'
-        ? 'Session storage belongs to this tab. Local storage and cookies are shared by origin across Bronom tab groups.'
-        : 'This browser profile is shared, so changes are visible to every Bronom tab on this origin.'
+        ? 'Session storage belongs to this tab. Local storage and cookies are shared by origin only inside this workspace.'
+        : 'This storage belongs to the current workspace, so changes are visible to its tabs on this origin but isolated from other workspaces.'
     }
   }
 
@@ -1436,7 +1715,7 @@ export class BrowserTabsManager {
     const comparison = tab.storageComparison
     const caveats = [
       'The baseline stays only in memory and is discarded when cleared, when the tab changes origin or closes, or when Bronom exits.',
-      'Local storage and cookies are shared by origin across tab groups; session storage belongs only to this tab.',
+      'Local storage and cookies are shared by origin inside this workspace and isolated from other workspaces; session storage belongs only to this tab.',
       includeValues
         ? 'Bounded non-HttpOnly values are included. HttpOnly cookie values always remain protected.'
         : 'Values are omitted. Request includeValues only when the changed values are necessary and safe to return.',
@@ -1668,7 +1947,7 @@ export class BrowserTabsManager {
       items: bounded.items,
       changed,
       truncated: next.length > MAX_STORAGE_ITEMS || bounded.truncated || undefined,
-      note: 'HttpOnly cookie values are protected. Non-HttpOnly cookies and local storage are shared by origin across Bronom tab groups.'
+      note: 'HttpOnly cookie values are protected. Non-HttpOnly cookies and local storage are shared by origin only inside this workspace.'
     }
   }
 
@@ -1750,7 +2029,7 @@ export class BrowserTabsManager {
   async newTab(options: NewTabOptions = {}): Promise<BrowserState> {
     const url = options.url ?? 'about:blank'
     if (isBronomHomeUrl(url)) {
-      if (options.mcpGroupId) throw new Error('Bronom Home is a human application page and cannot be added to an agent tab group.')
+      if (options.mcpGroupId) throw new Error('Bronom Home is a human application page and cannot be added to an agent workspace.')
       return this.openHome()
     }
     if (this.tabs.size >= MAX_TABS) throw new Error(`Tab limit reached (${MAX_TABS})`)
@@ -1885,7 +2164,7 @@ export class BrowserTabsManager {
     if (tab.id === target.id) return this.getState()
     if (isBronomHomeUrl(tab.url) || isBronomHomeUrl(target.url)) throw new Error('Bronom Home cannot be reordered')
     if (tab.pinned !== target.pinned) throw new Error('Pin or unpin a tab before moving it across the pinned boundary')
-    if (tab.mcpGroupId !== target.mcpGroupId) throw new Error('Tabs can only be reordered within the same agent tab group')
+    if (tab.mcpGroupId !== target.mcpGroupId) throw new Error('Tabs can only be reordered within the same workspace')
 
     const ordered = this.orderedTabs()
     ordered.splice(ordered.indexOf(tab), 1)
@@ -1921,57 +2200,38 @@ export class BrowserTabsManager {
       this.options.onActionFailed?.(action, error)
     }
     const currentGroup = tab.mcpGroupId ? this.mcpTabGroups.get(tab.mcpGroupId) : undefined
-    const groupChoices: MenuItemConstructorOptions[] = this.listMcpTabGroups()
-      .filter((group) => group.id !== tab.mcpGroupId)
-      .map((group) => ({
-        id: `move-to-group-${group.id}`,
-        label: group.name,
-        click: () => this.moveTabToMcpGroup(tab.id, group.id)
-      }))
-    const createGroupAndEdit = (): void => {
-      const group = this.createMcpTabGroup('New group')
-      this.moveTabToMcpGroup(tab.id, group.id)
-      this.window.webContents.send('browser:edit-tab-group', group.id)
-    }
     const groupMenu: MenuItemConstructorOptions = currentGroup
       ? {
-          id: 'tab-group',
-          label: `Tab Group: ${currentGroup.name}`,
+          id: 'workspace',
+          label: `Workspace: ${currentGroup.name}`,
           submenu: [
             {
-              id: 'rename-tab-group',
-              label: 'Edit Group…',
-              click: () => this.window.webContents.send('browser:edit-tab-group', currentGroup.id)
-            },
-            {
-              id: 'move-tab-to-group',
-              label: 'Move Tab to Group',
-              submenu: [
-                { id: 'new-tab-group', label: 'New Group…', click: createGroupAndEdit },
-                ...(groupChoices.length ? [{ type: 'separator' as const }, ...groupChoices] : [])
-              ]
+              id: 'new-tab-in-workspace',
+              label: 'New Tab in Workspace',
+              click: () => {
+                void this.createTab({ url: 'about:blank', active: true, mcpGroupId: currentGroup.id })
+                  .catch(reportError('open a new tab in the workspace'))
+              }
             },
             { type: 'separator' },
             {
-              id: 'save-close-tab-group',
-              label: 'Save & Close Group',
-              enabled: currentGroup.id !== this.defaultHumanGroupId,
-              click: () => { void this.saveAndCloseTabGroup(currentGroup.id).catch(reportError('save and close the tab group')) }
+              id: 'edit-workspace',
+              label: 'Edit Workspace…',
+              click: () => this.window.webContents.send('browser:edit-tab-group', currentGroup.id)
             },
+            { type: 'separator' },
             {
-              id: 'remove-tab-from-group',
-              label: 'Remove Tab from Group',
-              click: () => this.moveTabToMcpGroup(tab.id)
+              id: 'archive-workspace',
+              label: 'Archive Workspace',
+              enabled: currentGroup.id !== this.defaultHumanGroupId,
+              click: () => { void this.saveAndCloseTabGroup(currentGroup.id).catch(reportError('archive the workspace')) }
             }
           ]
         }
       : {
-          id: 'tab-group',
-          label: 'Add Tab to Group',
-          submenu: [
-            { id: 'new-tab-group', label: 'New Group…', click: createGroupAndEdit },
-            ...(groupChoices.length ? [{ type: 'separator' as const }, ...groupChoices] : [])
-          ]
+          id: 'workspace',
+          label: 'Workspace unavailable',
+          enabled: false
         }
     const openSplitWith = (firstTabId: string, secondTabId: string): void => {
       this.selectTab(firstTabId)
@@ -2252,7 +2512,7 @@ export class BrowserTabsManager {
       : null
     if (!isBronomHomeUrl(tab.url)) {
       this.closedTabs.push({
-        id: randomUUID(),
+        id: uuidV7(),
         title: tab.title || tab.url,
         url: tab.url,
         pinned: tab.pinned,
@@ -2279,7 +2539,7 @@ export class BrowserTabsManager {
     tab.view.webContents.close()
 
     if (!this.tabs.size) {
-      await this.createTab({ url: 'about:blank', active: true })
+      await this.createTab({ url: 'about:blank', active: true, mcpGroupId: this.ensureDefaultHumanGroup() })
     } else if (tab.id === this.activeTabId) {
       const nextId = splitPartnerId && this.tabs.has(splitPartnerId) ? splitPartnerId : ids[index + 1] ?? ids[index - 1]
       if (splitPartnerId) {
@@ -2306,7 +2566,7 @@ export class BrowserTabsManager {
     const tab = this.getTab(tabId)
     const normalized = normalizeAddress(url, this.options.getSearchEngine?.())
     if (tab.mcpGroupId && isBronomHomeUrl(normalized)) {
-      throw new Error('Bronom Home is a human application page and cannot be opened inside an agent tab group.')
+      throw new Error('Bronom Home is a human application page and cannot be opened inside an agent workspace.')
     }
     this.prepareDiagnosticNavigation(tab)
     await tab.view.webContents.loadURL(normalized)
@@ -4827,12 +5087,16 @@ export class BrowserTabsManager {
     mcpGroupId?: string
   }): Promise<BrowserTab> {
     if (this.tabs.size >= MAX_TABS) throw new Error(`Tab limit reached (${MAX_TABS})`)
-    if (options.mcpGroupId && !this.mcpTabGroups.has(options.mcpGroupId)) throw new Error(`Unknown tab group: ${options.mcpGroupId}`)
-    const id = options.id ?? randomUUID()
+    if (options.mcpGroupId && !this.mcpTabGroups.has(options.mcpGroupId)) throw new Error(`Unknown workspace: ${options.mcpGroupId}`)
+    const id = options.id ?? uuidV7()
     const url = normalizeAddress(options.url, this.options.getSearchEngine?.())
+    const workspace = options.mcpGroupId ? this.mcpTabGroups.get(options.mcpGroupId) : undefined
+    const partition = workspace?.storageId
+      ? workspacePartition(this.options.partition, workspace.storageId)
+      : this.options.partition
     const view = new WebContentsView({
       webPreferences: {
-        partition: this.options.partition,
+        partition,
         preload: join(__dirname, '../preload/page.cjs'),
         contextIsolation: true,
         nodeIntegration: false,
@@ -4878,6 +5142,7 @@ export class BrowserTabsManager {
       group.lastUsedAt = new Date().toISOString()
     }
     this.webContentsToTab.set(view.webContents.id, id)
+    this.options.configureSession?.(view.webContents.session)
     this.installSessionHooks(view.webContents.session)
     this.attachTabEvents(tab)
     if (options.active || !this.activeTabId) this.selectTab(id)
@@ -4901,17 +5166,34 @@ export class BrowserTabsManager {
   private ensureDefaultHumanGroup(): string {
     if (this.defaultHumanGroupId && this.mcpTabGroups.has(this.defaultHumanGroupId)) return this.defaultHumanGroupId
     const now = new Date().toISOString()
-    const id = randomUUID()
+    const id = uuidV7()
     this.mcpTabGroups.set(id, {
       id,
       name: 'Default',
       color: 'gray',
       createdAt: now,
       lastUsedAt: now,
-      activeTabId: null
+      activeTabId: null,
+      origins: []
     })
     this.defaultHumanGroupId = id
     return id
+  }
+
+  private assertWorkspaceNameAvailable(
+    name: string,
+    excludeActiveWorkspaceId?: string,
+    excludeSavedWorkspaceId?: string
+  ): void {
+    const key = workspaceNameKey(name)
+    const activeCollision = [...this.mcpTabGroups.values()].find((workspace) => (
+      workspace.id !== excludeActiveWorkspaceId && workspaceNameKey(workspace.name) === key
+    ))
+    const savedCollision = [...this.savedTabGroups.values()].find((workspace) => (
+      workspace.id !== excludeSavedWorkspaceId && workspaceNameKey(workspace.name) === key
+    ))
+    const collision = activeCollision ?? savedCollision
+    if (collision) throw new Error(`A workspace named "${name}" already exists. Workspace names must be unique.`)
   }
 
   private attachTabEvents(tab: BrowserTab): void {
@@ -5195,6 +5477,7 @@ export class BrowserTabsManager {
     })
     webContents.on('did-navigate', (_event, url) => {
       if (tab.sleeping) return
+      this.trackWorkspaceOrigin(tab, url)
       tab.memoryBaseline = undefined
       try {
         if (new URL(tab.url).origin !== new URL(url).origin) tab.storageComparison = undefined
@@ -5210,6 +5493,7 @@ export class BrowserTabsManager {
     })
     webContents.on('did-navigate-in-page', (_event, url) => {
       if (tab.sleeping) return
+      this.trackWorkspaceOrigin(tab, url)
       syncNavigation()
       if (tab.reproRecording?.active) this.addReproStep(tab, {
         kind: 'navigate',
@@ -5313,7 +5597,15 @@ export class BrowserTabsManager {
 
   private recordVisit(tab: BrowserTab): void {
     if (!isWebUrl(tab.url)) return
+    this.trackWorkspaceOrigin(tab, tab.url)
     this.options.onPageVisited?.({ url: tab.url, title: tab.title })
+  }
+
+  private trackWorkspaceOrigin(tab: BrowserTab, url: string): void {
+    if (!tab.mcpGroupId || !isWebUrl(url)) return
+    const workspace = this.mcpTabGroups.get(tab.mcpGroupId)
+    if (!workspace) return
+    workspace.origins = normalizeWorkspaceStorageOrigins([...workspace.origins, new URL(url).origin])
   }
 
   private showContextMenu(tab: BrowserTab, params: ContextMenuParams): void {
@@ -5764,7 +6056,11 @@ export class BrowserTabsManager {
         index: tab.sleepNavigationHistory.index
       }
     }
-    const navigation = tab.view.webContents.navigationHistory
+    const webContents = tab.view?.webContents
+    if (!webContents || webContents.isDestroyed() || !webContents.navigationHistory) {
+      return { entries: [], index: -1 }
+    }
+    const navigation = webContents.navigationHistory
     return { entries: navigation.getAllEntries(), index: navigation.getActiveIndex() }
   }
 
@@ -7220,8 +7516,8 @@ export class BrowserTabsManager {
   }
 
   private installSessionHooks(browserSession: Session): void {
-    if (!this.networkHooksInstalled) {
-      this.networkHooksInstalled = true
+    if (!this.networkHookSessions.has(browserSession)) {
+      this.networkHookSessions.add(browserSession)
       browserSession.webRequest.onBeforeRequest((details, callback) => {
         const tabId = details.webContentsId ? this.webContentsToTab.get(details.webContentsId) : undefined
         const tab = tabId ? this.tabs.get(tabId) : undefined
@@ -7262,8 +7558,8 @@ export class BrowserTabsManager {
       })
     }
 
-    if (!this.downloadHooksInstalled) {
-      this.downloadHooksInstalled = true
+    if (!this.downloadHookSessions.has(browserSession)) {
+      this.downloadHookSessions.add(browserSession)
       browserSession.on('will-download', (event, item, webContents) => {
         this.trimDownloadHistory()
         if (this.downloads.size >= MAX_DOWNLOAD_HISTORY) {
@@ -7430,7 +7726,15 @@ export class BrowserTabsManager {
       allHumanInteractionLocked: this.allHumanInteractionLocked,
       ...(this.defaultHumanGroupId ? { defaultHumanGroupId: this.defaultHumanGroupId } : {}),
       mcpTabGroups: [...this.mcpTabGroups.values()].map((group) => ({ ...group })),
-      savedTabGroups: this.listSavedTabGroups(),
+      savedTabGroups: [...this.savedTabGroups.values()].map((group) => ({
+        id: group.id,
+        name: group.name,
+        color: group.color,
+        savedAt: group.savedAt,
+        ...(group.storageId ? { storageId: group.storageId } : {}),
+        origins: [...group.origins],
+        tabs: group.tabs.map((tab) => ({ ...tab }))
+      })),
       tabs: this.orderedTabs().map((tab) => ({
         id: tab.id,
         title: tab.title,

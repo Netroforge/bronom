@@ -1,7 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { useMcpTabGroup } from './mcp-tab-group.js'
+import { useMcpWorkspace } from './mcp-workspace.js'
 
 interface BrowserStateResult {
   activeTabId: string | null
@@ -26,9 +26,9 @@ function fail(message: string): never {
 
 await client.connect(transport)
 try {
-  await useMcpTabGroup(client, 'MCP smoke')
+  await useMcpWorkspace(client, 'MCP smoke')
   const tools = await client.listTools()
-  const requiredTools = ['browser_tab_groups', 'browser_status', 'browser_new_tab', 'browser_snapshot', 'browser_element_inspect', 'browser_dialog', 'browser_emulate', 'browser_storage', 'browser_memory', 'browser_debug_report', 'browser_network_wait', 'browser_network_search', 'browser_type', 'browser_screenshot']
+  const requiredTools = ['browser_workspaces', 'browser_status', 'browser_new_tab', 'browser_snapshot', 'browser_element_inspect', 'browser_dialog', 'browser_emulate', 'browser_storage', 'browser_memory', 'browser_debug_report', 'browser_network_wait', 'browser_network_search', 'browser_type', 'browser_screenshot']
   for (const name of requiredTools) {
     if (!tools.tools.some((tool) => tool.name === name)) fail(`Missing MCP tool: ${name}`)
   }

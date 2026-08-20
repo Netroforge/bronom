@@ -58,7 +58,7 @@ export interface CommandPaletteCommand {
 
 export const COMMAND_PALETTE_COMMANDS: readonly CommandPaletteCommand[] = [
   { id: 'home', label: 'Open Bronom Home', description: 'Show the application dashboard', category: 'Navigation', keywords: ['dashboard'] },
-  { id: 'new-tab', label: 'New tab', description: 'Open a blank tab in the Default group', category: 'Navigation', shortcut: 'Ctrl/Cmd+T' },
+  { id: 'new-tab', label: 'New tab', description: 'Open a blank tab in the Default workspace', category: 'Navigation', shortcut: 'Ctrl/Cmd+T' },
   { id: 'search-tabs', label: 'Search tabs', description: 'Find open, saved, and recently closed websites', category: 'Navigation', keywords: ['switch', 'restore', 'groups', 'workspace'], shortcut: 'Ctrl/Cmd+Shift+A' },
   { id: 'downloads', label: 'Show downloads', description: 'Review current and completed downloads', category: 'Navigation', keywords: ['files'] },
   { id: 'bookmarks', label: 'Show bookmarks', description: 'Open locally saved pages', category: 'Navigation', keywords: ['favorites', 'star'] },

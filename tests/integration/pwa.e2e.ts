@@ -83,16 +83,16 @@ test('inspects service workers and Cache Storage for people and grouped agents',
   const client = await connectClient(mcpPort, mcpToken)
   try {
     const groupResult = await client.callTool({
-      name: 'browser_tab_groups',
+      name: 'browser_workspaces',
       arguments: { action: 'create', name: 'Offline inspection' }
     }) as CallToolResult
-    const groupId = (JSON.parse(text(groupResult)) as { id: string }).id
+    const workspaceId = (JSON.parse(text(groupResult)) as { id: string }).id
     const opened = await client.callTool({
       name: 'browser_new_tab',
-      arguments: { groupId, url: `http://127.0.0.1:${address.port}/` }
+      arguments: { workspaceId, url: `http://127.0.0.1:${address.port}/` }
     }) as CallToolResult
     const tabId = (JSON.parse(text(opened)) as { activeTabId: string }).activeTabId
-    await client.callTool({ name: 'browser_wait', arguments: { groupId, tabId, text: 'Offline app ready' } })
+    await client.callTool({ name: 'browser_wait', arguments: { workspaceId, tabId, text: 'Offline app ready' } })
 
     await appWindow.getByRole('button', { name: 'Block human interaction in this tab' }).click()
     let usageReport: {
@@ -107,7 +107,7 @@ test('inspects service workers and Cache Storage for people and grouped agents',
     await expect.poll(async () => {
       const result = await client.callTool({
         name: 'browser_storage_usage',
-        arguments: { groupId, tabId }
+        arguments: { workspaceId, tabId }
       }) as CallToolResult
       if (result.isError) return 0
       usageReport = JSON.parse(text(result)) as typeof usageReport
@@ -122,12 +122,12 @@ test('inspects service workers and Cache Storage for people and grouped agents',
     expect(usageReport!.breakdown.some((item) => item.storageType === 'cache_storage')).toBe(true)
     expect(text(await client.callTool({
       name: 'browser_storage_usage',
-      arguments: { groupId, tabId }
+      arguments: { workspaceId, tabId }
     }) as CallToolResult)).not.toContain('cached response body must stay private')
 
     const overviewResult = await client.callTool({
       name: 'browser_pwa',
-      arguments: { groupId, tabId }
+      arguments: { workspaceId, tabId }
     }) as CallToolResult
     expect(overviewResult.isError, text(overviewResult)).not.toBe(true)
     const overview = JSON.parse(text(overviewResult)) as {
@@ -151,7 +151,7 @@ test('inspects service workers and Cache Storage for people and grouped agents',
 
     const cacheResult = await client.callTool({
       name: 'browser_pwa',
-      arguments: { groupId, tabId, cacheName: 'offline-v1', query: 'asset.txt' }
+      arguments: { workspaceId, tabId, cacheName: 'offline-v1', query: 'asset.txt' }
     }) as CallToolResult
     const report = JSON.parse(text(cacheResult)) as {
       selectedCache: { entries: Array<{ requestUrl: string; responseStatus: number; requestHeaders?: unknown }> }
@@ -186,7 +186,7 @@ test('inspects service workers and Cache Storage for people and grouped agents',
     await expect.poll(async () => {
       const fallbackResult = await client.callTool({
         name: 'browser_storage_usage',
-        arguments: { groupId, tabId }
+        arguments: { workspaceId, tabId }
       }) as CallToolResult
       expect(fallbackResult.isError, text(fallbackResult)).not.toBe(true)
       fallback = JSON.parse(text(fallbackResult)) as typeof fallback

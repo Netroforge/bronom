@@ -81,30 +81,30 @@ test('replays retained XHRs for people and agents with explicit side-effect conf
     expect(tools.tools.find((tool) => tool.name === 'browser_network_replay')?.description).toContain('confirmSideEffects: true')
 
     const groupResult = await client.callTool({
-      name: 'browser_tab_groups',
+      name: 'browser_workspaces',
       arguments: { action: 'create', name: 'XHR replay' }
     }) as CallToolResult
-    const groupId = (JSON.parse(text(groupResult)) as { id: string }).id
+    const workspaceId = (JSON.parse(text(groupResult)) as { id: string }).id
     const opened = await client.callTool({
       name: 'browser_new_tab',
-      arguments: { groupId, url: `http://127.0.0.1:${address.port}/` }
+      arguments: { workspaceId, url: `http://127.0.0.1:${address.port}/` }
     }) as CallToolResult
     const tabId = (JSON.parse(text(opened)) as { activeTabId: string }).activeTabId
-    await client.callTool({ name: 'browser_wait', arguments: { groupId, tabId } })
+    await client.callTool({ name: 'browser_wait', arguments: { workspaceId, tabId } })
     const armedNetwork = await client.callTool({
       name: 'browser_network',
-      arguments: { groupId, tabId }
+      arguments: { workspaceId, tabId }
     }) as CallToolResult
     expect(armedNetwork.isError, text(armedNetwork)).not.toBe(true)
 
     const getSent = await client.callTool({
       name: 'browser_evaluate',
-      arguments: { groupId, tabId, script: "window.sendReplayXhr('GET')" }
+      arguments: { workspaceId, tabId, script: "window.sendReplayXhr('GET')" }
     }) as CallToolResult
     expect(getSent.isError, text(getSent)).not.toBe(true)
     let getRequestId = ''
     await expect.poll(async () => {
-      const result = await client.callTool({ name: 'browser_network', arguments: { groupId, tabId } }) as CallToolResult
+      const result = await client.callTool({ name: 'browser_network', arguments: { workspaceId, tabId } }) as CallToolResult
       const requests = JSON.parse(text(result)) as Array<{ id: string; url: string; resourceType: string }>
       getRequestId = requests.find((request) => request.resourceType === 'xhr' && request.url.includes('/xhr-get'))?.id ?? ''
       return getRequestId
@@ -112,7 +112,7 @@ test('replays retained XHRs for people and agents with explicit side-effect conf
 
     const replayedGet = await client.callTool({
       name: 'browser_network_replay',
-      arguments: { groupId, tabId, requestId: getRequestId }
+      arguments: { workspaceId, tabId, requestId: getRequestId }
     }) as CallToolResult
     expect(replayedGet.isError, text(replayedGet)).not.toBe(true)
     const getReplayResult = JSON.parse(text(replayedGet)) as {
@@ -132,11 +132,11 @@ test('replays retained XHRs for people and agents with explicit side-effect conf
 
     await client.callTool({
       name: 'browser_evaluate',
-      arguments: { groupId, tabId, script: "fetch('/xhr-get?view=fetch-only').then((response) => response.status)" }
+      arguments: { workspaceId, tabId, script: "fetch('/xhr-get?view=fetch-only').then((response) => response.status)" }
     })
     let fetchRequestId = ''
     await expect.poll(async () => {
-      const result = await client.callTool({ name: 'browser_network', arguments: { groupId, tabId } }) as CallToolResult
+      const result = await client.callTool({ name: 'browser_network', arguments: { workspaceId, tabId } }) as CallToolResult
       const requests = JSON.parse(text(result)) as Array<{ id: string; url: string; resourceType: string }>
       fetchRequestId = [...requests].reverse().find((request) => (
         request.resourceType === 'fetch' && request.url.includes('view=fetch-only')
@@ -145,19 +145,19 @@ test('replays retained XHRs for people and agents with explicit side-effect conf
     }).not.toBe('')
     const rejectedFetch = await client.callTool({
       name: 'browser_network_replay',
-      arguments: { groupId, tabId, requestId: fetchRequestId }
+      arguments: { workspaceId, tabId, requestId: fetchRequestId }
     }) as CallToolResult
     expect(rejectedFetch.isError).toBe(true)
     expect(text(rejectedFetch)).toContain('Only captured XMLHttpRequest')
 
     const postSent = await client.callTool({
       name: 'browser_evaluate',
-      arguments: { groupId, tabId, script: "window.sendReplayXhr('POST')" }
+      arguments: { workspaceId, tabId, script: "window.sendReplayXhr('POST')" }
     }) as CallToolResult
     expect(postSent.isError, text(postSent)).not.toBe(true)
     let postRequestId = ''
     await expect.poll(async () => {
-      const result = await client.callTool({ name: 'browser_network', arguments: { groupId, tabId } }) as CallToolResult
+      const result = await client.callTool({ name: 'browser_network', arguments: { workspaceId, tabId } }) as CallToolResult
       const requests = JSON.parse(text(result)) as Array<{ id: string; url: string; method: string; resourceType: string }>
       postRequestId = [...requests].reverse().find((request) => (
         request.resourceType === 'xhr' && request.method === 'POST' && request.url.endsWith('/xhr-post')
@@ -167,7 +167,7 @@ test('replays retained XHRs for people and agents with explicit side-effect conf
 
     const rejectedPost = await client.callTool({
       name: 'browser_network_replay',
-      arguments: { groupId, tabId, requestId: postRequestId }
+      arguments: { workspaceId, tabId, requestId: postRequestId }
     }) as CallToolResult
     expect(rejectedPost.isError).toBe(true)
     expect(text(rejectedPost)).toContain('confirmSideEffects: true')
@@ -175,7 +175,7 @@ test('replays retained XHRs for people and agents with explicit side-effect conf
 
     const replayedPost = await client.callTool({
       name: 'browser_network_replay',
-      arguments: { groupId, tabId, requestId: postRequestId, confirmSideEffects: true }
+      arguments: { workspaceId, tabId, requestId: postRequestId, confirmSideEffects: true }
     }) as CallToolResult
     expect(replayedPost.isError, text(replayedPost)).not.toBe(true)
     expect(JSON.parse(text(replayedPost))).toMatchObject({
@@ -193,12 +193,12 @@ test('replays retained XHRs for people and agents with explicit side-effect conf
 
     await client.callTool({
       name: 'browser_evaluate',
-      arguments: { groupId, tabId, script: "window.sendReplayXhr('POST')" }
+      arguments: { workspaceId, tabId, script: "window.sendReplayXhr('POST')" }
     })
     await expect.poll(() => postCount).toBe(3)
     const latestNetwork = await client.callTool({
       name: 'browser_network',
-      arguments: { groupId, tabId }
+      arguments: { workspaceId, tabId }
     }) as CallToolResult
     const latestPost = [...JSON.parse(text(latestNetwork)) as Array<{ id: string; url: string; method: string; resourceType: string }>]
       .reverse()

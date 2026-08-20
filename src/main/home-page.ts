@@ -260,7 +260,7 @@ export function renderHomePage(options: HomePageOptions): string {
     <div class="grid">
       <section class="panel" aria-labelledby="connect-title">
         <header class="panel-heading">
-          <div><h2 id="connect-title">Connect your coding agent</h2><p>Choose a client, copy the setup, then create or resume a named tab group before browsing.</p></div>
+          <div><h2 id="connect-title">Connect your coding agent</h2><p>Choose a client, copy the setup, then create a named workspace before browsing.</p></div>
           <span class="count">5 clients</span>
         </header>
         <div class="agent-layout">

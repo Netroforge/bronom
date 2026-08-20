@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { expect, test } from './fixtures.js'
-import { useMcpTabGroup } from '../../scripts/mcp-tab-group.js'
+import { useMcpWorkspace } from '../../scripts/mcp-workspace.js'
 
 test('uses the selected search engine for address-bar and MCP searches', async ({
   appWindow,
@@ -61,7 +61,20 @@ test('uses the selected search engine for address-bar and MCP searches', async (
     ))).toEqual(['https://duckduckgo.com/?q=human%20search%20phrase'])
 
     await client.connect(transport)
-    await useMcpTabGroup(client, 'Search settings tests')
+    await useMcpWorkspace(client, 'Search settings tests')
+    await electronApp.evaluate(({ webContents }, localRedirectUrl) => {
+      const globalState = globalThis as typeof globalThis & { __bronomCapturedSearchUrls?: string[] }
+      const sessions = new Set(webContents.getAllWebContents().map((contents) => contents.session))
+      for (const browserSession of sessions) {
+        browserSession.webRequest.onBeforeRequest(
+          { urls: ['https://duckduckgo.com/*'] },
+          (details, callback) => {
+            globalState.__bronomCapturedSearchUrls?.push(details.url)
+            callback({ redirectURL: localRedirectUrl })
+          }
+        )
+      }
+    }, redirectUrl)
     await client.callTool({ name: 'browser_navigate', arguments: { url: 'agent search phrase' } })
     await expect.poll(() => electronApp.evaluate(() => (
       (globalThis as typeof globalThis & { __bronomCapturedSearchUrls?: string[] }).__bronomCapturedSearchUrls

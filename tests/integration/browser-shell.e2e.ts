@@ -6,7 +6,7 @@ import { promisify } from 'node:util'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { useMcpTabGroup } from '../../scripts/mcp-tab-group.js'
+import { useMcpWorkspace } from '../../scripts/mcp-workspace.js'
 import { closeBronom, expect, launchBronom, test } from './fixtures.js'
 
 const execFileAsync = promisify(execFile)
@@ -1109,7 +1109,7 @@ test('pins tabs from the native menu and tab search while preserving closed-tab 
     { id: 'mute-tab', label: 'Mute Tab', enabled: true },
     { id: 'pin-tab', label: 'Pin Tab', enabled: true },
     { id: 'sleep-tab', label: 'Put Tab to Sleep', enabled: false },
-    { id: 'tab-group', label: 'Tab Group: Default', enabled: true },
+    { id: 'workspace', label: 'Workspace: Default', enabled: true },
     { id: 'move-tab-left', label: 'Move Tab Left', enabled: true },
     { id: 'move-tab-right', label: 'Move Tab Right', enabled: false },
     { id: 'close-tab', label: 'Close Tab', enabled: true },
@@ -1120,14 +1120,13 @@ test('pins tabs from the native menu and tab search while preserving closed-tab 
   ])
   await expect.poll(() => electronApp.evaluate(() => {
     const menu = (globalThis as typeof globalThis & { __bronomTabMenu?: Electron.Menu }).__bronomTabMenu
-    return menu?.getMenuItemById('tab-group')?.submenu?.items
+    return menu?.getMenuItemById('workspace')?.submenu?.items
       .filter((item) => item.type !== 'separator')
       .map(({ id, label }) => ({ id, label })) ?? []
   })).toEqual([
-    { id: 'rename-tab-group', label: 'Edit Group…' },
-    { id: 'move-tab-to-group', label: 'Move Tab to Group' },
-    { id: 'save-close-tab-group', label: 'Save & Close Group' },
-    { id: 'remove-tab-from-group', label: 'Remove Tab from Group' }
+    { id: 'new-tab-in-workspace', label: 'New Tab in Workspace' },
+    { id: 'edit-workspace', label: 'Edit Workspace…' },
+    { id: 'archive-workspace', label: 'Archive Workspace' }
   ])
   await electronApp.evaluate(() => {
     const menu = (globalThis as typeof globalThis & { __bronomTabMenu?: Electron.Menu }).__bronomTabMenu
@@ -1181,82 +1180,84 @@ test('pins tabs from the native menu and tab search while preserving closed-tab 
   ])
 })
 
-test('creates, renames, and removes a human tab group from the tab context menu', async ({ appWindow, electronApp }) => {
-  await appWindow.evaluate(`window.bronom.newTab({ url: 'data:text/html,<title>Human group tab</title><main>Grouped</main>', active: true })`)
+test('creates, renames, and permanently closes an isolated human workspace', async ({ appWindow, electronApp }) => {
+  await appWindow.evaluate(`window.bronom.newTab({ url: 'data:text/html,<title>Human default tab</title><main>Default</main>', active: true })`)
   await electronApp.evaluate(({ Menu }) => {
     ;(globalThis as typeof globalThis & { __bronomTabMenu?: Electron.Menu }).__bronomTabMenu = undefined
     Menu.prototype.popup = function (): void {
       ;(globalThis as typeof globalThis & { __bronomTabMenu?: Electron.Menu }).__bronomTabMenu = this
     }
   })
-  const tab = appWindow.getByRole('tab', { name: /^Human group tab/ })
-  await tab.click({ button: 'right' })
-  await electronApp.evaluate(() => {
-    const menu = (globalThis as typeof globalThis & { __bronomTabMenu?: Electron.Menu }).__bronomTabMenu
-    const item = menu?.getMenuItemById('new-tab-group')
-    if (!item?.click) throw new Error('New Group context action was not found')
-    ;(item.click as unknown as () => void)()
-  })
-  const editor = appWindow.getByRole('dialog', { name: 'Edit group' })
+  await appWindow.getByRole('button', { name: 'Create workspace' }).click()
+  const editor = appWindow.getByRole('dialog', { name: 'Create workspace' })
   await expect(editor).toBeVisible()
-  await editor.getByLabel('Group name').fill('Human debugging')
-  await expect(editor.getByRole('radio')).toHaveCount(9)
+  await editor.getByLabel('Workspace name').fill('Human debugging')
+  await expect(editor.getByRole('radio')).toHaveCount(11)
   await editor.getByRole('radio', { name: 'Orange' }).click()
-  await editor.getByRole('button', { name: 'Save changes' }).click()
+  await editor.getByRole('button', { name: 'Create workspace' }).click()
   await expect(editor).toBeHidden()
   await expect(appWindow.locator('.tab-group-label', { hasText: 'Human debugging' })).toBeVisible()
-  await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => state.tabs.find((candidate) => candidate.title === 'Human group tab')?.mcpGroupName)`)).toBe('Human debugging')
+  await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => state.tabs.find((candidate) => candidate.active)?.mcpGroupName)`)).toBe('Human debugging')
   await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => state.mcpTabGroups.find((group) => group.name === 'Human debugging')?.color)`)).toBe('orange')
   await expect(appWindow.locator('.tab-group-label', { hasText: 'Human debugging' })).toHaveAttribute('style', /#e08b3e/)
 
-  await tab.click({ button: 'right' })
+  const workspaceTab = appWindow.getByRole('tab', { name: /^New tab/ })
+  await workspaceTab.click({ button: 'right' })
   await expect.poll(() => electronApp.evaluate(() => {
     const menu = (globalThis as typeof globalThis & { __bronomTabMenu?: Electron.Menu }).__bronomTabMenu
-    const group = menu?.getMenuItemById('tab-group')
+    const workspace = menu?.getMenuItemById('workspace')
     return {
-      label: group?.label,
-      actions: group?.submenu?.items.filter((item) => item.type !== 'separator').map(({ id }) => id)
+      label: workspace?.label,
+      actions: workspace?.submenu?.items.filter((item) => item.type !== 'separator').map(({ id }) => id)
     }
   })).toEqual({
-    label: 'Tab Group: Human debugging',
-    actions: ['rename-tab-group', 'move-tab-to-group', 'save-close-tab-group', 'remove-tab-from-group']
+    label: 'Workspace: Human debugging',
+    actions: ['new-tab-in-workspace', 'edit-workspace', 'archive-workspace']
   })
   await electronApp.evaluate(() => {
     const menu = (globalThis as typeof globalThis & { __bronomTabMenu?: Electron.Menu }).__bronomTabMenu
-    const item = menu?.getMenuItemById('remove-tab-from-group')
-    if (!item?.click) throw new Error('Remove Tab from Group context action was not found')
+    const item = menu?.getMenuItemById('edit-workspace')
+    if (!item?.click) throw new Error('Edit Workspace context action was not found')
     ;(item.click as unknown as () => void)()
   })
-  await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => state.tabs.find((candidate) => candidate.title === 'Human group tab')?.mcpGroupId ?? null)`)).toBeNull()
-  await expect(appWindow.locator('.tab-group-label', { hasText: 'Human debugging' })).toBeHidden()
+  const editDialog = appWindow.getByRole('dialog', { name: 'Edit workspace' })
+  await editDialog.getByLabel('Workspace name').fill('Renamed debugging')
+  await editDialog.getByRole('button', { name: 'Save changes' }).click()
+  await expect(appWindow.locator('.tab-group-label', { hasText: 'Renamed debugging' })).toBeVisible()
+
+  await workspaceTab.click({ button: 'right' })
+  await electronApp.evaluate(() => {
+    const menu = (globalThis as typeof globalThis & { __bronomTabMenu?: Electron.Menu }).__bronomTabMenu
+    ;(menu?.getMenuItemById('edit-workspace')?.click as unknown as (() => void) | undefined)?.()
+  })
+  appWindow.once('dialog', (dialog) => dialog.accept())
+  await appWindow.getByRole('dialog', { name: 'Edit workspace' }).getByRole('button', { name: 'Close workspace', exact: true }).click()
+  await expect(appWindow.locator('.tab-group-label', { hasText: 'Renamed debugging' })).toBeHidden()
+  await expect(appWindow.getByRole('tab', { name: /^Human default tab/ })).toBeVisible()
+  await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => state.mcpTabGroups.some((workspace) => workspace.name === 'Renamed debugging'))`)).toBe(false)
 })
 
-test('saves a tab group from its context menu and restores it with a fresh group id', async ({ appWindow, electronApp }) => {
-  await appWindow.evaluate(`window.bronom.newTab({ url: 'data:text/html,<title>Saved research</title><main>Grouped</main>', active: true })`)
+test('archives a workspace from its context menu and restores it with a fresh workspace id', async ({ appWindow, electronApp }) => {
   await electronApp.evaluate(({ Menu }) => {
     ;(globalThis as typeof globalThis & { __bronomTabMenu?: Electron.Menu }).__bronomTabMenu = undefined
     Menu.prototype.popup = function (): void {
       ;(globalThis as typeof globalThis & { __bronomTabMenu?: Electron.Menu }).__bronomTabMenu = this
     }
   })
+  await appWindow.getByRole('button', { name: 'Create workspace' }).click()
+  const editor = appWindow.getByRole('dialog', { name: 'Create workspace' })
+  await editor.getByLabel('Workspace name').fill('Saved investigation')
+  await editor.getByRole('button', { name: 'Create workspace' }).click()
+  const workspaceTabId = await appWindow.evaluate(`window.bronom.getState().then((state) => state.activeTabId)`) as string
+  await appWindow.evaluate(`window.bronom.navigate({ tabId: ${JSON.stringify(workspaceTabId)}, url: 'data:text/html,<title>Saved research</title><main>Grouped</main>' })`)
   const originalTab = appWindow.getByRole('tab', { name: /^Saved research/ })
-  await originalTab.click({ button: 'right' })
-  await electronApp.evaluate(() => {
-    const menu = (globalThis as typeof globalThis & { __bronomTabMenu?: Electron.Menu }).__bronomTabMenu
-    const item = menu?.getMenuItemById('new-tab-group')
-    if (!item?.click) throw new Error('New Group context action was not found')
-    ;(item.click as unknown as () => void)()
-  })
-  const editor = appWindow.getByRole('dialog', { name: 'Edit group' })
-  await editor.getByLabel('Group name').fill('Saved investigation')
-  await editor.getByRole('button', { name: 'Save changes' }).click()
   const originalGroupId = await appWindow.evaluate(`window.bronom.getState().then((state) => state.mcpTabGroups.find((group) => group.name === 'Saved investigation')?.id)`) as string
 
   await originalTab.click({ button: 'right' })
   await electronApp.evaluate(() => {
     const menu = (globalThis as typeof globalThis & { __bronomTabMenu?: Electron.Menu }).__bronomTabMenu
-    const item = menu?.getMenuItemById('save-close-tab-group')
-    if (!item?.click) throw new Error('Save & Close Group context action was not found')
+    const item = menu?.getMenuItemById('archive-workspace')
+    if (!item?.click) throw new Error('Archive Workspace context action was not found')
     ;(item.click as unknown as () => void)()
   })
   await expect(originalTab).toBeHidden()
@@ -1267,8 +1268,8 @@ test('saves a tab group from its context menu and restores it with a fresh group
 
   await appWindow.getByRole('button', { name: 'Search tabs' }).click()
   const panel = appWindow.getByRole('dialog', { name: 'Tabs' })
-  await expect(panel.getByText('Saved groups')).toBeVisible()
-  await panel.getByRole('button', { name: 'Restore saved group Saved investigation' }).click()
+  await expect(panel.getByText('Archived workspaces')).toBeVisible()
+  await panel.getByRole('button', { name: 'Restore archived workspace Saved investigation' }).click()
   await expect(appWindow.getByRole('tab', { name: /^Saved research/ })).toBeVisible()
   await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => ({ saved: state.savedTabGroups.length, restored: state.mcpTabGroups.find((group) => group.name === 'Saved investigation')?.id }))`)).toEqual({
     saved: 0,
@@ -2206,7 +2207,7 @@ test('picks a page element and copies safe agent-ready DOM context from an MCP-c
       }
     }).toBe(true)
     await client.connect(transport)
-    await useMcpTabGroup(client, 'Human element picker tests', false)
+    await useMcpWorkspace(client, 'Human element picker tests', false)
     const opened = await client.callTool({ name: 'browser_new_tab', arguments: { url, active: true } }) as CallToolResult
     expect(opened.isError, mcpResultText(opened)).not.toBe(true)
     const mcpTabId = (JSON.parse(mcpResultText(opened)) as { activeTabId: string }).activeTabId
@@ -2693,7 +2694,7 @@ test('drags a page area and copies the screenshot image for agent chat', async (
     await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => state.tabs.find((tab) => tab.id === ${JSON.stringify(activeTabId)})?.devToolsOpen)`)).toBe(false)
 
     await client.connect(transport)
-    await useMcpTabGroup(client, 'Human area capture tests', false)
+    await useMcpWorkspace(client, 'Human area capture tests', false)
     const mcpUrl = `${url}?created=mcp`
     const opened = await client.callTool({
       name: 'browser_new_tab',

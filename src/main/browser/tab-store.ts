@@ -23,6 +23,8 @@ export interface PersistedTabGroup {
   createdAt: string
   lastUsedAt: string
   activeTabId?: string | null
+  storageId?: string
+  origins?: string[]
 }
 
 export interface PersistedSavedTabGroup {
@@ -30,6 +32,8 @@ export interface PersistedSavedTabGroup {
   name: string
   color: BrowserTabGroupColor
   savedAt: string
+  storageId?: string
+  origins?: string[]
   tabs: Array<Pick<PersistedTab, 'title' | 'url' | 'pinned'>>
 }
 
@@ -41,6 +45,27 @@ export interface PersistedBrowserState {
   tabs: PersistedTab[]
   mcpTabGroups?: PersistedTabGroup[]
   savedTabGroups?: PersistedSavedTabGroup[]
+}
+
+const WORKSPACE_STORAGE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function persistedWorkspaceOrigins(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const origins = new Set<string>()
+  for (const candidate of value) {
+    if (typeof candidate !== 'string') continue
+    try {
+      const url = new URL(candidate)
+      if ((url.protocol === 'http:' || url.protocol === 'https:') && url.hostname) origins.add(url.origin)
+    } catch {
+      // Ignore corrupt or obsolete profile entries while preserving the rest.
+    }
+  }
+  return [...origins].sort()
+}
+
+function persistedWorkspaceStorageId(value: unknown): string | undefined {
+  return typeof value === 'string' && WORKSPACE_STORAGE_ID_PATTERN.test(value) ? value : undefined
 }
 
 export class TabStateStore {
@@ -76,9 +101,14 @@ export class TabStateStore {
             && typeof group.createdAt === 'string'
             && typeof group.lastUsedAt === 'string'
           )).map((group) => ({
-            ...group,
+            id: group.id,
+            name: group.name,
             color: isBrowserTabGroupColor(group.color) ? group.color : defaultTabGroupColor(group.id),
-            activeTabId: typeof group.activeTabId === 'string' ? group.activeTabId : null
+            createdAt: group.createdAt,
+            lastUsedAt: group.lastUsedAt,
+            activeTabId: typeof group.activeTabId === 'string' ? group.activeTabId : null,
+            ...(persistedWorkspaceStorageId(group.storageId) ? { storageId: group.storageId } : {}),
+            origins: persistedWorkspaceOrigins(group.origins)
           }))
           : [],
         savedTabGroups: Array.isArray(data.savedTabGroups)
@@ -92,6 +122,8 @@ export class TabStateStore {
             name: group.name,
             color: isBrowserTabGroupColor(group.color) ? group.color : defaultTabGroupColor(group.id),
             savedAt: group.savedAt,
+            ...(persistedWorkspaceStorageId(group.storageId) ? { storageId: group.storageId } : {}),
+            origins: persistedWorkspaceOrigins(group.origins),
             tabs: group.tabs.filter((tab) => (
               typeof tab?.title === 'string' && typeof tab.url === 'string'
             )).map((tab) => ({

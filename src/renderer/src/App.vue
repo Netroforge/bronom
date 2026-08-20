@@ -72,6 +72,7 @@ import IconTune from '~icons/material-symbols/tune-rounded'
 import IconStop from '~icons/material-symbols/stop-rounded'
 import IconSystemUpdate from '~icons/material-symbols/system-update-alt-rounded'
 import IconTabSearch from '~icons/material-symbols/tab-search-rounded'
+import IconWorkspaces from '~icons/material-symbols/workspaces-rounded'
 import IconTerminal from '~icons/material-symbols/terminal-rounded'
 import IconSwapHoriz from '~icons/material-symbols/swap-horiz-rounded'
 import IconVerticalSplit from '~icons/material-symbols/vertical-split-rounded'
@@ -443,9 +444,17 @@ const environmentAccuracy = ref(100)
 const environmentState = ref<'idle' | 'applying' | 'applied' | 'error'>('idle')
 const environmentError = ref('')
 const tabGroupEditorId = ref<string | null>(null)
+const workspaceEditorOpen = ref(false)
+const workspaceEditorMode = ref<'create' | 'edit'>('edit')
 const tabGroupEditorName = ref('')
 const tabGroupEditorColor = ref<BrowserTabGroupColor>('purple')
 const tabGroupEditorError = ref('')
+const workspaceStorageMode = ref<'scratch' | 'fork-default'>('scratch')
+const workspaceTransferDirection = ref<'from-default' | 'to-default'>('from-default')
+const workspaceOriginOptions = ref<string[]>([])
+const workspaceSelectedOrigins = ref<string[]>([])
+const workspaceStorageState = ref<'idle' | 'loading' | 'saving' | 'saved' | 'error'>('idle')
+const workspaceStorageMessage = ref('')
 const browsingDataSummary = ref<BrowsingDataSummary | null>(null)
 const browsingDataOptions = ref<BrowsingDataClearOptions>({ history: true, cookiesAndSiteData: false, cache: true })
 const browsingDataState = ref<'idle' | 'loading' | 'clearing' | 'cleared' | 'error'>('idle')
@@ -1899,20 +1908,116 @@ async function openTabGroupEditor(groupId: string): Promise<void> {
   state.value = next
   const group = next.mcpTabGroups.find((candidate) => candidate.id === groupId)
   if (!group) return
+  workspaceEditorMode.value = 'edit'
+  workspaceEditorOpen.value = true
   tabGroupEditorId.value = groupId
   tabGroupEditorName.value = group.name
   tabGroupEditorColor.value = group.color
   tabGroupEditorError.value = ''
+  workspaceTransferDirection.value = 'from-default'
+  workspaceStorageMessage.value = ''
+  await loadWorkspaceStorageOrigins()
 }
 
-async function saveTabGroupName(): Promise<void> {
-  if (!tabGroupEditorId.value || !tabGroupEditorName.value.trim()) return
+async function openNewWorkspaceEditor(): Promise<void> {
+  workspaceEditorMode.value = 'create'
+  workspaceEditorOpen.value = true
+  tabGroupEditorId.value = null
+  tabGroupEditorName.value = 'New workspace'
+  tabGroupEditorColor.value = 'purple'
+  tabGroupEditorError.value = ''
+  workspaceStorageMode.value = 'scratch'
+  workspaceTransferDirection.value = 'from-default'
+  workspaceStorageMessage.value = ''
+  await loadWorkspaceStorageOrigins()
+}
+
+function closeWorkspaceEditor(): void {
+  workspaceEditorOpen.value = false
+  tabGroupEditorId.value = null
+  tabGroupEditorError.value = ''
+  workspaceStorageState.value = 'idle'
+  workspaceStorageMessage.value = ''
+}
+
+async function loadWorkspaceStorageOrigins(): Promise<void> {
+  const defaultWorkspace = state.value.mcpTabGroups.find((workspace) => workspace.isDefault)
+  const sourceId = workspaceEditorMode.value === 'create' || workspaceTransferDirection.value === 'from-default'
+    ? defaultWorkspace?.id
+    : tabGroupEditorId.value ?? undefined
+  if (!sourceId) {
+    workspaceOriginOptions.value = []
+    workspaceSelectedOrigins.value = []
+    return
+  }
+  workspaceStorageState.value = 'loading'
   try {
-    await syncState(browser.updateTabGroup(tabGroupEditorId.value, {
-      name: tabGroupEditorName.value,
-      color: tabGroupEditorColor.value
-    }))
-    tabGroupEditorId.value = null
+    const origins = await browser.listWorkspaceStorageOrigins(sourceId)
+    workspaceOriginOptions.value = origins
+    workspaceSelectedOrigins.value = [...origins]
+    workspaceStorageState.value = 'idle'
+  } catch (error) {
+    workspaceStorageState.value = 'error'
+    workspaceStorageMessage.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
+function workspaceTransferOrigins(): string[] | undefined {
+  return workspaceSelectedOrigins.value.length === workspaceOriginOptions.value.length
+    ? undefined
+    : [...workspaceSelectedOrigins.value]
+}
+
+async function saveWorkspaceEditor(): Promise<void> {
+  if (!tabGroupEditorName.value.trim()) return
+  try {
+    if (workspaceEditorMode.value === 'create') {
+      await syncState(browser.createWorkspace({
+        name: tabGroupEditorName.value,
+        color: tabGroupEditorColor.value,
+        storage: workspaceStorageMode.value,
+        ...(workspaceStorageMode.value === 'fork-default'
+          ? { origins: workspaceTransferOrigins() }
+          : {})
+      }))
+    } else if (tabGroupEditorId.value) {
+      await syncState(browser.updateTabGroup(tabGroupEditorId.value, {
+        name: tabGroupEditorName.value,
+        color: tabGroupEditorColor.value
+      }))
+    }
+    closeWorkspaceEditor()
+  } catch (error) {
+    tabGroupEditorError.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
+async function transferWorkspaceStorage(): Promise<void> {
+  if (!tabGroupEditorId.value) return
+  workspaceStorageState.value = 'saving'
+  workspaceStorageMessage.value = ''
+  try {
+    const result = await browser.transferWorkspaceStorage({
+      workspaceId: tabGroupEditorId.value,
+      direction: workspaceTransferDirection.value,
+      origins: workspaceTransferOrigins()
+    })
+    workspaceStorageState.value = 'saved'
+    workspaceStorageMessage.value = `${result.cookieCount} cookies and ${result.localStorageItemCount} local storage items copied.`
+    state.value = await browser.getState()
+  } catch (error) {
+    workspaceStorageState.value = 'error'
+    workspaceStorageMessage.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
+async function closeEditedWorkspace(): Promise<void> {
+  const workspace = state.value.mcpTabGroups.find((candidate) => candidate.id === tabGroupEditorId.value)
+  if (!workspace || workspace.isDefault) return
+  if (!window.confirm(`Close workspace "${workspace.name}"? Its tabs, cookies, local storage, cache, and other private browser data will be permanently deleted.`)) return
+  try {
+    await syncState(browser.closeWorkspace(workspace.id))
+    closeWorkspaceEditor()
   } catch (error) {
     tabGroupEditorError.value = error instanceof Error ? error.message : String(error)
   }
@@ -2300,7 +2405,7 @@ async function restoreSavedTabGroup(group: BrowserSavedTabGroupState): Promise<v
 
 async function deleteSavedTabGroup(event: MouseEvent, group: BrowserSavedTabGroupState): Promise<void> {
   event.stopPropagation()
-  if (!window.confirm(`Delete saved group "${group.name}" and its ${group.tabs.length} saved ${group.tabs.length === 1 ? 'tab' : 'tabs'}?`)) return
+  if (!window.confirm(`Delete archived workspace "${group.name}" and its ${group.tabs.length} saved ${group.tabs.length === 1 ? 'tab' : 'tabs'}? Its isolated browser data will also be deleted.`)) return
   await syncState(browser.deleteSavedTabGroup(group.id))
   tabSearchSelection.value = Math.min(tabSearchSelection.value, Math.max(0, tabSearchResults.value.length - 1))
   await nextTick()
@@ -2636,6 +2741,10 @@ watch([settingsOpen, settingsSection], ([open, section]) => {
   }
 })
 
+watch(workspaceTransferDirection, () => {
+  if (workspaceEditorOpen.value && workspaceEditorMode.value === 'edit') void loadWorkspaceStorageOrigins()
+})
+
 watch(updateNoticeOpen, async () => {
   await nextTick()
   reportShellHeight()
@@ -2681,7 +2790,7 @@ watch(
     bookmarksOpen,
     historyOpen,
     splitMenuOpen,
-    tabGroupEditorId
+    workspaceEditorOpen
   ],
   async () => {
     await nextTick()
@@ -3411,8 +3520,8 @@ function tabTooltip(tab: BrowserTabState): string {
   const emulation = tab.emulation ? ` — emulated: ${emulationDescription(tab.emulation)}` : ''
   const networkRoutes = tab.networkRouteCount ? ` — ${tab.networkRouteCount} temporary network ${tab.networkRouteCount === 1 ? 'route' : 'routes'}` : ''
   const split = state.value.splitView?.firstTabId === tab.id || state.value.splitView?.secondTabId === tab.id ? ' — visible in split view' : ''
-  const group = tab.mcpGroupName ? ` — agent group: ${tab.mcpGroupName}` : ''
-  return `${tab.title || 'New tab'}${problem}${pinned}${sleeping}${audio}${locked}${emulation}${networkRoutes}${split}${group}`
+  const workspace = tab.mcpGroupName ? ` — workspace: ${tab.mcpGroupName}` : ''
+  return `${tab.title || 'New tab'}${problem}${pinned}${sleeping}${audio}${locked}${emulation}${networkRoutes}${split}${workspace}`
 }
 
 function pageProblemDetails(tab: BrowserTabState): string {
@@ -5480,7 +5589,7 @@ function handleKeyDown(event: KeyboardEvent): void {
     return
   }
   if (event.key !== 'Escape') return
-  if (tabGroupEditorId.value) tabGroupEditorId.value = null
+  if (workspaceEditorOpen.value) closeWorkspaceEditor()
   else if (commandPaletteOpen.value) commandPaletteOpen.value = false
   else if (siteStorageOpen.value) siteStorageOpen.value = false
   else if (siteControlsOpen.value) siteControlsOpen.value = false
@@ -5536,7 +5645,7 @@ function reportShellHeight(): void {
   const floatingOverlayBottom = Array.from(
     shell.value.querySelectorAll<HTMLElement>('[data-shell-floating-panel]')
   ).reduce((bottom, panel) => Math.max(bottom, panel.getBoundingClientRect().bottom), 0)
-  const modalOpen = settingsOpen.value || commandPaletteOpen.value || helpDialog.value !== null || tabGroupEditorId.value !== null
+  const modalOpen = settingsOpen.value || commandPaletteOpen.value || helpDialog.value !== null || workspaceEditorOpen.value
   const sidePanelInset = modalOpen ? 0 : Array.from(
     shell.value.querySelectorAll<HTMLElement>('[data-shell-side-panel]')
   ).reduce((inset, panel) => Math.max(inset, window.innerWidth - panel.getBoundingClientRect().left), 0)
@@ -5826,8 +5935,8 @@ onBeforeUnmount(() => {
             class="tab-group-label"
             :class="{ active: tabGroupContainsActiveTab(tab.mcpGroupId!) }"
             :style="tabGroupStyle(tab)"
-            :title="`${isTabGroupCollapsed(tab.mcpGroupId!) ? 'Expand' : 'Collapse'} ${state.mcpTabGroups.find((group) => group.id === tab.mcpGroupId)?.isDefault ? 'default human' : 'agent'} tab group ${tab.mcpGroupName} · ${tab.mcpGroupId}`"
-            :aria-label="`${isTabGroupCollapsed(tab.mcpGroupId!) ? 'Expand' : 'Collapse'} group ${tab.mcpGroupName}, ${tabGroupTabCount(tab.mcpGroupId!)} ${tabGroupTabCount(tab.mcpGroupId!) === 1 ? 'tab' : 'tabs'}`"
+            :title="`${isTabGroupCollapsed(tab.mcpGroupId!) ? 'Expand' : 'Collapse'} workspace ${tab.mcpGroupName} · ${tab.mcpGroupId}`"
+            :aria-label="`${isTabGroupCollapsed(tab.mcpGroupId!) ? 'Expand' : 'Collapse'} workspace ${tab.mcpGroupName}, ${tabGroupTabCount(tab.mcpGroupId!)} ${tabGroupTabCount(tab.mcpGroupId!) === 1 ? 'tab' : 'tabs'}`"
             :aria-expanded="!isTabGroupCollapsed(tab.mcpGroupId!)"
             type="button"
             @click="toggleTabGroup(tab.mcpGroupId!)"
@@ -5838,7 +5947,7 @@ onBeforeUnmount(() => {
             <IconKeep
               v-if="state.mcpTabGroups.find((group) => group.id === tab.mcpGroupId)?.isDefault"
               class="tab-group-default-badge"
-              aria-label="Default group for new human tabs"
+              aria-label="Default workspace for new tabs"
             />
             <span>{{ tab.mcpGroupName }}</span>
             <span class="tab-group-count" aria-hidden="true">{{ tabGroupTabCount(tab.mcpGroupId!) }}</span>
@@ -5912,6 +6021,7 @@ onBeforeUnmount(() => {
         </button>
         </template>
         <button class="new-tab" type="button" title="New tab (Ctrl/Cmd+T)" aria-label="New tab" aria-keyshortcuts="Control+T Meta+T" @click="runBrowserShortcut('new-tab')"><IconAdd aria-hidden="true" /></button>
+        <button class="new-workspace" type="button" title="New isolated workspace" aria-label="Create workspace" @click="openNewWorkspaceEditor"><IconWorkspaces aria-hidden="true" /></button>
       </div>
       <div class="topbar-actions">
         <button
@@ -6293,7 +6403,7 @@ onBeforeUnmount(() => {
               <button v-for="tab in splitCandidates" :key="tab.id" type="button" @click="openTabInSplitView(tab.id)">
                 <img v-if="tab.faviconDataUrl" :src="tab.faviconDataUrl" alt="" />
                 <IconLanguage v-else aria-hidden="true" />
-                <span><strong>{{ tab.title || 'New tab' }}</strong><small>{{ tab.mcpGroupName || 'Ungrouped' }}</small></span>
+                <span><strong>{{ tab.title || 'New tab' }}</strong><small>{{ tab.mcpGroupName || 'No workspace' }}</small></span>
               </button>
             </div>
           </template>
@@ -9220,8 +9330,8 @@ onBeforeUnmount(() => {
       </div>
       <div v-else id="tab-search-results" class="tab-search-list">
         <section v-if="filteredSavedTabGroups.length" class="tab-search-section saved-groups" aria-labelledby="saved-groups-title">
-          <h3 id="saved-groups-title">Saved groups <span>{{ filteredSavedTabGroups.length }}</span></h3>
-          <div role="list" aria-label="Saved tab groups">
+          <h3 id="saved-groups-title">Archived workspaces <span>{{ filteredSavedTabGroups.length }}</span></h3>
+          <div role="list" aria-label="Archived workspaces">
             <article
               v-for="group in filteredSavedTabGroups"
               :id="`tab-search-saved-${group.id}`"
@@ -9239,8 +9349,8 @@ onBeforeUnmount(() => {
                   <small>{{ group.tabs.slice(0, 3).map((tab) => tab.title || tab.url).join(' · ') }}</small>
                 </span>
               </button>
-              <button class="tab-search-restore" type="button" :aria-label="`Restore saved group ${group.name}`" title="Restore group" @click="restoreSavedTabGroup(group)"><IconRestore aria-hidden="true" /></button>
-              <button class="tab-search-close" type="button" :aria-label="`Delete saved group ${group.name}`" title="Delete saved group" @click="deleteSavedTabGroup($event, group)"><IconDelete aria-hidden="true" /></button>
+              <button class="tab-search-restore" type="button" :aria-label="`Restore archived workspace ${group.name}`" title="Restore workspace" @click="restoreSavedTabGroup(group)"><IconRestore aria-hidden="true" /></button>
+              <button class="tab-search-close" type="button" :aria-label="`Delete archived workspace ${group.name}`" title="Delete archived workspace" @click="deleteSavedTabGroup($event, group)"><IconDelete aria-hidden="true" /></button>
             </article>
           </div>
         </section>
@@ -9570,7 +9680,7 @@ onBeforeUnmount(() => {
         </div>
         <footer>
           <span>{{ siteStorageResult?.itemCount ?? 0 }} {{ (siteStorageResult?.itemCount ?? 0) === 1 ? 'entry' : 'entries' }}</span>
-          <span>{{ siteStorageKind === 'session-storage' ? 'This tab only' : 'Shared by origin across groups' }}</span>
+          <span>{{ siteStorageKind === 'session-storage' ? 'This tab only' : 'Shared by origin in this workspace' }}</span>
         </footer>
       </template>
       <section v-else-if="siteStorageIndexedDbOpen" class="indexeddb-view" :aria-busy="siteStorageIndexedDbState === 'loading'">
@@ -9753,13 +9863,14 @@ onBeforeUnmount(() => {
       </section>
       <p v-if="siteStorageError && !siteStorageUsageOpen && !siteStorageChangesOpen && !siteStorageIndexedDbOpen && !siteStoragePwaOpen" class="site-storage-error" role="alert">{{ siteStorageError }}</p>
     </section>
-    <div v-if="tabGroupEditorId" class="tab-group-editor-overlay" @click.self="tabGroupEditorId = null">
-      <form class="tab-group-editor" role="dialog" aria-modal="true" aria-labelledby="tab-group-editor-title" @submit.prevent="saveTabGroupName">
+    <div v-if="workspaceEditorOpen" class="tab-group-editor-overlay" @click.self="closeWorkspaceEditor">
+      <form class="tab-group-editor workspace-editor" role="dialog" aria-modal="true" aria-labelledby="tab-group-editor-title" @submit.prevent="saveWorkspaceEditor">
         <header>
-          <div><span class="eyebrow">Tab group</span><h2 id="tab-group-editor-title">Edit group</h2></div>
-          <button class="panel-close" type="button" aria-label="Close tab group editor" @click="tabGroupEditorId = null"><IconClose aria-hidden="true" /></button>
+          <div><span class="eyebrow">Browser workspace</span><h2 id="tab-group-editor-title">{{ workspaceEditorMode === 'create' ? 'Create workspace' : 'Edit workspace' }}</h2></div>
+          <button class="panel-close" type="button" aria-label="Close workspace editor" @click="closeWorkspaceEditor"><IconClose aria-hidden="true" /></button>
         </header>
-        <label for="tab-group-name">Group name</label>
+        <div class="workspace-editor-body">
+        <label for="tab-group-name">Workspace name</label>
         <input id="tab-group-name" v-model="tabGroupEditorName" type="text" maxlength="80" autocomplete="off" autofocus />
         <label id="tab-group-color-label">Color</label>
         <div class="tab-group-color-options" role="radiogroup" aria-labelledby="tab-group-color-label">
@@ -9777,10 +9888,42 @@ onBeforeUnmount(() => {
             @click="tabGroupEditorColor = color"
           ><IconCheck v-if="tabGroupEditorColor === color" aria-hidden="true" /></button>
         </div>
-        <p v-if="state.mcpTabGroups.find((group) => group.id === tabGroupEditorId)?.isDefault">New tabs opened by you always return to this sticky group. Agents can see its public ID but are instructed not to use it.</p>
-        <p v-else>Agents can list this public group ID. Each agent is instructed to work only in the group it created for its task.</p>
-        <output v-if="tabGroupEditorError" role="alert">{{ tabGroupEditorError }}</output>
-        <footer><button type="button" @click="tabGroupEditorId = null">Cancel</button><button class="primary" type="submit" :disabled="!tabGroupEditorName.trim()">Save changes</button></footer>
+        <section v-if="workspaceEditorMode === 'create'" class="workspace-storage-section">
+          <div class="workspace-storage-heading"><IconDatabase aria-hidden="true" /><div><strong>Starting browser data</strong><span>Choose whether this workspace starts clean or receives selected data from Default.</span></div></div>
+          <label class="workspace-storage-choice">
+            <input v-model="workspaceStorageMode" type="radio" value="scratch" />
+            <span><strong>Start from scratch</strong><small>Use an empty isolated browser profile.</small></span>
+          </label>
+          <label class="workspace-storage-choice">
+            <input v-model="workspaceStorageMode" type="radio" value="fork-default" />
+            <span><strong>Fork Default</strong><small>Copy cookies and local storage without linking future changes.</small></span>
+          </label>
+          <div v-if="workspaceStorageMode === 'fork-default'" class="workspace-origin-picker">
+            <div><strong>Websites to copy</strong><button type="button" @click="workspaceSelectedOrigins = workspaceSelectedOrigins.length === workspaceOriginOptions.length ? [] : [...workspaceOriginOptions]">{{ workspaceSelectedOrigins.length === workspaceOriginOptions.length ? 'Clear' : 'Select all' }}</button></div>
+            <p v-if="!workspaceOriginOptions.length">No known website origins yet. Bronom will still copy Default cookies.</p>
+            <label v-for="origin in workspaceOriginOptions" :key="origin"><input v-model="workspaceSelectedOrigins" type="checkbox" :value="origin" /><span>{{ origin }}</span></label>
+          </div>
+        </section>
+        <p v-else-if="state.mcpTabGroups.find((workspace) => workspace.id === tabGroupEditorId)?.isDefault" class="workspace-default-note"><IconKeep aria-hidden="true" /> Default is the shared durable browser profile. Human-created tabs open here, agents are instructed not to use it, and it cannot be closed or deleted.</p>
+        <section v-else class="workspace-storage-section">
+          <div class="workspace-storage-heading"><IconDatabase aria-hidden="true" /><div><strong>Browser data</strong><span>This workspace has an isolated profile. Transfers merge data; they do not create a live connection.</span></div></div>
+          <div class="workspace-transfer-direction" role="radiogroup" aria-label="Storage transfer direction">
+            <label><input v-model="workspaceTransferDirection" type="radio" value="from-default" /><span>Import from Default</span></label>
+            <label><input v-model="workspaceTransferDirection" type="radio" value="to-default" /><span>Save to Default</span></label>
+          </div>
+          <div class="workspace-origin-picker">
+            <div><strong>Websites to copy</strong><button type="button" @click="workspaceSelectedOrigins = workspaceSelectedOrigins.length === workspaceOriginOptions.length ? [] : [...workspaceOriginOptions]">{{ workspaceSelectedOrigins.length === workspaceOriginOptions.length ? 'Clear' : 'Select all' }}</button></div>
+            <p v-if="workspaceStorageState === 'loading'">Loading known websites…</p>
+            <p v-else-if="!workspaceOriginOptions.length">No known website origins in the source profile. All cookies can still be copied.</p>
+            <label v-for="origin in workspaceOriginOptions" :key="origin"><input v-model="workspaceSelectedOrigins" type="checkbox" :value="origin" /><span>{{ origin }}</span></label>
+          </div>
+          <button class="workspace-transfer-button" type="button" :disabled="workspaceStorageState === 'saving' || workspaceStorageState === 'loading'" @click="transferWorkspaceStorage"><IconSwapHoriz aria-hidden="true" /> {{ workspaceStorageState === 'saving' ? 'Copying…' : workspaceTransferDirection === 'from-default' ? 'Import selected data' : 'Save selected data to Default' }}</button>
+          <output v-if="workspaceStorageMessage" :class="{ error: workspaceStorageState === 'error' }" role="status">{{ workspaceStorageMessage }}</output>
+          <div class="workspace-danger-zone"><div><strong>Close workspace permanently</strong><span>Closes its tabs and deletes its isolated browser data.</span></div><button type="button" @click="closeEditedWorkspace">Close workspace</button></div>
+        </section>
+        <output v-if="tabGroupEditorError" class="workspace-editor-error" role="alert">{{ tabGroupEditorError }}</output>
+        </div>
+        <footer><button type="button" @click="closeWorkspaceEditor">Cancel</button><button class="primary" type="submit" :disabled="!tabGroupEditorName.trim()">{{ workspaceEditorMode === 'create' ? 'Create workspace' : 'Save changes' }}</button></footer>
       </form>
     </div>
     <div v-if="commandPaletteOpen" class="settings-overlay command-palette-overlay" @click.self="commandPaletteOpen = false">
@@ -10290,7 +10433,7 @@ onBeforeUnmount(() => {
           <main v-else-if="settingsSection === 'privacy'" class="settings-content privacy-settings">
             <div class="setting-copy">
               <h3>Privacy &amp; browsing data</h3>
-              <p>Choose what to remove, then clear one website or all websites in this local profile.</p>
+              <p>Manage the durable Default workspace profile. Isolated workspaces are managed from their workspace editor.</p>
             </div>
             <fieldset class="privacy-category-options" :disabled="browsingDataState === 'clearing' || janitorState === 'clearing'">
               <legend>What to clear</legend>
@@ -10321,7 +10464,7 @@ onBeforeUnmount(() => {
             <div class="privacy-websites-heading">
               <div>
                 <h4>Websites</h4>
-                <p>Search the profile, then clear the selected categories from one website.</p>
+                <p>Search Default and application-wide records, then clear the selected categories from one website.</p>
               </div>
               <button class="secondary-button janitor-refresh" type="button" :disabled="janitorState === 'loading' || janitorState === 'clearing'" @click="refreshJanitorWebsites">
                 <IconRefresh aria-hidden="true" />
@@ -10337,7 +10480,7 @@ onBeforeUnmount(() => {
               <div v-if="janitorState === 'loading' && !janitorWebsites.length" class="site-permissions-empty janitor-empty">
                 <IconProgress class="state-spinner" aria-hidden="true" />
                 <strong>Finding websites…</strong>
-                <p>Checking this local profile.</p>
+                <p>Checking the Default workspace and application-wide records.</p>
               </div>
               <div v-else-if="!janitorWebsites.length" class="site-permissions-empty janitor-empty">
                 <IconCleaning aria-hidden="true" />
@@ -10357,7 +10500,7 @@ onBeforeUnmount(() => {
                   <span v-if="janitorWebsiteMeta(site).length" class="janitor-site-meta">
                     <span v-for="item in janitorWebsiteMeta(site)" :key="item">{{ item }}</span>
                   </span>
-                  <span v-else class="janitor-site-meta"><span>Known to this profile</span></span>
+                  <span v-else class="janitor-site-meta"><span>Known to Default</span></span>
                 </span>
                 <button
                   class="janitor-clear-button"
@@ -10379,7 +10522,8 @@ onBeforeUnmount(() => {
                 Bookmarks ({{ browsingDataSummary?.bookmarkCount ?? '…' }}), saved passwords ({{ browsingDataSummary?.savedPasswordCount ?? '…' }}),
                 site-permission decisions ({{ browsingDataSummary?.permissionDecisionCount ?? '…' }}), downloaded files, settings, and open tabs stay untouched.
                 Open pages are not reloaded automatically. New MCP commands pause only while clearing is in progress.
-                The website list combines origins known from local history, cookies, open tabs, bookmarks, saved accounts, and permissions. Chromium does not expose a complete index of storage-only origins. Related subdomains may share cookies.
+                Cookies, cache, and site data here belong to Default; history, bookmarks, saved accounts, and downloaded files are application-wide.
+                The website list combines origins known from those records and open Default tabs. Chromium does not expose a complete index of storage-only origins. Related subdomains may share cookies.
               </p>
             </div>
           </main>

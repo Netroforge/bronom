@@ -73,20 +73,20 @@ test('compares bounded browser storage changes for people and grouped agents', a
     expect(tools.tools.find((tool) => tool.name === 'browser_storage_changes')?.description).toContain('Values are omitted by default')
 
     const groupResult = await client.callTool({
-      name: 'browser_tab_groups',
+      name: 'browser_workspaces',
       arguments: { action: 'create', name: 'Storage changes' }
     }) as CallToolResult
-    const groupId = (JSON.parse(text(groupResult)) as { id: string }).id
+    const workspaceId = (JSON.parse(text(groupResult)) as { id: string }).id
     const opened = await client.callTool({
       name: 'browser_new_tab',
-      arguments: { groupId, url: `http://127.0.0.1:${address.port}/` }
+      arguments: { workspaceId, url: `http://127.0.0.1:${address.port}/` }
     }) as CallToolResult
     const tabId = (JSON.parse(text(opened)) as { activeTabId: string }).activeTabId
-    await client.callTool({ name: 'browser_wait', arguments: { groupId, tabId, text: 'Storage changes fixture' } })
+    await client.callTool({ name: 'browser_wait', arguments: { workspaceId, tabId, text: 'Storage changes fixture' } })
 
     const baseline = await client.callTool({
       name: 'browser_storage_changes',
-      arguments: { groupId, tabId, action: 'baseline' }
+      arguments: { workspaceId, tabId, action: 'baseline' }
     }) as CallToolResult
     expect(baseline.isError, text(baseline)).not.toBe(true)
     expect(JSON.parse(text(baseline))).toMatchObject({
@@ -100,12 +100,12 @@ test('compares bounded browser storage changes for people and grouped agents', a
 
     const mutated = await client.callTool({
       name: 'browser_evaluate',
-      arguments: { groupId, tabId, script: 'window.mutateStorage()' }
+      arguments: { workspaceId, tabId, script: 'window.mutateStorage()' }
     }) as CallToolResult
     expect(mutated.isError, text(mutated)).not.toBe(true)
     const compared = await client.callTool({
       name: 'browser_storage_changes',
-      arguments: { groupId, tabId, action: 'compare' }
+      arguments: { workspaceId, tabId, action: 'compare' }
     }) as CallToolResult
     expect(compared.isError, text(compared)).not.toBe(true)
     const report = JSON.parse(text(compared)) as {
@@ -129,7 +129,7 @@ test('compares bounded browser storage changes for people and grouped agents', a
 
     const values = await client.callTool({
       name: 'browser_storage_changes',
-      arguments: { groupId, tabId, action: 'get', includeValues: true }
+      arguments: { workspaceId, tabId, action: 'get', includeValues: true }
     }) as CallToolResult
     const valueReport = JSON.parse(text(values)) as typeof report
     expect(valueReport.changes).toEqual(expect.arrayContaining([
@@ -143,7 +143,7 @@ test('compares bounded browser storage changes for people and grouped agents', a
 
     await client.callTool({
       name: 'browser_storage_changes',
-      arguments: { groupId, tabId, action: 'clear' }
+      arguments: { workspaceId, tabId, action: 'clear' }
     })
     await appWindow.getByRole('button', { name: 'Page tools' }).click()
     const pageTools = appWindow.getByRole('dialog', { name: 'Page tools' })
@@ -156,7 +156,7 @@ test('compares bounded browser storage changes for people and grouped agents', a
 
     await client.callTool({
       name: 'browser_evaluate',
-      arguments: { groupId, tabId, script: "localStorage.setItem('ui-change', 'ready')" }
+      arguments: { workspaceId, tabId, script: "localStorage.setItem('ui-change', 'ready')" }
     })
     await storagePanel.getByRole('button', { name: 'Compare now' }).click()
     await expect(storagePanel).toContainText('1 storage change')
@@ -171,12 +171,12 @@ test('compares bounded browser storage changes for people and grouped agents', a
 
     await client.callTool({
       name: 'browser_navigate',
-      arguments: { groupId, tabId, url: `http://localhost:${address.port}/other` }
+      arguments: { workspaceId, tabId, url: `http://localhost:${address.port}/other` }
     })
-    await client.callTool({ name: 'browser_wait', arguments: { groupId, tabId, text: 'Storage changes fixture' } })
+    await client.callTool({ name: 'browser_wait', arguments: { workspaceId, tabId, text: 'Storage changes fixture' } })
     const clearedAfterOriginChange = await client.callTool({
       name: 'browser_storage_changes',
-      arguments: { groupId, tabId, action: 'get' }
+      arguments: { workspaceId, tabId, action: 'get' }
     }) as CallToolResult
     expect(JSON.parse(text(clearedAfterOriginChange))).toMatchObject({
       origin: `http://localhost:${address.port}`,
