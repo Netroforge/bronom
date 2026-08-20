@@ -6,6 +6,8 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ### Fixed
 
+- Catch address-bar navigation rejections and surface them as top-level application toasts while retaining the recoverable site-error bar.
+- Mark independently destroyed page renderers as unavailable and immediately activate another live tab, or create a safe Default tab when no live renderer remains.
 - Record a committed website as soon as its main document is ready so it appears in recent address suggestions even while slow page resources are still loading.
 - Collapse an existing split view onto its surviving pane when Electron destroys either native renderer, and show a top-level error toast if a stale tab is selected afterward.
 - Reject destroyed split-view panes before mutating layout state, keep stale tabs closable, and surface split-view failures as top-level application toasts instead of raw Electron errors.

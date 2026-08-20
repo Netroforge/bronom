@@ -3289,7 +3289,11 @@ async function selectBrowserTab(tabId: string): Promise<boolean> {
 async function navigate(): Promise<void> {
   if (!address.value.trim()) return
   closeAddressSuggestions()
-  await syncState(browser.navigate({ url: address.value, tabId: state.value.activeTabId ?? undefined }))
+  try {
+    await syncState(browser.navigate({ url: address.value, tabId: state.value.activeTabId ?? undefined }))
+  } catch (error) {
+    showAppToast('error', 'Navigation failed', friendlyUiError(error, 'The address could not be opened.'))
+  }
 }
 
 function showAddressSuggestions(): void {

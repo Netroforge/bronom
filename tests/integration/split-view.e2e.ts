@@ -167,11 +167,20 @@ test('rejects a destroyed split target without corrupting the active tab or late
     active.close()
   }, activeUrl)
 
-  const currentError = await appWindow.evaluate(`window.bronom.openSplitView(${JSON.stringify(recoveryTabId)}).then(() => 'opened', (error) => String(error.message ?? error))`)
-  expect(currentError).toContain('current tab renderer is no longer available')
+  await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => ({
+    activeTabId: state.activeTabId,
+    staleProblem: state.tabs.find((tab) => tab.id === ${JSON.stringify(activeTabId)})?.pageProblem
+  }))`)).toMatchObject({
+    activeTabId: expect.not.stringMatching(String(activeTabId)),
+    staleProblem: {
+      kind: 'renderer-gone',
+      title: 'This page is no longer available'
+    }
+  })
   await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.splitView)')).toBeUndefined()
 
   await appWindow.evaluate(`window.bronom.closeTab(${JSON.stringify(activeTabId)})`)
+  await appWindow.evaluate(`window.bronom.selectTab(${JSON.stringify(recoveryTabId)})`)
   await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')).toBe(recoveryTabId)
 })
 

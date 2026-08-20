@@ -5371,26 +5371,68 @@ export class BrowserTabsManager {
   private attachTabEvents(tab: BrowserTab): void {
     const webContents = tab.webContents
     webContents.once('destroyed', () => {
-      if (this.destroyed || this.tabs.get(tab.id) !== tab || !this.splitViewContains(tab.id)) return
-      const split = this.splitView!
-      const partnerId = split.firstTabId === tab.id ? split.secondTabId : split.firstTabId
-      const partner = this.tabs.get(partnerId)
-      this.splitView = null
-      try {
-        this.window.contentView.removeChildView(tab.view)
-      } catch (error) {
-        console.warn(`[browser] Could not detach destroyed split pane ${tab.id}:`, error)
+      if (this.destroyed || this.tabs.get(tab.id) !== tab) return
+      tab.loading = false
+      tab.pageProblem = {
+        kind: 'renderer-gone',
+        title: 'This page is no longer available',
+        message: 'Close this tab and reopen it from Recently closed.',
+        url: tab.url,
+        reason: 'renderer-destroyed'
       }
-      if (partner && !partner.webContents.isDestroyed()) {
-        if (this.activeTabId === tab.id) {
-          this.activeTabId = partner.id
-          partner.lastActiveAt = Date.now()
-          this.markTabActiveInGroup(partner)
+      if (this.splitViewContains(tab.id)) {
+        const split = this.splitView!
+        const partnerId = split.firstTabId === tab.id ? split.secondTabId : split.firstTabId
+        const partner = this.tabs.get(partnerId)
+        this.splitView = null
+        try {
+          this.window.contentView.removeChildView(tab.view)
+        } catch (error) {
+          console.warn(`[browser] Could not detach destroyed split pane ${tab.id}:`, error)
         }
-        this.layout()
-        if (this.activeTabId === partner.id) partner.webContents.focus()
+        if (partner && !partner.webContents.isDestroyed()) {
+          if (this.activeTabId === tab.id) {
+            this.activeTabId = partner.id
+            partner.lastActiveAt = Date.now()
+            this.markTabActiveInGroup(partner)
+          }
+          this.layout()
+          if (this.activeTabId === partner.id) partner.webContents.focus()
+          this.changed()
+          return
+        }
       }
-      this.changed()
+
+      const active = this.activeTabId ? this.tabs.get(this.activeTabId) : undefined
+      if (active && !active.webContents.isDestroyed()) {
+        this.changed()
+        return
+      }
+      const replacement = this.orderedTabs().find((candidate) => (
+        candidate.id !== tab.id && !candidate.webContents.isDestroyed()
+      ))
+      if (replacement) {
+        try {
+          this.selectTab(replacement.id)
+          return
+        } catch (error) {
+          console.error('[browser] Could not activate a live tab after renderer teardown:', error)
+        }
+      }
+      if (active) {
+        try {
+          this.window.contentView.removeChildView(active.view)
+        } catch (error) {
+          console.warn(`[browser] Could not detach destroyed active pane ${active.id}:`, error)
+        }
+      }
+      this.activeTabId = null
+      this.changed(false)
+      void this.createTab({ url: 'about:blank', active: true, mcpGroupId: this.ensureDefaultHumanGroup() })
+        .catch((error) => {
+          console.error('[browser] Could not create a replacement tab after renderer teardown:', error)
+          this.options.onActionFailed?.('recover from a closed page renderer', error)
+        })
     })
     webContents.on('focus', () => {
       if (this.restoringLayout) return

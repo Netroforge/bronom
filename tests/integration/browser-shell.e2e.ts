@@ -590,15 +590,19 @@ test('shows a recoverable site error and retries the failed address', async ({ a
   await close()
   const failedUrl = `http://127.0.0.1:${port}/temporarily-unavailable`
   try {
-    await appWindow.evaluate(`window.bronom.newTab({ url: ${JSON.stringify(failedUrl)}, active: true })`)
+    await appWindow.evaluate('window.bronom.newTab({ active: true })')
+    const address = appWindow.getByRole('combobox', { name: 'Address' })
+    await address.fill(failedUrl)
+    await address.press('Enter')
     await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.find((tab) => tab.active)?.pageProblem)')).toMatchObject({
       kind: 'load-error',
       title: 'This site could not be reached',
       url: failedUrl,
       errorDescription: 'ERR_CONNECTION_REFUSED'
     })
+    await expect(appWindow.getByRole('alert', { name: 'Navigation failed' })).toContainText('ERR_CONNECTION_REFUSED')
 
-    const recovery = appWindow.getByRole('alert')
+    const recovery = appWindow.locator('.page-problem-bar')
     await expect(recovery).toContainText('The website refused the connection.')
     await expect(recovery).toContainText('ERR_CONNECTION_REFUSED')
     await expect(appWindow.getByRole('tab')).toHaveAttribute('aria-label', /This site could not be reached/)
@@ -685,7 +689,10 @@ test('keeps shell state usable when Electron destroys a tab WebContents independ
   const url = 'data:text/html,<title>Native teardown fixture</title><main>Native teardown fixture</main>'
   const created = await appWindow.evaluate(`window.bronom.newTab({ url: ${JSON.stringify(url)}, active: true })`) as BrowserState
   const tabId = created.activeTabId
+  const homeTabId = created.tabs.find((tab) => tab.url.startsWith('bronom://home'))?.id
   expect(tabId).toBeTruthy()
+  expect(homeTabId).toBeTruthy()
+  await appWindow.evaluate(`window.bronom.closeTab(${JSON.stringify(homeTabId)})`)
   await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.find((tab) => tab.active)?.title)'))
     .toBe('Native teardown fixture')
   await expect.poll(() => electronApp.evaluate(({ webContents }, requestedUrl) => {
@@ -699,9 +706,25 @@ test('keeps shell state usable when Electron destroys a tab WebContents independ
     page.close()
   }, url)
 
-  await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => (
-    state.tabs.find((tab) => tab.id === ${JSON.stringify(tabId)})?.devToolsOpen
-  ))`)).toBe(false)
+  await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => ({
+    active: state.tabs.find((tab) => tab.active),
+    stale: state.tabs.find((tab) => tab.id === ${JSON.stringify(tabId)})
+  }))`)).toMatchObject({
+    active: {
+      url: 'about:blank'
+    },
+    stale: {
+      devToolsOpen: false,
+      pageProblem: {
+        kind: 'renderer-gone',
+        title: 'This page is no longer available'
+      }
+    }
+  })
+  await appWindow.getByRole('tab', { name: /Native teardown fixture/ }).click()
+  await expect(appWindow.getByRole('alert', { name: 'Open tab failed' })).toContainText(
+    'tab renderer is no longer available'
+  )
   await appWindow.evaluate(`window.bronom.closeTab(${JSON.stringify(tabId)})`)
   await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => (
     state.tabs.some((tab) => tab.id === ${JSON.stringify(tabId)})
