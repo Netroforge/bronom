@@ -17,11 +17,10 @@ function mcpResultText(result: CallToolResult): string {
   return content?.type === 'text' ? content.text : ''
 }
 
-test('launches a visible browser shell with an authenticated MCP endpoint', async ({
+test('launches a visible browser shell with a loopback MCP endpoint', async ({
   appWindow,
   electronApp,
-  mcpPort,
-  mcpToken
+  mcpPort
 }) => {
   await expect(appWindow).toHaveTitle('Bronom')
   await expect(appWindow.getByRole('button', { name: 'Settings' })).toBeVisible()
@@ -34,15 +33,10 @@ test('launches a visible browser shell with an authenticated MCP endpoint', asyn
   })
   expect(windowState).toEqual({ visible: true, destroyed: false })
 
-  const unauthorized = await fetch(`http://127.0.0.1:${mcpPort}/healthz`)
-  expect(unauthorized.status).toBe(401)
-
   await expect
     .poll(async () => {
       try {
-        const response = await fetch(`http://127.0.0.1:${mcpPort}/healthz`, {
-          headers: { authorization: `Bearer ${mcpToken}` }
-        })
+        const response = await fetch(`http://127.0.0.1:${mcpPort}/healthz`)
         const body = (await response.json()) as { name?: string }
         return response.ok && body.name === 'bronom'
       } catch {
