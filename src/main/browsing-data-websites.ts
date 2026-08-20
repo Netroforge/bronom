@@ -48,7 +48,7 @@ function cookieOrigin(cookie: BrowsingDataCookie): string | null {
   return `${cookie.secure ? 'https' : 'http'}://${address}`
 }
 
-function cookieAvailableToOrigin(cookie: BrowsingDataCookie, origin: string): boolean {
+export function cookieAvailableToOrigin(cookie: BrowsingDataCookie, origin: string): boolean {
   const domain = cookieHostname(cookie)
   if (!domain) return false
   const url = new URL(origin)

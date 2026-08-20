@@ -36,7 +36,7 @@ import { HistoryStore } from './history-store.js'
 import { CredentialStore } from './credential-store.js'
 import { CommercialLicenseClient, CommercialLicenseError } from './commercial-license-client.js'
 import { CommercialLicenseStore } from './commercial-license-store.js'
-import { buildBrowsingDataWebsiteInventory } from './browsing-data-websites.js'
+import { buildBrowsingDataWebsiteInventory, cookieAvailableToOrigin } from './browsing-data-websites.js'
 import { renderHomePage } from './home-page.js'
 import {
   BROWSER_TOOL_CATALOG,
@@ -433,7 +433,8 @@ async function currentBrowsingDataSiteSummary(
     throw new TypeError('Website must be a valid HTTP or HTTPS address')
   }
   const history = (historyStore?.list() ?? []).filter((entry) => new URL(entry.url).origin === url.origin)
-  const cookies = await browserSession.cookies.get({ url: url.href })
+  const cookies = (await browserSession.cookies.get({}))
+    .filter((cookie) => cookieAvailableToOrigin(cookie, url.origin))
   return {
     origin: url.origin,
     cookieCount: cookies.length,

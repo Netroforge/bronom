@@ -4,6 +4,10 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Count every cookie belonging to a website origin in Privacy & browsing data and `browser_site_data`, including cookies scoped to a different path than the page currently open.
+
 ## [1.6.5] - 2026-08-21
 
 ### Changed

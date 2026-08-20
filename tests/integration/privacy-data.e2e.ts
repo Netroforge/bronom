@@ -49,6 +49,13 @@ test('summarizes and selectively clears browsing data without removing retained 
       expirationDate: Date.now() / 1_000 + 3_600
     }), origin)
     await electronApp.evaluate(({ session }, cookieUrl) => session.fromPartition('persist:bronom').cookies.set({
+      url: `${cookieUrl}/admin`,
+      name: 'bronom-path-scoped-fixture',
+      value: 'private-admin',
+      path: '/admin',
+      expirationDate: Date.now() / 1_000 + 3_600
+    }), origin)
+    await electronApp.evaluate(({ session }, cookieUrl) => session.fromPartition('persist:bronom').cookies.set({
       url: cookieUrl,
       name: 'bronom-other-site-fixture',
       value: 'retained',
@@ -59,7 +66,7 @@ test('summarizes and selectively clears browsing data without removing retained 
 
     await expect.poll(() => appWindow.evaluate(`window.bronomBrowsingData.siteSummary(${JSON.stringify(url)})`)).toMatchObject({
       origin,
-      cookieCount: 1,
+      cookieCount: 2,
       historyEntries: 1,
       historyVisits: 1
     })
@@ -70,7 +77,7 @@ test('summarizes and selectively clears browsing data without removing retained 
     const siteControls = appWindow.getByRole('dialog', { name: '127.0.0.1' })
     await expect(siteControls).toBeVisible()
     await expect(siteControls).toContainText(origin)
-    await expect(siteControls.getByLabel('1 cookie available to this address')).toBeVisible()
+    await expect(siteControls.getByLabel('2 cookies available to this address')).toBeVisible()
     await expect(siteControls.getByLabel('1 history page and 1 visit')).toBeVisible()
     const siteNotificationPermission = siteControls.getByRole('combobox', {
       name: `Notifications permission for ${origin}`
@@ -98,7 +105,7 @@ test('summarizes and selectively clears browsing data without removing retained 
       permissionDecisionCount: 1
     })
     const beforeSummary = await appWindow.evaluate('window.bronomBrowsingData.summary()') as { cookieCount: number }
-    expect(beforeSummary.cookieCount).toBeGreaterThanOrEqual(2)
+    expect(beforeSummary.cookieCount).toBeGreaterThanOrEqual(3)
     await expect.poll(() => appWindow.evaluate('window.bronomBrowsingData.summary().then((summary) => summary.cacheBytes)')).toBeGreaterThan(0)
     const requestCountBeforeClear = requests.length
 
@@ -110,7 +117,7 @@ test('summarizes and selectively clears browsing data without removing retained 
     await expect(dialog.getByRole('searchbox', { name: 'Search websites' })).toHaveValue(origin)
     await expect(dialog.getByRole('heading', { name: 'Privacy & browsing data' })).toBeVisible()
     await expect.poll(async () => (await dialog.boundingBox())!.height).toBe(dialogHeight)
-    await expect(dialog).toContainText('1 cookie')
+    await expect(dialog).toContainText('2 cookies')
     await expect(dialog).toContainText('1 history page · 1 visit')
     await expect(dialog).toContainText('1 bookmark kept')
     await expect(dialog.getByRole('checkbox', { name: /^History/ })).toBeChecked()
