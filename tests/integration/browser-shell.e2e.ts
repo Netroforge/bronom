@@ -914,12 +914,18 @@ test('floats bookmark and history suggestions above pages while allowing duplica
     if (!serverAddress || typeof serverAddress === 'string') throw new Error('Address-suggestion fixture did not expose a port')
     const historyUrl = `http://127.0.0.1:${serverAddress.port}/history`
     const bookmarkUrl = `http://127.0.0.1:${serverAddress.port}/bookmark`
-    await appWindow.evaluate(`window.bronom.newTab({ url: ${JSON.stringify(historyUrl)}, active: true })`)
+    const address = appWindow.getByRole('combobox', { name: 'Address' })
+    await appWindow.evaluate('window.bronom.newTab({ active: true })')
+    await address.fill(historyUrl)
+    await address.press('Enter')
     await expect.poll(() => appWindow.evaluate('window.bronomHistory.list()')).toEqual([
       expect.objectContaining({ url: historyUrl, title: 'Suggestion history' })
     ])
-    await appWindow.evaluate(`window.bronom.getState().then((state) => window.bronom.closeTab(state.tabs.find((tab) => tab.url === ${JSON.stringify(historyUrl)}).id))`)
     await appWindow.evaluate('window.bronom.newTab({ active: true })')
+    await address.fill(new URL(historyUrl).hostname)
+    await expect(appWindow.locator('#address-suggestions [role="option"]')).toHaveCount(1)
+    await expect(appWindow.locator('#address-suggestions [role="option"]').first()).toContainText('Suggestion history')
+    await address.fill('')
     await appWindow.evaluate(`window.bronom.newTab({ url: ${JSON.stringify(bookmarkUrl)}, active: false })`)
     await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => state.tabs.find((tab) => tab.url === ${JSON.stringify(bookmarkUrl)})?.title)`)).toBe('Suggestion bookmark')
     await appWindow.evaluate(`window.bronomBookmarks.add(${JSON.stringify(bookmarkUrl)}, 'Suggestion bookmark')`)
@@ -963,7 +969,6 @@ test('floats bookmark and history suggestions above pages while allowing duplica
       if (!contents) return 0
       return contents.executeJavaScript(`document.querySelector('.address-suggestions')?.scrollTop ?? 0`)
     })
-    const address = appWindow.getByRole('combobox', { name: 'Address' })
     const listbox = appWindow.locator('#address-suggestions')
     const options = listbox.locator('[role="option"]')
     const requestCountBeforeTyping = requests.length
@@ -1076,6 +1081,48 @@ test('floats bookmark and history suggestions above pages while allowing duplica
     await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.find((tab) => tab.active)?.title)')).toBe('Suggestion history')
     await expect(address).toHaveAttribute('aria-expanded', 'false')
   } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+})
+
+test('suggests a committed address before every page resource finishes loading', async ({ appWindow }) => {
+  let finishPendingResource: (() => void) | undefined
+  const server = createServer((request, response) => {
+    if (request.url === '/pending-resource') {
+      response.writeHead(200, { 'content-type': 'text/plain' })
+      response.write('resource started')
+      finishPendingResource = () => response.end('resource finished')
+      return
+    }
+    response.writeHead(200, { 'content-type': 'text/html' })
+    response.end('<!doctype html><title>Committed history</title><main>Ready</main><img src="/pending-resource">')
+  })
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => resolve())
+  })
+  try {
+    const serverAddress = server.address()
+    if (!serverAddress || typeof serverAddress === 'string') throw new Error('Committed-history fixture did not expose a port')
+    const historyUrl = `http://127.0.0.1:${serverAddress.port}/committed`
+    const address = appWindow.getByRole('combobox', { name: 'Address' })
+
+    await appWindow.evaluate('window.bronom.newTab({ active: true })')
+    await address.fill(historyUrl)
+    await address.press('Enter')
+    await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.find((tab) => tab.active))')).toMatchObject({
+      url: historyUrl,
+      title: 'Committed history',
+      loading: true
+    })
+
+    await appWindow.evaluate('window.bronom.newTab({ active: true })')
+    await address.fill(new URL(historyUrl).hostname)
+    const options = appWindow.locator('#address-suggestions [role="option"]')
+    await expect(options).toHaveCount(1)
+    await expect(options.first()).toContainText('Committed history')
+  } finally {
+    finishPendingResource?.()
     await new Promise<void>((resolve) => server.close(() => resolve()))
   }
 })

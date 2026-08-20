@@ -125,3 +125,52 @@ test('restores both split panes and their layout after restart', async ({ profil
     if (second) await closeBronom(second.app)
   }
 })
+
+test('rejects a destroyed split target without corrupting the active tab or later close operations', async ({
+  appWindow,
+  electronApp
+}) => {
+  const activeUrl = 'data:text/html,<title>Live split source</title><h1>Live source</h1>'
+  const destroyedUrl = 'data:text/html,<title>Destroyed split target</title><h1>Destroyed target</h1>'
+  const activeState = await appWindow.evaluate(`window.bronom.newTab({ url: ${JSON.stringify(activeUrl)}, active: true })`) as BrowserState
+  const activeTabId = activeState.activeTabId!
+  const targetState = await appWindow.evaluate(`window.bronom.newTab({ url: ${JSON.stringify(destroyedUrl)}, active: false })`) as BrowserState
+  const targetTabId = targetState.tabs.find((tab) => tab.url === destroyedUrl)!.id
+
+  await expect.poll(() => electronApp.evaluate(({ webContents }, url) => (
+    webContents.getAllWebContents().some((contents) => contents.getURL() === url)
+  ), destroyedUrl)).toBe(true)
+  await electronApp.evaluate(({ webContents }, url) => {
+    const target = webContents.getAllWebContents().find((contents) => contents.getURL() === url)
+    if (!target) throw new Error('Destroyed split target was not found')
+    target.close()
+  }, destroyedUrl)
+
+  await appWindow.getByRole('button', { name: 'Split view', exact: true }).click()
+  await appWindow.locator('.split-candidate-list').getByRole('button', { name: /Destroyed split target/ }).click()
+  await expect(appWindow.getByRole('alert', { name: 'Split view failed' })).toContainText(
+    'selected tab renderer is no longer available'
+  )
+  await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')).toBe(activeTabId)
+  await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.splitView)')).toBeUndefined()
+
+  await appWindow.evaluate(`window.bronom.closeTab(${JSON.stringify(targetTabId)})`)
+  await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')).toBe(activeTabId)
+  await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.splitView)')).toBeUndefined()
+
+  const recoveryUrl = 'data:text/html,<title>Live split recovery</title><h1>Live recovery</h1>'
+  const recoveryState = await appWindow.evaluate(`window.bronom.newTab({ url: ${JSON.stringify(recoveryUrl)}, active: false })`) as BrowserState
+  const recoveryTabId = recoveryState.tabs.find((tab) => tab.url === recoveryUrl)!.id
+  await electronApp.evaluate(({ webContents }, url) => {
+    const active = webContents.getAllWebContents().find((contents) => contents.getURL() === url)
+    if (!active) throw new Error('Live split source was not found')
+    active.close()
+  }, activeUrl)
+
+  const currentError = await appWindow.evaluate(`window.bronom.openSplitView(${JSON.stringify(recoveryTabId)}).then(() => 'opened', (error) => String(error.message ?? error))`)
+  expect(currentError).toContain('current tab renderer is no longer available')
+  await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.splitView)')).toBeUndefined()
+
+  await appWindow.evaluate(`window.bronom.closeTab(${JSON.stringify(activeTabId)})`)
+  await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')).toBe(recoveryTabId)
+})

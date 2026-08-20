@@ -2413,6 +2413,16 @@ export class BrowserTabsManager {
     const target = this.getTab(tabId)
     if (current.id === target.id) throw new Error('Choose a different tab for split view.')
     if (isBronomHomeUrl(current.url) || isBronomHomeUrl(target.url)) throw new Error('Bronom Home cannot be opened in split view.')
+    // A WebContentsView can outlive its WebContents when Electron or DevTools
+    // tears the renderer down independently. Validate both panes before
+    // mutating split state; addChildView/setBounds throw native exceptions for
+    // a destroyed child and would otherwise leave splitView half-applied.
+    if (current.webContents.isDestroyed()) {
+      throw new Error('The current tab renderer is no longer available. Close the tab and reopen it from Recently closed.')
+    }
+    if (target.webContents.isDestroyed()) {
+      throw new Error('The selected tab renderer is no longer available. Close the tab and reopen it from Recently closed.')
+    }
     current.lastActiveAt = Date.now()
     target.lastActiveAt = Date.now()
     if (current.sleeping) void this.wakeTab(current.id).catch((error) => console.error('[browser] Could not wake split tab:', error))
@@ -5590,6 +5600,12 @@ export class BrowserTabsManager {
       tab.loading = webContents.isLoading()
       this.changed()
     }
+    const recordPendingHistory = (): void => {
+      if (tab.suppressInitialHistory || tab.pendingHistoryUrl !== tab.url) return
+      tab.title = webContents.getTitle() || tab.title
+      this.recordVisit(tab)
+      tab.pendingHistoryUrl = null
+    }
     webContents.on('page-title-updated', (_event, title) => {
       if (tab.sleeping) return
       tab.title = title || tab.title
@@ -5634,7 +5650,7 @@ export class BrowserTabsManager {
         tab.pendingHistoryUrl = null
         return
       }
-      if (tab.pendingHistoryUrl === tab.url) this.recordVisit(tab)
+      recordPendingHistory()
       tab.pendingHistoryUrl = null
     })
     webContents.on('did-navigate', (_event, url) => {
@@ -5684,6 +5700,11 @@ export class BrowserTabsManager {
       this.changed()
     })
     webContents.on('dom-ready', () => {
+      // A page can remain loading indefinitely because of a slow image,
+      // analytics request, or other subresource. Once its main document is
+      // committed and usable, make it available to address suggestions rather
+      // than waiting for did-stop-loading.
+      recordPendingHistory()
       this.watchCredentialSubmission(tab)
       this.watchUnsavedFormEdits(tab)
     })

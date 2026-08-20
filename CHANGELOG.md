@@ -4,6 +4,11 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Record a committed website as soon as its main document is ready so it appears in recent address suggestions even while slow page resources are still loading.
+- Reject destroyed split-view panes before mutating layout state, keep stale tabs closable, and surface split-view failures as top-level application toasts instead of raw Electron errors.
+
 ## [1.6.3] - 2026-08-20
 
 ### Changed

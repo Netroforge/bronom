@@ -3539,25 +3539,48 @@ function toggleSplitMenu(): void {
 
 async function openTabInSplitView(tabId: string): Promise<void> {
   splitMenuOpen.value = false
-  await syncState(browser.openSplitView(tabId))
+  await updateSplitState(
+    browser.openSplitView(tabId),
+    'The selected tab could not be opened in split view.'
+  )
 }
 
 async function changeSplitLayout(orientation: BrowserSplitOrientation): Promise<void> {
-  await syncState(browser.updateSplitView({ orientation }))
+  await updateSplitState(
+    browser.updateSplitView({ orientation }),
+    'The split-view layout could not be changed.'
+  )
 }
 
 async function changeSplitRatio(event: Event): Promise<void> {
   const ratio = Number((event.target as HTMLInputElement).value) / 100
-  await syncState(browser.updateSplitView({ ratio }))
+  await updateSplitState(
+    browser.updateSplitView({ ratio }),
+    'The split-view size could not be changed.'
+  )
 }
 
 async function swapSplitTabs(): Promise<void> {
-  await syncState(browser.updateSplitView({ swap: true }))
+  await updateSplitState(
+    browser.updateSplitView({ swap: true }),
+    'The split-view panes could not be swapped.'
+  )
 }
 
 async function exitSplitView(): Promise<void> {
   splitMenuOpen.value = false
-  await syncState(browser.closeSplitView())
+  await updateSplitState(
+    browser.closeSplitView(),
+    'Split view could not be closed.'
+  )
+}
+
+async function updateSplitState(next: Promise<BrowserState>, fallback: string): Promise<void> {
+  try {
+    await syncState(next)
+  } catch (error) {
+    showAppToast('error', 'Split view failed', friendlyUiError(error, fallback))
+  }
 }
 
 async function setActiveZoom(action: 'in' | 'out' | 'reset'): Promise<void> {
