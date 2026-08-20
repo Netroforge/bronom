@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -79,5 +79,48 @@ describe('HistoryStore', () => {
     }))
     await store.load()
     expect(store.list()).toEqual([expect.objectContaining({ id: 'new' })])
+  })
+
+  it('repairs duplicate persisted IDs without dropping distinct history entries', async () => {
+    const now = Date.UTC(2026, 7, 13)
+    const { path, store } = await storeAt(now)
+    const visitedAt = new Date(now - 1_000).toISOString()
+    await writeFile(path, JSON.stringify({
+      version: 1,
+      entries: [
+        { id: 'duplicate-id', url: 'https://one.example/', title: 'One', visitedAt, visitCount: 1 },
+        { id: 'duplicate-id', url: 'https://two.example/', title: 'Two', visitedAt, visitCount: 1 }
+      ]
+    }))
+
+    const restored = await store.load()
+    expect(restored).toHaveLength(2)
+    expect(new Set(restored.map((entry) => entry.id)).size).toBe(2)
+    expect(new Set((JSON.parse(await readFile(path, 'utf8')) as { entries: Array<{ id: string }> }).entries.map((entry) => entry.id)).size).toBe(2)
+  })
+
+  it('keeps history unchanged when mutations cannot be persisted', async () => {
+    const { path, store } = await storeAt()
+    const first = await store.record({ url: 'https://one.example/', title: 'One' })
+    await store.record({ url: 'https://two.example/', title: 'Two' })
+    const before = store.list()
+    expect(first).not.toBeNull()
+    const backupPath = `${path}.backup`
+    await rename(path, backupPath)
+    await mkdir(path)
+
+    await expect(store.record({ url: 'https://three.example/', title: 'Lost visit' })).rejects.toThrow()
+    expect(store.list()).toEqual(before)
+    await expect(store.remove(first!.id)).rejects.toThrow()
+    expect(store.list()).toEqual(before)
+    await expect(store.clearOrigin('https://one.example')).rejects.toThrow()
+    expect(store.list()).toEqual(before)
+    await expect(store.clear()).rejects.toThrow()
+    expect(store.list()).toEqual(before)
+
+    await rm(path, { recursive: true })
+    await rename(backupPath, path)
+    const restored = new HistoryStore(path, () => Date.UTC(2026, 7, 13))
+    expect(await restored.load()).toEqual(before)
   })
 })

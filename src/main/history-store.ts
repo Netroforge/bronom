@@ -46,8 +46,15 @@ function validEntry(value: unknown, oldestAllowed: number): value is BrowserHist
   )
 }
 
+function sortedHistory(entries: Iterable<BrowserHistoryEntry>): BrowserHistoryEntry[] {
+  return [...entries]
+    .sort((left, right) => right.visitedAt.localeCompare(left.visitedAt) || left.title.localeCompare(right.title))
+    .map((entry) => ({ ...entry }))
+}
+
 export class HistoryStore {
   private readonly entries = new Map<string, BrowserHistoryEntry>()
+  private mutationQueue: Promise<void> = Promise.resolve()
   private saveQueue: Promise<void> = Promise.resolve()
 
   constructor(private readonly path: string, private readonly now: () => number = Date.now) {}
@@ -62,11 +69,17 @@ export class HistoryStore {
         .filter((entry) => validEntry(entry, oldestAllowed))
         .sort((left, right) => right.visitedAt.localeCompare(left.visitedAt))
       const seenUrls = new Set<string>()
+      const seenIds = new Set<string>()
+      let repairedDuplicateId = false
       for (const entry of sorted) {
         if (seenUrls.has(entry.url) || this.entries.size >= MAX_HISTORY_ENTRIES) continue
         seenUrls.add(entry.url)
-        this.entries.set(entry.id, { ...entry })
+        const restored = seenIds.has(entry.id) ? { ...entry, id: randomUUID() } : { ...entry }
+        if (restored.id !== entry.id) repairedDuplicateId = true
+        seenIds.add(restored.id)
+        this.entries.set(restored.id, restored)
       }
+      if (repairedDuplicateId) await this.persist()
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code
       if (code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error
@@ -75,63 +88,88 @@ export class HistoryStore {
   }
 
   list(): BrowserHistoryEntry[] {
-    return [...this.entries.values()]
-      .sort((left, right) => right.visitedAt.localeCompare(left.visitedAt) || left.title.localeCompare(right.title))
-      .map((entry) => ({ ...entry }))
+    return sortedHistory(this.entries.values())
   }
 
   async record(value: { url: string; title: string }): Promise<BrowserHistoryEntry | null> {
     const url = normalizeHistoryUrl(value.url)
     if (!url) return null
-    const existing = [...this.entries.values()].find((entry) => entry.url === url)
-    const entry: BrowserHistoryEntry = {
-      id: existing?.id ?? randomUUID(),
-      url,
-      title: normalizeTitle(value.title, url),
-      visitedAt: new Date(this.now()).toISOString(),
-      visitCount: (existing?.visitCount ?? 0) + 1
-    }
-    if (existing) this.entries.delete(existing.id)
-    this.entries.set(entry.id, entry)
-    this.prune()
-    await this.persist()
-    return { ...entry }
+    return this.queueMutation(async () => {
+      const nextEntries = new Map(this.entries)
+      const existing = [...nextEntries.values()].find((entry) => entry.url === url)
+      const entry: BrowserHistoryEntry = {
+        id: existing?.id ?? randomUUID(),
+        url,
+        title: normalizeTitle(value.title, url),
+        visitedAt: new Date(this.now()).toISOString(),
+        visitCount: (existing?.visitCount ?? 0) + 1
+      }
+      if (existing) nextEntries.delete(existing.id)
+      nextEntries.set(entry.id, entry)
+      this.prune(nextEntries)
+      await this.persist(nextEntries.values())
+      this.replaceEntries(nextEntries)
+      return { ...entry }
+    })
   }
 
   async remove(id: string): Promise<boolean> {
-    const removed = this.entries.delete(id)
-    if (removed) await this.persist()
-    return removed
+    return this.queueMutation(async () => {
+      if (!this.entries.has(id)) return false
+      const nextEntries = new Map(this.entries)
+      nextEntries.delete(id)
+      await this.persist(nextEntries.values())
+      this.replaceEntries(nextEntries)
+      return true
+    })
   }
 
   async clear(): Promise<void> {
-    if (!this.entries.size) return
-    this.entries.clear()
-    await this.persist()
+    await this.queueMutation(async () => {
+      if (!this.entries.size) return
+      await this.persist([])
+      this.entries.clear()
+    })
   }
 
   async clearOrigin(origin: string): Promise<number> {
-    let removed = 0
-    for (const entry of this.entries.values()) {
-      if (new URL(entry.url).origin !== origin) continue
-      this.entries.delete(entry.id)
-      removed += 1
-    }
-    if (removed) await this.persist()
-    return removed
+    return this.queueMutation(async () => {
+      const nextEntries = new Map(this.entries)
+      let removed = 0
+      for (const entry of nextEntries.values()) {
+        if (new URL(entry.url).origin !== origin) continue
+        nextEntries.delete(entry.id)
+        removed += 1
+      }
+      if (!removed) return 0
+      await this.persist(nextEntries.values())
+      this.replaceEntries(nextEntries)
+      return removed
+    })
   }
 
-  private prune(): void {
+  private prune(entries: Map<string, BrowserHistoryEntry>): void {
     const oldestAllowed = this.now() - HISTORY_RETENTION_MS
-    for (const entry of this.list()) {
-      if (Date.parse(entry.visitedAt) < oldestAllowed) this.entries.delete(entry.id)
+    for (const entry of sortedHistory(entries.values())) {
+      if (Date.parse(entry.visitedAt) < oldestAllowed) entries.delete(entry.id)
     }
-    const overflow = this.list().slice(MAX_HISTORY_ENTRIES)
-    for (const entry of overflow) this.entries.delete(entry.id)
+    const overflow = sortedHistory(entries.values()).slice(MAX_HISTORY_ENTRIES)
+    for (const entry of overflow) entries.delete(entry.id)
   }
 
-  private persist(): Promise<void> {
-    const value: PersistedHistory = { version: HISTORY_VERSION, entries: this.list() }
+  private queueMutation<T>(mutation: () => Promise<T>): Promise<T> {
+    const operation = this.mutationQueue.then(mutation)
+    this.mutationQueue = operation.then(() => undefined, () => undefined)
+    return operation
+  }
+
+  private replaceEntries(entries: ReadonlyMap<string, BrowserHistoryEntry>): void {
+    this.entries.clear()
+    for (const [id, entry] of entries) this.entries.set(id, entry)
+  }
+
+  private persist(entries: Iterable<BrowserHistoryEntry> = this.entries.values()): Promise<void> {
+    const value: PersistedHistory = { version: HISTORY_VERSION, entries: sortedHistory(entries) }
     const operation = this.saveQueue.then(async () => {
       await mkdir(dirname(this.path), { recursive: true })
       const temporaryPath = `${this.path}.tmp`

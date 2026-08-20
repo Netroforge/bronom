@@ -1,6 +1,6 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { CredentialStore, type CredentialEncryption } from '../src/main/credential-store.js'
 
@@ -117,6 +117,69 @@ describe('CredentialStore', () => {
     ])
     expect(await restored.password('newer-duplicate')).toBe('new password')
     expect((JSON.parse(await readFile(path, 'utf8')) as { credentials: unknown[] }).credentials).toHaveLength(1)
+  })
+
+  it('repairs duplicate persisted IDs without dropping either account', async () => {
+    const { path, store } = await createStore()
+    const first = await store.save('https://one.example', 'one', 'secret one')
+    const persisted = JSON.parse(await readFile(path, 'utf8')) as {
+      version: 1
+      credentials: Array<Record<string, string>>
+    }
+    persisted.credentials.push({
+      ...persisted.credentials[0]!,
+      origin: 'https://two.example',
+      username: 'two',
+      encryptedPassword: Buffer.from('encrypted:secret two', 'utf8').toString('base64')
+    })
+    await writeFile(path, `${JSON.stringify(persisted, null, 2)}\n`, 'utf8')
+
+    const restored = new CredentialStore(path, encryption)
+    const accounts = await restored.load()
+    expect(accounts).toHaveLength(2)
+    expect(accounts.map((account) => account.origin)).toEqual(['https://one.example', 'https://two.example'])
+    expect(new Set(accounts.map((account) => account.id))).toHaveProperty('size', 2)
+    expect(await restored.password(first.id)).toBe('secret one')
+    const second = accounts.find((account) => account.origin === 'https://two.example')!
+    expect(await restored.password(second.id)).toBe('secret two')
+    const repaired = JSON.parse(await readFile(path, 'utf8')) as { credentials: Array<{ id: string }> }
+    expect(new Set(repaired.credentials.map((account) => account.id))).toHaveProperty('size', 2)
+  })
+
+  it('keeps the in-memory vault unchanged when persistence fails', async () => {
+    const { path, store } = await createStore()
+    const saved = await store.save('https://example.com', 'person', 'original password')
+    const profileDirectory = dirname(path)
+    const backupDirectory = `${profileDirectory}-backup`
+
+    const blockPersistence = async (): Promise<void> => {
+      await rename(profileDirectory, backupDirectory)
+      await writeFile(profileDirectory, 'blocks credential directory creation', 'utf8')
+    }
+    const restorePersistence = async (): Promise<void> => {
+      await rm(profileDirectory, { force: true })
+      await rename(backupDirectory, profileDirectory)
+    }
+
+    await blockPersistence()
+    await expect(store.save('https://example.com/account', 'person', 'lost update')).rejects.toThrow()
+    expect(store.list()).toEqual([saved])
+    expect(await store.password(saved.id)).toBe('original password')
+    await restorePersistence()
+
+    await blockPersistence()
+    await expect(store.remove(saved.id)).rejects.toThrow()
+    expect(store.list()).toEqual([saved])
+    await restorePersistence()
+
+    await blockPersistence()
+    await expect(store.clear()).rejects.toThrow()
+    expect(store.list()).toEqual([saved])
+    await restorePersistence()
+
+    const restored = new CredentialStore(path, encryption)
+    expect(await restored.load()).toEqual([saved])
+    expect(await restored.password(saved.id)).toBe('original password')
   })
 
   it('removes one credential or clears the complete vault', async () => {

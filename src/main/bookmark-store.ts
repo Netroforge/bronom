@@ -40,8 +40,15 @@ function validBookmark(value: unknown): value is BrowserBookmark {
   )
 }
 
+function sortedBookmarks(entries: Iterable<BrowserBookmark>): BrowserBookmark[] {
+  return [...entries]
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.title.localeCompare(right.title))
+    .map((entry) => ({ ...entry }))
+}
+
 export class BookmarkStore {
   private readonly entries = new Map<string, BrowserBookmark>()
+  private mutationQueue: Promise<void> = Promise.resolve()
   private saveQueue: Promise<void> = Promise.resolve()
 
   constructor(private readonly path: string) {}
@@ -52,11 +59,17 @@ export class BookmarkStore {
       const value = JSON.parse(await readFile(this.path, 'utf8')) as Partial<PersistedBookmarks>
       if (value.version !== 1 || !Array.isArray(value.bookmarks)) return []
       const seenUrls = new Set<string>()
+      const seenIds = new Set<string>()
+      let repairedDuplicateId = false
       for (const entry of value.bookmarks) {
         if (!validBookmark(entry) || seenUrls.has(entry.url) || this.entries.size >= MAX_BOOKMARKS) continue
         seenUrls.add(entry.url)
-        this.entries.set(entry.id, { ...entry })
+        const restored = seenIds.has(entry.id) ? { ...entry, id: randomUUID() } : { ...entry }
+        if (restored.id !== entry.id) repairedDuplicateId = true
+        seenIds.add(restored.id)
+        this.entries.set(restored.id, restored)
       }
+      if (repairedDuplicateId) await this.persist()
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code
       if (code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error
@@ -65,9 +78,7 @@ export class BookmarkStore {
   }
 
   list(): BrowserBookmark[] {
-    return [...this.entries.values()]
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.title.localeCompare(right.title))
-      .map((entry) => ({ ...entry }))
+    return sortedBookmarks(this.entries.values())
   }
 
   get(id: string): BrowserBookmark | undefined {
@@ -85,38 +96,66 @@ export class BookmarkStore {
   async add(value: { url: string; title: string }): Promise<BrowserBookmark> {
     const url = normalizeBookmarkUrl(value.url)
     if (!url) throw new TypeError('Bookmark URL must be an HTTP or HTTPS address')
-    const existing = [...this.entries.values()].find((entry) => entry.url === url)
-    if (!existing && this.entries.size >= MAX_BOOKMARKS) throw new Error(`Bookmark limit reached (${MAX_BOOKMARKS})`)
-    const now = new Date().toISOString()
-    const entry: BrowserBookmark = {
-      id: existing?.id ?? randomUUID(),
-      url,
-      title: normalizeBookmarkTitle(value.title, url),
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now
-    }
-    this.entries.set(entry.id, entry)
-    await this.persist()
-    return { ...entry }
+    return this.queueMutation(async () => {
+      const nextEntries = new Map(this.entries)
+      const existing = [...nextEntries.values()].find((entry) => entry.url === url)
+      if (!existing && nextEntries.size >= MAX_BOOKMARKS) throw new Error(`Bookmark limit reached (${MAX_BOOKMARKS})`)
+      const now = new Date().toISOString()
+      const entry: BrowserBookmark = {
+        id: existing?.id ?? randomUUID(),
+        url,
+        title: normalizeBookmarkTitle(value.title, url),
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now
+      }
+      nextEntries.set(entry.id, entry)
+      await this.persist(nextEntries.values())
+      this.replaceEntries(nextEntries)
+      return { ...entry }
+    })
   }
 
   async rename(id: string, title: string): Promise<BrowserBookmark> {
-    const entry = this.entries.get(id)
-    if (!entry) throw new Error(`Bookmark not found: ${id}`)
-    entry.title = normalizeBookmarkTitle(title, entry.url)
-    entry.updatedAt = new Date().toISOString()
-    await this.persist()
-    return { ...entry }
+    return this.queueMutation(async () => {
+      const existing = this.entries.get(id)
+      if (!existing) throw new Error(`Bookmark not found: ${id}`)
+      const entry = {
+        ...existing,
+        title: normalizeBookmarkTitle(title, existing.url),
+        updatedAt: new Date().toISOString()
+      }
+      const nextEntries = new Map(this.entries)
+      nextEntries.set(id, entry)
+      await this.persist(nextEntries.values())
+      this.replaceEntries(nextEntries)
+      return { ...entry }
+    })
   }
 
   async remove(id: string): Promise<boolean> {
-    const removed = this.entries.delete(id)
-    if (removed) await this.persist()
-    return removed
+    return this.queueMutation(async () => {
+      if (!this.entries.has(id)) return false
+      const nextEntries = new Map(this.entries)
+      nextEntries.delete(id)
+      await this.persist(nextEntries.values())
+      this.replaceEntries(nextEntries)
+      return true
+    })
   }
 
-  private persist(): Promise<void> {
-    const value: PersistedBookmarks = { version: 1, bookmarks: this.list() }
+  private queueMutation<T>(mutation: () => Promise<T>): Promise<T> {
+    const operation = this.mutationQueue.then(mutation)
+    this.mutationQueue = operation.then(() => undefined, () => undefined)
+    return operation
+  }
+
+  private replaceEntries(entries: ReadonlyMap<string, BrowserBookmark>): void {
+    this.entries.clear()
+    for (const [id, entry] of entries) this.entries.set(id, entry)
+  }
+
+  private persist(entries: Iterable<BrowserBookmark> = this.entries.values()): Promise<void> {
+    const value: PersistedBookmarks = { version: 1, bookmarks: sortedBookmarks(entries) }
     const operation = this.saveQueue.then(async () => {
       await mkdir(dirname(this.path), { recursive: true })
       const temporaryPath = `${this.path}.tmp`

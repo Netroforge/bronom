@@ -39,8 +39,15 @@ function validEntry(value: unknown): value is SitePermissionEntry {
   )
 }
 
+function sortedPermissions(entries: Iterable<SitePermissionEntry>): SitePermissionEntry[] {
+  return [...entries]
+    .map((entry) => ({ ...entry }))
+    .sort((left, right) => left.origin.localeCompare(right.origin) || left.permission.localeCompare(right.permission))
+}
+
 export class SitePermissionStore {
   private readonly entries = new Map<string, SitePermissionEntry>()
+  private mutationQueue: Promise<void> = Promise.resolve()
   private saveQueue: Promise<void> = Promise.resolve()
 
   constructor(private readonly path: string) {}
@@ -61,9 +68,7 @@ export class SitePermissionStore {
   }
 
   list(): SitePermissionEntry[] {
-    return [...this.entries.values()]
-      .map((entry) => ({ ...entry }))
-      .sort((left, right) => left.origin.localeCompare(right.origin) || left.permission.localeCompare(right.permission))
+    return sortedPermissions(this.entries.values())
   }
 
   get(origin: string, permission: string): SitePermissionDecision | undefined {
@@ -77,28 +82,51 @@ export class SitePermissionStore {
     if (!normalizedOrigin) throw new TypeError('Site permission origin must be an HTTP or HTTPS origin')
     if (!PERMISSION_NAME.test(permission)) throw new TypeError('Invalid site permission name')
     if (!isSitePermissionDecision(decision)) throw new TypeError('Invalid site permission decision')
-    const entry: SitePermissionEntry = { origin: normalizedOrigin, permission, decision }
-    this.entries.set(keyFor(normalizedOrigin, permission), entry)
-    await this.persist()
-    return { ...entry }
+    return this.queueMutation(async () => {
+      const entry: SitePermissionEntry = { origin: normalizedOrigin, permission, decision }
+      const nextEntries = new Map(this.entries)
+      nextEntries.set(keyFor(normalizedOrigin, permission), entry)
+      await this.persist(nextEntries.values())
+      this.replaceEntries(nextEntries)
+      return { ...entry }
+    })
   }
 
   async remove(origin: string, permission: string): Promise<boolean> {
     const normalizedOrigin = normalizeSitePermissionOrigin(origin)
     if (!normalizedOrigin || !PERMISSION_NAME.test(permission)) return false
-    const removed = this.entries.delete(keyFor(normalizedOrigin, permission))
-    if (removed) await this.persist()
-    return removed
+    return this.queueMutation(async () => {
+      const key = keyFor(normalizedOrigin, permission)
+      if (!this.entries.has(key)) return false
+      const nextEntries = new Map(this.entries)
+      nextEntries.delete(key)
+      await this.persist(nextEntries.values())
+      this.replaceEntries(nextEntries)
+      return true
+    })
   }
 
   async clear(): Promise<void> {
-    if (!this.entries.size) return
-    this.entries.clear()
-    await this.persist()
+    await this.queueMutation(async () => {
+      if (!this.entries.size) return
+      await this.persist([])
+      this.entries.clear()
+    })
   }
 
-  private persist(): Promise<void> {
-    const value: PersistedSitePermissions = { version: 1, permissions: this.list() }
+  private queueMutation<T>(mutation: () => Promise<T>): Promise<T> {
+    const operation = this.mutationQueue.then(mutation)
+    this.mutationQueue = operation.then(() => undefined, () => undefined)
+    return operation
+  }
+
+  private replaceEntries(entries: ReadonlyMap<string, SitePermissionEntry>): void {
+    this.entries.clear()
+    for (const [key, entry] of entries) this.entries.set(key, entry)
+  }
+
+  private persist(entries: Iterable<SitePermissionEntry> = this.entries.values()): Promise<void> {
+    const value: PersistedSitePermissions = { version: 1, permissions: sortedPermissions(entries) }
     const operation = this.saveQueue.then(async () => {
       await mkdir(dirname(this.path), { recursive: true })
       const temporaryPath = `${this.path}.tmp`

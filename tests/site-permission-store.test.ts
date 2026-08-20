@@ -1,6 +1,6 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { normalizeSitePermissionOrigin, SitePermissionStore } from '../src/main/site-permission-store.js'
 
@@ -75,5 +75,26 @@ describe('SitePermissionStore', () => {
     await expect(store.set('bronom://home', 'geolocation', 'allow')).rejects.toThrow('HTTP or HTTPS origin')
     expect(normalizeSitePermissionOrigin('https://EXAMPLE.com:443/path')).toBe('https://example.com')
     expect(normalizeSitePermissionOrigin('not a URL')).toBeNull()
+  })
+
+  it('keeps permission decisions unchanged when mutations cannot be persisted', async () => {
+    const { path, store } = await createStore()
+    await store.set('https://example.com', 'geolocation', 'allow')
+    const before = store.list()
+    const profileDirectory = dirname(path)
+    const backupDirectory = `${profileDirectory}-backup`
+    await rename(profileDirectory, backupDirectory)
+    await writeFile(profileDirectory, 'blocks permission directory creation', 'utf8')
+
+    await expect(store.set('https://example.com', 'geolocation', 'deny')).rejects.toThrow()
+    expect(store.list()).toEqual(before)
+    await expect(store.remove('https://example.com', 'geolocation')).rejects.toThrow()
+    expect(store.list()).toEqual(before)
+    await expect(store.clear()).rejects.toThrow()
+    expect(store.list()).toEqual(before)
+
+    await rm(profileDirectory, { force: true })
+    await rename(backupDirectory, profileDirectory)
+    expect(await new SitePermissionStore(path).load()).toEqual(before)
   })
 })

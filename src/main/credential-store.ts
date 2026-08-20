@@ -72,7 +72,13 @@ export class CredentialStore {
           repairedDuplicates = true
         }
       }
-      for (const entry of accounts.values()) this.entries.set(entry.id, entry)
+      const usedIds = new Set<string>()
+      for (const entry of accounts.values()) {
+        const restored = usedIds.has(entry.id) ? { ...entry, id: randomUUID() } : entry
+        if (restored !== entry) repairedDuplicates = true
+        usedIds.add(restored.id)
+        this.entries.set(restored.id, restored)
+      }
       if (repairedDuplicates) await this.persist()
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code
@@ -98,7 +104,8 @@ export class CredentialStore {
     if (username.length > 512) throw new TypeError('Credential username is too long')
     if (!password || password.length > 16_384) throw new TypeError('Credential password must be between 1 and 16384 characters')
     return this.queueMutation(async () => {
-      const existing = [...this.entries.values()].find((entry) => entry.origin === normalized && entry.username === username)
+      const nextEntries = new Map(this.entries)
+      const existing = [...nextEntries.values()].find((entry) => entry.origin === normalized && entry.username === username)
       const now = new Date().toISOString()
       const entry: PersistedCredential = {
         id: existing?.id ?? randomUUID(),
@@ -108,8 +115,9 @@ export class CredentialStore {
         createdAt: existing?.createdAt ?? now,
         updatedAt: now
       }
-      this.entries.set(entry.id, entry)
-      await this.persist()
+      nextEntries.set(entry.id, entry)
+      await this.persist(nextEntries.values())
+      this.replaceEntries(nextEntries)
       const { encryptedPassword: _encryptedPassword, ...summary } = entry
       return { ...summary }
     })
@@ -122,9 +130,14 @@ export class CredentialStore {
     if (decrypted.shouldReEncrypt) {
       await this.queueMutation(async () => {
         if (this.entries.get(id) !== entry) return
-        entry.encryptedPassword = (await this.encryption.encrypt(decrypted.result)).toString('base64')
-        entry.updatedAt = new Date().toISOString()
-        await this.persist()
+        const nextEntries = new Map(this.entries)
+        nextEntries.set(id, {
+          ...entry,
+          encryptedPassword: (await this.encryption.encrypt(decrypted.result)).toString('base64'),
+          updatedAt: new Date().toISOString()
+        })
+        await this.persist(nextEntries.values())
+        this.replaceEntries(nextEntries)
       })
     }
     return decrypted.result
@@ -132,17 +145,20 @@ export class CredentialStore {
 
   async remove(id: string): Promise<boolean> {
     return this.queueMutation(async () => {
-      const removed = this.entries.delete(id)
-      if (removed) await this.persist()
-      return removed
+      if (!this.entries.has(id)) return false
+      const nextEntries = new Map(this.entries)
+      nextEntries.delete(id)
+      await this.persist(nextEntries.values())
+      this.replaceEntries(nextEntries)
+      return true
     })
   }
 
   async clear(): Promise<void> {
     await this.queueMutation(async () => {
       if (!this.entries.size) return
+      await this.persist([])
       this.entries.clear()
-      await this.persist()
     })
   }
 
@@ -152,8 +168,16 @@ export class CredentialStore {
     return operation
   }
 
-  private persist(): Promise<void> {
-    const value: PersistedCredentialVault = { version: 1, credentials: [...this.entries.values()] }
+  private replaceEntries(entries: ReadonlyMap<string, PersistedCredential>): void {
+    this.entries.clear()
+    for (const [id, entry] of entries) this.entries.set(id, entry)
+  }
+
+  private persist(entries: Iterable<PersistedCredential> = this.entries.values()): Promise<void> {
+    const value: PersistedCredentialVault = {
+      version: 1,
+      credentials: [...entries].map((entry) => ({ ...entry }))
+    }
     const operation = this.saveQueue.then(async () => {
       await mkdir(dirname(this.path), { recursive: true })
       const temporaryPath = `${this.path}.tmp`

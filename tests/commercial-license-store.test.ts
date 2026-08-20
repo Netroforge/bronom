@@ -1,6 +1,6 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { CommercialLicenseStore, type CommercialLicenseEncryption } from '../src/main/commercial-license-store.js'
 
@@ -103,5 +103,41 @@ describe('CommercialLicenseStore', () => {
 
     expect(store.summary(true)).toMatchObject({ active: false, status: 'expired', maskedKey: '••••-MNOP' })
     expect(await store.credentials()).toEqual({ licenseKey: 'ABCD-EFGH-IJKL-MNOP', instanceId: 'inst_abcdefgh1234' })
+  })
+
+  it('keeps the current license state when mutations cannot be persisted', async () => {
+    const { path, store } = await createStore()
+    await store.saveActivation('ABCD-EFGH-IJKL-MNOP', {
+      valid: true,
+      status: 'active',
+      productId: 'prod_bronom',
+      instanceId: 'inst_abcdefgh1234',
+      activationLimit: 3
+    })
+    const before = store.summary(true)
+    const profileDirectory = dirname(path)
+    const backupDirectory = `${profileDirectory}-backup`
+    await rename(profileDirectory, backupDirectory)
+    await writeFile(profileDirectory, 'blocks license directory creation', 'utf8')
+
+    await expect(store.saveValidation({ valid: false, status: 'inactive', productId: 'prod_bronom' })).rejects.toThrow()
+    expect(store.summary(true)).toEqual(before)
+    await expect(store.markInactive()).rejects.toThrow()
+    expect(store.summary(true)).toEqual(before)
+    await expect(store.clear()).rejects.toThrow()
+    expect(store.summary(true)).toEqual(before)
+    await expect(store.saveActivation('WXYZ-EFGH-IJKL-QRST', {
+      valid: true,
+      status: 'active',
+      productId: 'prod_bronom',
+      instanceId: 'inst_replacement1234'
+    })).rejects.toThrow()
+    expect(store.summary(true)).toEqual(before)
+
+    await rm(profileDirectory, { force: true })
+    await rename(backupDirectory, profileDirectory)
+    const restored = new CommercialLicenseStore(path, encryption)
+    await restored.load()
+    expect(restored.summary(true)).toEqual(before)
   })
 })

@@ -5455,7 +5455,13 @@ function handleCredentialPickerKeydown(event: KeyboardEvent): void {
 }
 
 async function removeSavedCredential(id: string): Promise<void> {
-  await window.bronomCredentials.remove(id)
+  try {
+    const removed = await window.bronomCredentials.remove(id)
+    if (!removed) throw new Error('The saved account no longer exists.')
+    showAppToast('success', 'Password removed', 'The saved account was removed from this device.')
+  } catch (error) {
+    showAppToast('error', 'Remove password failed', friendlyUiError(error, 'The saved account could not be removed.'))
+  }
 }
 
 function permissionLabel(permission: string): string {

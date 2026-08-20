@@ -2769,7 +2769,12 @@ async function createWindow(): Promise<void> {
         .then(() => publishVisitHistory())
         .catch((error) => console.error('[history] Failed to record visit:', error))
     },
-    onCredentialSubmitted: (candidate) => { void handleCredentialCandidate(candidate).catch((error) => console.error('[credentials] Failed to save password:', error)) }
+    onCredentialSubmitted: (candidate) => {
+      void handleCredentialCandidate(candidate).catch((error) => {
+        console.error('[credentials] Failed to save password:', error)
+        reportBrowserActionFailure('save password', error)
+      })
+    }
   })
   registerIpc()
 
