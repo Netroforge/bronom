@@ -14,4 +14,16 @@ describe('safeNavigationHistorySnapshot', () => {
     })).toEqual({ entries: [], index: -1 })
     expect(getAllEntries).not.toHaveBeenCalled()
   })
+
+  it('returns an empty snapshot when the web contents is destroyed while reading its history', () => {
+    expect(safeNavigationHistorySnapshot({
+      isDestroyed: () => false,
+      navigationHistory: {
+        getAllEntries: () => {
+          throw new Error('Object has been destroyed')
+        },
+        getActiveIndex: vi.fn()
+      }
+    })).toEqual({ entries: [], index: -1 })
+  })
 })

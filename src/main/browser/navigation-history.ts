@@ -19,8 +19,14 @@ export function safeNavigationHistorySnapshot(
   if (!webContents || webContents.isDestroyed() || !webContents.navigationHistory) {
     return { entries: [], index: -1 }
   }
-  return {
-    entries: webContents.navigationHistory.getAllEntries(),
-    index: webContents.navigationHistory.getActiveIndex()
+  try {
+    return {
+      entries: webContents.navigationHistory.getAllEntries(),
+      index: webContents.navigationHistory.getActiveIndex()
+    }
+  } catch {
+    // Electron can destroy a WebContents between isDestroyed() and the
+    // navigationHistory calls during renderer failure or tab teardown.
+    return { entries: [], index: -1 }
   }
 }
