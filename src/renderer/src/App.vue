@@ -499,6 +499,11 @@ const settingsOpen = ref(false)
 const settingsSection = ref<'appearance' | 'search' | 'downloads' | 'performance' | 'mcp' | 'privacy' | 'permissions' | 'credentials' | 'updates' | 'support'>('appearance')
 const helpDialog = ref<'shortcuts' | 'about' | null>(null)
 const helpDialogPanel = ref<HTMLElement | null>(null)
+const fullModalOpen = computed(() => settingsOpen.value
+  || commandPaletteOpen.value
+  || helpDialog.value !== null
+  || workspaceEditorOpen.value
+  || credentialPickerOpen.value)
 const updateNoticeOpen = ref(false)
 const mcpCopied = ref(false)
 const mcpPortDraft = ref(String(DEFAULT_MCP_PORT))
@@ -2890,6 +2895,13 @@ watch(
     }
   }
 )
+
+// The address suggestions are rendered in a topmost native WebContentsView.
+// Dismiss it synchronously before any full renderer modal opens so the native
+// overlay can never cover Settings, Help, the command palette, or a picker.
+watch(fullModalOpen, (open) => {
+  if (open) closeAddressSuggestions()
+}, { flush: 'sync' })
 
 watch(consolePanelOpen, (open) => {
   if (consoleRefreshTimer !== undefined) {
@@ -5821,11 +5833,7 @@ function reportShellHeight(): void {
   // Website content is a native WebContentsView. Renderer-owned UI may reserve
   // its space only when it is true application chrome or a full modal. Any
   // transient popover that overlaps a website must use a topmost native view.
-  const modalOpen = settingsOpen.value
-    || commandPaletteOpen.value
-    || helpDialog.value !== null
-    || workspaceEditorOpen.value
-    || credentialPickerOpen.value
+  const modalOpen = fullModalOpen.value
   const sidePanelInset = modalOpen ? 0 : Array.from(
     shell.value.querySelectorAll<HTMLElement>('[data-shell-side-panel]')
   ).reduce((inset, panel) => Math.max(inset, window.innerWidth - panel.getBoundingClientRect().left), 0)

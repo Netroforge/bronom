@@ -975,6 +975,21 @@ test('floats bookmark and history suggestions above pages while allowing duplica
     expect(requests).toHaveLength(requestCountBeforeTyping)
     await expect.poll(browserViewY).toBe(browserViewYWithoutPopup)
 
+    // Native views always sit above the renderer. Opening any full application
+    // modal must therefore detach the suggestion view before showing the modal.
+    await electronApp.evaluate(({ BrowserWindow }) => {
+      const main = BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'Bronom')
+      main?.webContents.send('updates:open')
+    })
+    const settingsDialog = appWindow.getByRole('dialog', { name: 'Settings' })
+    await expect(settingsDialog).toBeVisible()
+    await expect(settingsDialog.getByRole('heading', { name: 'Software updates' })).toBeVisible()
+    await expect.poll(addressOverlay).toMatchObject({ attached: false, visible: false })
+    await settingsDialog.getByRole('button', { name: 'Close', exact: true }).click()
+    await address.focus()
+    await address.fill('Suggestion')
+    await expect.poll(addressOverlay).toMatchObject({ attached: true, topmost: true, visible: true })
+
     const duplicateNavigationTabId = await appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')
     await clickOverlayOption(0)
     await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.find((tab) => tab.active)?.title)')).toBe('Suggestion bookmark')
