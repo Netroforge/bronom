@@ -57,6 +57,36 @@ test('uses UUIDv7 for tabs and puts the last-tab replacement in Default', async 
   ])
 })
 
+test('keeps empty workspaces visible and opens a tab from each workspace action', async ({
+  appWindow,
+  mcpPort,
+  mcpToken
+}) => {
+  const client = await connectClient('empty-workspace-ui', mcpPort, mcpToken)
+  try {
+    const workspaceId = await createWorkspace(client, 'Empty investigation', 'cyan')
+    const workspaceControl = appWindow.locator('.tab-group-label', { hasText: 'Empty investigation' })
+    await expect(workspaceControl).toBeVisible()
+    await expect(workspaceControl).toHaveAccessibleName('Collapse workspace Empty investigation, 0 tabs')
+    await expect(appWindow.getByRole('tab')).toHaveCount(0)
+
+    await appWindow.getByRole('button', { name: 'New tab in Empty investigation workspace' }).click()
+    await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => ({
+      activeTabId: state.activeTabId,
+      workspaceTabIds: state.tabs
+        .filter((tab) => tab.mcpGroupId === ${JSON.stringify(workspaceId)})
+        .map((tab) => tab.id)
+    }))`)).toEqual({
+      activeTabId: expect.stringMatching(UUID_V7_PATTERN),
+      workspaceTabIds: [expect.stringMatching(UUID_V7_PATTERN)]
+    })
+    await expect(workspaceControl).toHaveAccessibleName('Collapse workspace Empty investigation, 1 tab')
+    await expect(appWindow.getByRole('button', { name: 'New tab in Default workspace' })).toBeVisible()
+  } finally {
+    await client.close()
+  }
+})
+
 test('requires visible workspaces and keeps each tool inside its selected workspace', async ({
   appWindow,
   mcpPort,

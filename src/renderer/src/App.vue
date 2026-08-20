@@ -1048,9 +1048,6 @@ function tabGroupStyle(tab: BrowserTabState): Record<string, string> | undefined
 function tabGroupColorStyle(color: BrowserTabGroupColor): Record<string, string> {
   return { '--tab-group-color': BROWSER_TAB_GROUP_COLOR_HEX[color] }
 }
-function beginsTabGroup(tab: BrowserTabState, index: number): boolean {
-  return Boolean(tab.mcpGroupId && regularTabs.value[index - 1]?.mcpGroupId !== tab.mcpGroupId)
-}
 function loadCollapsedTabGroupIds(): string[] {
   try {
     const stored = JSON.parse(window.localStorage.getItem('bronom:collapsed-tab-groups') ?? '[]')
@@ -1081,12 +1078,15 @@ function toggleTabGroup(groupId: string): void {
   collapsedTabGroupIds.value = next
   persistCollapsedTabGroups()
 }
-function expandTabGroupForTab(tab: BrowserTabState): void {
-  if (!tab.mcpGroupId || !collapsedTabGroupIds.value.has(tab.mcpGroupId)) return
+function expandTabGroup(groupId: string): void {
+  if (!collapsedTabGroupIds.value.has(groupId)) return
   const next = new Set(collapsedTabGroupIds.value)
-  next.delete(tab.mcpGroupId)
+  next.delete(groupId)
   collapsedTabGroupIds.value = next
   persistCollapsedTabGroups()
+}
+function expandTabGroupForTab(tab: BrowserTabState): void {
+  if (tab.mcpGroupId) expandTabGroup(tab.mcpGroupId)
 }
 watch(() => state.value.mcpTabGroups.map((group) => group.id).join(','), () => {
   const validGroupIds = new Set(state.value.mcpTabGroups.map((group) => group.id))
@@ -3528,6 +3528,27 @@ async function runBrowserShortcut(action: BrowserShortcutAction): Promise<void> 
     case 'pick-element': return toggleElementPicker()
     case 'toggle-devtools': return toggleDeveloperTools()
   }
+}
+
+async function newTabInWorkspace(groupId: string): Promise<void> {
+  if (state.value.allHumanInteractionLocked) return
+  const workspace = state.value.mcpTabGroups.find((candidate) => candidate.id === groupId)
+  if (!workspace) return
+  settingsOpen.value = false
+  tabSearchOpen.value = false
+  try {
+    await syncState(browser.newTab({ active: true, mcpGroupId: groupId }))
+    expandTabGroup(groupId)
+    await focusAddress()
+  } catch (error) {
+    showAppToast('error', 'New tab failed', friendlyUiError(error, `A tab could not be opened in ${workspace.name}.`))
+  }
+}
+
+async function showWorkspaceContextMenu(groupId: string): Promise<void> {
+  const firstTab = tabGroupTabs(groupId)[0]
+  if (firstTab) await browser.showTabContextMenu(firstTab.id)
+  else await openTabGroupEditor(groupId)
 }
 
 async function openZoom(): Promise<void> {
@@ -6163,32 +6184,40 @@ onBeforeUnmount(() => {
         <span>Home</span>
       </button>
       <span class="topbar-divider" aria-hidden="true" />
-      <div class="tabs-strip" role="tablist" aria-label="Browser tabs">
-        <template v-for="(tab, tabIndex) in regularTabs" :key="tab.id">
+      <div class="tabs-strip" role="tablist" aria-label="Browser tabs and workspaces">
+        <template v-for="workspace in state.mcpTabGroups" :key="workspace.id">
           <button
-            v-if="beginsTabGroup(tab, tabIndex)"
             class="tab-group-label"
-            :class="{ active: tabGroupContainsActiveTab(tab.mcpGroupId!) }"
-            :style="tabGroupStyle(tab)"
-            :title="`${isTabGroupCollapsed(tab.mcpGroupId!) ? 'Expand' : 'Collapse'} workspace ${tab.mcpGroupName} · ${tab.mcpGroupId}`"
-            :aria-label="`${isTabGroupCollapsed(tab.mcpGroupId!) ? 'Expand' : 'Collapse'} workspace ${tab.mcpGroupName}, ${tabGroupTabCount(tab.mcpGroupId!)} ${tabGroupTabCount(tab.mcpGroupId!) === 1 ? 'tab' : 'tabs'}`"
-            :aria-expanded="!isTabGroupCollapsed(tab.mcpGroupId!)"
+            :class="{ active: tabGroupContainsActiveTab(workspace.id) }"
+            :style="tabGroupColorStyle(workspace.color)"
+            :title="`${isTabGroupCollapsed(workspace.id) ? 'Expand' : 'Collapse'} workspace ${workspace.name} · ${workspace.id}`"
+            :aria-label="`${isTabGroupCollapsed(workspace.id) ? 'Expand' : 'Collapse'} workspace ${workspace.name}, ${tabGroupTabCount(workspace.id)} ${tabGroupTabCount(workspace.id) === 1 ? 'tab' : 'tabs'}`"
+            :aria-expanded="!isTabGroupCollapsed(workspace.id)"
             type="button"
-            @click="toggleTabGroup(tab.mcpGroupId!)"
-            @contextmenu.prevent="browser.showTabContextMenu(tab.id)"
+            @click="toggleTabGroup(workspace.id)"
+            @contextmenu.prevent="showWorkspaceContextMenu(workspace.id)"
           >
-            <IconKeyboardArrowRight v-if="isTabGroupCollapsed(tab.mcpGroupId!)" aria-hidden="true" />
+            <IconKeyboardArrowRight v-if="isTabGroupCollapsed(workspace.id)" aria-hidden="true" />
             <IconKeyboardArrowDown v-else aria-hidden="true" />
             <IconKeep
-              v-if="state.mcpTabGroups.find((group) => group.id === tab.mcpGroupId)?.isDefault"
+              v-if="workspace.isDefault"
               class="tab-group-default-badge"
               aria-label="Default workspace for new tabs"
             />
-            <span>{{ tab.mcpGroupName }}</span>
-            <span class="tab-group-count" aria-hidden="true">{{ tabGroupTabCount(tab.mcpGroupId!) }}</span>
+            <span>{{ workspace.name }}</span>
+            <span class="tab-group-count" aria-hidden="true">{{ tabGroupTabCount(workspace.id) }}</span>
           </button>
+          <button
+            class="new-tab workspace-new-tab"
+            type="button"
+            :style="tabGroupColorStyle(workspace.color)"
+            :title="`New tab in ${workspace.name} workspace`"
+            :aria-label="`New tab in ${workspace.name} workspace`"
+            @click="newTabInWorkspace(workspace.id)"
+          ><IconAdd aria-hidden="true" /></button>
+        <template v-for="tab in tabGroupTabs(workspace.id)" :key="tab.id">
         <button
-          v-if="!tab.mcpGroupId || !isTabGroupCollapsed(tab.mcpGroupId)"
+          v-if="!isTabGroupCollapsed(workspace.id)"
           class="tab"
           :class="{
             active: tab.active,
@@ -6255,7 +6284,7 @@ onBeforeUnmount(() => {
           <span class="tab-close" role="button" title="Close tab (Ctrl/Cmd+W)" aria-label="Close tab" aria-keyshortcuts="Control+W Meta+W" @click="closeTab($event, tab.id)"><IconClose aria-hidden="true" /></span>
         </button>
         </template>
-        <button class="new-tab" type="button" title="New tab (Ctrl/Cmd+T)" aria-label="New tab" aria-keyshortcuts="Control+T Meta+T" @click="runBrowserShortcut('new-tab')"><IconAdd aria-hidden="true" /></button>
+        </template>
         <button class="new-workspace" type="button" title="New isolated workspace" aria-label="Create workspace" @click="openNewWorkspaceEditor"><IconWorkspaces aria-hidden="true" /></button>
       </div>
       <div class="topbar-actions">

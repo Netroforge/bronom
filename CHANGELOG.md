@@ -9,6 +9,7 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 - Leave MCP authentication off for new profiles so local agents can connect without token setup, while preserving an existing profile's explicit setting and keeping opt-in bearer authentication available in Settings.
 - Make section reset restore every Appearance preference and keep MCP authentication off; Saved passwords no longer exposes a generic reset that could silently delete credentials.
 - Keep passwords, bookmarks, history, site permissions, and commercial-license state unchanged when a disk write fails; repair duplicate stored identifiers without losing accounts or bookmarks, and surface password save or removal failures as application toasts.
+- Keep every active workspace visible even when it has no tabs, and place a workspace-specific new-tab button beside each workspace instead of an ambiguous global new-tab action.
 
 ## [1.6.4] - 2026-08-21
 
