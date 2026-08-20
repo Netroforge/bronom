@@ -2,10 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { buildLocalAddressSuggestions } from '../src/shared/address-suggestions.js'
 
 describe('buildLocalAddressSuggestions', () => {
-  const tabs = [
-    { id: 'active', title: 'Current project', url: 'https://current.example/path' },
-    { id: 'docs', title: 'Project documentation', url: 'https://docs.example/guide#intro', pinned: true }
-  ]
   const bookmarks = [
     { id: 'duplicate', title: 'Saved documentation', url: 'https://docs.example/guide' },
     { id: 'design', title: 'Design reference', url: 'https://design.example/' }
@@ -15,15 +11,12 @@ describe('buildLocalAddressSuggestions', () => {
     { id: 'release', title: 'Project release notes', url: 'https://release.example/', visitCount: 2 }
   ]
 
-  it('prioritizes open tabs and deduplicates local URLs across sources', () => {
+  it('keeps open tabs out of address suggestions and deduplicates saved URLs across sources', () => {
     expect(buildLocalAddressSuggestions({
       query: 'project',
-      activeTabId: 'active',
-      tabs,
       bookmarks,
       history
     })).toEqual([
-      expect.objectContaining({ kind: 'tab', title: 'Project documentation', tabId: 'docs', pinned: true }),
       expect.objectContaining({ kind: 'history', title: 'Project release notes', visitCount: 2 })
     ])
   })
@@ -31,8 +24,6 @@ describe('buildLocalAddressSuggestions', () => {
   it('supports explicit local scopes, multi-term matching, and bounded output', () => {
     expect(buildLocalAddressSuggestions({
       query: '@bookmarks design reference',
-      activeTabId: 'active',
-      tabs,
       bookmarks,
       history
     })).toEqual([
@@ -40,8 +31,6 @@ describe('buildLocalAddressSuggestions', () => {
     ])
     expect(buildLocalAddressSuggestions({
       query: '@history',
-      activeTabId: 'active',
-      tabs,
       bookmarks,
       history,
       limit: 1
@@ -50,8 +39,8 @@ describe('buildLocalAddressSuggestions', () => {
     ])
   })
 
-  it('does not suggest anything for an empty unscoped query or the active URL', () => {
-    expect(buildLocalAddressSuggestions({ query: '', activeTabId: 'active', tabs, bookmarks, history })).toEqual([])
-    expect(buildLocalAddressSuggestions({ query: 'current', activeTabId: 'active', tabs, bookmarks, history })).toEqual([])
+  it('does not suggest anything for an empty unscoped query or an unknown address', () => {
+    expect(buildLocalAddressSuggestions({ query: '', bookmarks, history })).toEqual([])
+    expect(buildLocalAddressSuggestions({ query: 'current', bookmarks, history })).toEqual([])
   })
 })

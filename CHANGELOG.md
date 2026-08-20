@@ -4,9 +4,14 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Keep open tabs out of address suggestions so entering or selecting an address always navigates the current tab and duplicate website addresses remain allowed; use tab search when the intent is to switch tabs.
+
 ### Fixed
 
-- Keep address suggestions fully above the native website view when matches appear after the address bar was already focused, and immediately return that space when the query has no matches.
+- Show address suggestions in a topmost native dropdown without moving or shrinking the current website, including after results appear while typing and at compact window sizes.
+- Reserve renderer-owned full-window overlays only for true modal dialogs, including the saved-account chooser, while requiring transient website popovers to use the native overlay path.
 
 ## [1.6.1] - 2026-08-20
 

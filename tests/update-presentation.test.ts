@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  shellHeightForOverlays,
+  shellHeightForBrowserContent,
   shouldShowUpdateStatusPill,
   shouldAutoDismissUpdateStatus
 } from '../src/shared/update-presentation.js'
@@ -25,28 +25,18 @@ describe('update notification presentation', () => {
   })
 
   it('keeps status indicators out of the webpage layout', () => {
-    expect(shellHeightForOverlays({
+    expect(shellHeightForBrowserContent({
       shellHeight: 104,
       viewportHeight: 900,
       modalOpen: false
     })).toBe(104)
   })
 
-  it('moves the website below a floating shell panel', () => {
-    expect(shellHeightForOverlays({
-      shellHeight: 104,
-      viewportHeight: 900,
-      modalOpen: false,
-      floatingOverlayBottom: 584.2
-    })).toBe(585)
-  })
-
   it('reserves the full surface for a modal shell overlay', () => {
-    expect(shellHeightForOverlays({
+    expect(shellHeightForBrowserContent({
       shellHeight: 104,
       viewportHeight: 900,
-      modalOpen: true,
-      floatingOverlayBottom: 584
+      modalOpen: true
     })).toBe(900)
   })
 })

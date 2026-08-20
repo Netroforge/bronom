@@ -187,7 +187,7 @@ import {
 } from '../../shared/network-waterfall'
 import UpdateNotification from './components/UpdateNotification.vue'
 import {
-  shellHeightForOverlays,
+  shellHeightForBrowserContent,
   shouldShowUpdateStatusPill,
   shouldAutoDismissUpdateStatus,
   UPDATE_STATUS_DISMISS_MS
@@ -203,7 +203,12 @@ import {
   MEMORY_SAVER_TIMEOUT_MINUTES,
   type MemorySaverTimeoutMinutes
 } from '../../shared/memory-saver'
-import { buildLocalAddressSuggestions, type AddressSuggestion } from '../../shared/address-suggestions'
+import {
+  buildLocalAddressSuggestions,
+  type AddressSuggestion,
+  type AddressSuggestionOverlayRequest,
+  type AddressSuggestionOverlayTheme
+} from '../../shared/address-suggestions'
 import { DEFAULT_MCP_PORT, MAX_MCP_PORT, MIN_MCP_PORT, isValidMcpPort } from '../../shared/mcp-port'
 import { SEARCH_ENGINE_OPTIONS } from '../../shared/search-engine'
 import {
@@ -369,6 +374,7 @@ const updateState = ref<AppUpdateState>({ status: 'idle', currentVersion: '' })
 const mcpControl = ref<McpControlState>({ status: 'starting', paused: false })
 const address = ref('')
 const addressInput = ref<HTMLInputElement | null>(null)
+const addressForm = ref<HTMLFormElement | null>(null)
 const siteControlsButton = ref<HTMLButtonElement | null>(null)
 const addressSuggestionsOpen = ref(false)
 // Suggestions stay unselected until the user explicitly points at one or uses
@@ -680,6 +686,7 @@ let unsubscribeHelp: (() => void) | undefined
 let unsubscribeClipboardFailed: (() => void) | undefined
 let unsubscribeActionFailed: (() => void) | undefined
 let unsubscribeTabGroupEdit: (() => void) | undefined
+let unsubscribeAddressOverlay: (() => void) | undefined
 let resizeObserver: ResizeObserver | undefined
 let updateNoticeDismissTimer: number | undefined
 let elementPickerResetTimer: number | undefined
@@ -1230,12 +1237,13 @@ const commandPaletteCommands = computed(() => filterCommandPaletteCommands(
 const selectedCommandPaletteCommand = computed(() => commandPaletteCommands.value[commandPaletteSelection.value])
 const addressSuggestions = computed(() => buildLocalAddressSuggestions({
   query: address.value,
-  activeTabId: state.value.activeTabId,
-  tabs: regularTabs.value,
   bookmarks: bookmarks.value,
   history: visitHistory.value
 }))
 const addressSuggestionsVisible = computed(() => addressSuggestionsOpen.value && addressSuggestions.value.length > 0)
+const addressSuggestionTheme = computed<AddressSuggestionOverlayTheme>(() => (
+  settings.value.theme === 'system' ? systemTheme.value : settings.value.theme
+))
 const selectedAddressSuggestion = computed(() => (
   addressSuggestionSelection.value >= 0
     ? addressSuggestions.value[addressSuggestionSelection.value]
@@ -2823,7 +2831,8 @@ watch(
     bookmarksOpen,
     historyOpen,
     splitMenuOpen,
-    workspaceEditorOpen
+    workspaceEditorOpen,
+    credentialPickerOpen
   ],
   async () => {
     await nextTick()
@@ -2858,7 +2867,7 @@ watch(activePanelId, async (panel) => {
 })
 
 watch(
-  [settingsOpen, commandPaletteOpen, helpDialog, siteControlsOpen, siteStorageOpen, addressSuggestionsOpen, findOpen, zoomOpen, splitMenuOpen, tabSearchOpen, downloadsOpen, bookmarksOpen, historyOpen],
+  [settingsOpen, commandPaletteOpen, helpDialog, workspaceEditorOpen, credentialPickerOpen, siteControlsOpen, siteStorageOpen, addressSuggestionsOpen, findOpen, zoomOpen, splitMenuOpen, tabSearchOpen, downloadsOpen, bookmarksOpen, historyOpen],
   (openStates) => {
     if (openStates.some(Boolean) && !keepsSeparatePanelOpen()) {
       pageToolsOpen.value = false
@@ -2942,10 +2951,14 @@ watch(
     if (addressSuggestionSelection.value >= length) addressSuggestionSelection.value = -1
     await nextTick()
     revealSelectedAddressSuggestion()
-    // The native website WebContentsView is layered above renderer DOM. An
-    // address popup can appear after focus when the user starts typing, so its
-    // result-count transition must reserve (or release) native view space too.
-    reportShellHeight()
+  }
+)
+
+watch(
+  [addressSuggestionsVisible, addressSuggestions, addressSuggestionSelection, addressSuggestionTheme],
+  async () => {
+    await nextTick()
+    syncAddressSuggestionOverlay()
   }
 )
 
@@ -3253,7 +3266,7 @@ async function syncState(next: Promise<BrowserState> | BrowserState): Promise<vo
 
 async function navigate(): Promise<void> {
   if (!address.value.trim()) return
-  addressSuggestionsOpen.value = false
+  closeAddressSuggestions()
   await syncState(browser.navigate({ url: address.value, tabId: state.value.activeTabId ?? undefined }))
 }
 
@@ -3273,6 +3286,7 @@ function showAddressSuggestions(): void {
 
 function closeAddressSuggestions(): void {
   addressSuggestionsOpen.value = false
+  if (!isDetachedPanelWindow) window.bronomAddressOverlay.hide()
 }
 
 function handleAddressFocusOut(event: FocusEvent): void {
@@ -3329,12 +3343,6 @@ function openSitePermissionSettings(): void {
 
 async function selectAddressSuggestion(suggestion: AddressSuggestion): Promise<void> {
   closeAddressSuggestions()
-  if (suggestion.kind === 'tab' && suggestion.tabId) {
-    const tab = regularTabs.value.find((candidate) => candidate.id === suggestion.tabId)
-    if (tab) expandTabGroupForTab(tab)
-    await syncState(browser.selectTab(suggestion.tabId))
-    return
-  }
   address.value = suggestion.url
   await navigate()
 }
@@ -3347,6 +3355,36 @@ function revealSelectedAddressSuggestion(): void {
   const suggestion = selectedAddressSuggestion.value
   if (!suggestion) return
   document.getElementById(addressSuggestionId(suggestion))?.scrollIntoView({ block: 'nearest' })
+}
+
+function syncAddressSuggestionOverlay(): void {
+  if (isDetachedPanelWindow) return
+  if (!addressSuggestionsVisible.value || !addressForm.value) {
+    window.bronomAddressOverlay.hide()
+    return
+  }
+  const formBounds = addressForm.value.getBoundingClientRect()
+  const viewportMargin = 12
+  const availableWidth = Math.max(1, window.innerWidth - viewportMargin * 2)
+  const width = Math.min(availableWidth, Math.max(formBounds.width + 2, Math.min(560, availableWidth)))
+  const x = Math.max(
+    viewportMargin,
+    Math.min(formBounds.left - 1, window.innerWidth - width - viewportMargin)
+  )
+  const y = Math.ceil(formBounds.bottom + 7)
+  const maxHeight = Math.max(1, Math.min(440, window.innerHeight - y - viewportMargin))
+  const request: AddressSuggestionOverlayRequest = {
+    bounds: { x, y, width, maxHeight },
+    suggestions: addressSuggestions.value.map((suggestion) => ({ ...suggestion })),
+    selectedIndex: addressSuggestionSelection.value,
+    theme: addressSuggestionTheme.value
+  }
+  window.bronomAddressOverlay.show(request)
+}
+
+function handleWindowResize(): void {
+  reportShellHeight()
+  syncAddressSuggestionOverlay()
 }
 
 async function moveAddressSuggestionSelection(offset: -1 | 1): Promise<void> {
@@ -3386,7 +3424,6 @@ function handleAddressKeydown(event: KeyboardEvent): void {
 }
 
 function addressSuggestionMeta(suggestion: AddressSuggestion): string {
-  if (suggestion.kind === 'tab') return suggestion.pinned ? 'Switch to pinned tab' : 'Switch to tab'
   if (suggestion.kind === 'bookmark') return 'Bookmark'
   return suggestion.visitCount && suggestion.visitCount > 1 ? `History · ${suggestion.visitCount} visits` : 'History'
 }
@@ -5781,18 +5818,21 @@ function reportShellHeight(): void {
   const maximumSize = panelDockMaximumSize(shellHeight)
   const minimumSize = panelDockMinimumSize(maximumSize)
   panelDockSize.value = Math.round(Math.min(maximumSize, Math.max(minimumSize, preferredSize)))
-  const floatingOverlayBottom = Array.from(
-    shell.value.querySelectorAll<HTMLElement>('[data-shell-floating-panel]')
-  ).reduce((bottom, panel) => Math.max(bottom, panel.getBoundingClientRect().bottom), 0)
-  const modalOpen = settingsOpen.value || commandPaletteOpen.value || helpDialog.value !== null || workspaceEditorOpen.value
+  // Website content is a native WebContentsView. Renderer-owned UI may reserve
+  // its space only when it is true application chrome or a full modal. Any
+  // transient popover that overlaps a website must use a topmost native view.
+  const modalOpen = settingsOpen.value
+    || commandPaletteOpen.value
+    || helpDialog.value !== null
+    || workspaceEditorOpen.value
+    || credentialPickerOpen.value
   const sidePanelInset = modalOpen ? 0 : Array.from(
     shell.value.querySelectorAll<HTMLElement>('[data-shell-side-panel]')
   ).reduce((inset, panel) => Math.max(inset, window.innerWidth - panel.getBoundingClientRect().left), 0)
-  window.bronomShell.setToolbarHeight(shellHeightForOverlays({
+  window.bronomShell.setToolbarHeight(shellHeightForBrowserContent({
     shellHeight,
     viewportHeight: window.innerHeight,
-    modalOpen,
-    floatingOverlayBottom
+    modalOpen
   }))
   const dockSize = dockedPanelOpen.value && !modalOpen ? panelDockSize.value : 0
   window.bronomShell.setContentInsets({
@@ -5911,6 +5951,12 @@ onMounted(async () => {
   })
   unsubscribeShortcutRequested = browser.onShortcutRequested((action) => { void runBrowserShortcut(action) })
   unsubscribeTabGroupEdit = browser.onTabGroupEditRequested((groupId) => { void openTabGroupEditor(groupId) })
+  if (!isDetachedPanelWindow) {
+    unsubscribeAddressOverlay = window.bronomAddressOverlay.onSelected((suggestionId) => {
+      const suggestion = addressSuggestions.value.find((candidate) => candidate.id === suggestionId)
+      if (suggestion) void selectAddressSuggestion(suggestion)
+    })
+  }
   unsubscribeSettings = window.bronomSettings.onChanged(applyTheme)
   unsubscribeSystemTheme = window.bronomSettings.onSystemThemeChanged(handleSystemThemeChange)
   unsubscribePermissions = window.bronomPermissions.onChanged((next) => (sitePermissions.value = next))
@@ -5976,7 +6022,7 @@ onMounted(async () => {
   bookmarks.value = savedBookmarks
   visitHistory.value = savedVisitHistory
   window.addEventListener('keydown', handleKeyDown)
-  window.addEventListener('resize', reportShellHeight)
+  window.addEventListener('resize', handleWindowResize)
   await nextTick()
   resizeObserver = new ResizeObserver(reportShellHeight)
   if (shell.value) resizeObserver.observe(shell.value)
@@ -6003,6 +6049,8 @@ onBeforeUnmount(() => {
   unsubscribeClipboardFailed?.()
   unsubscribeActionFailed?.()
   unsubscribeTabGroupEdit?.()
+  unsubscribeAddressOverlay?.()
+  if (!isDetachedPanelWindow) window.bronomAddressOverlay.hide()
   unsubscribePanelRequested?.()
   unsubscribePanelActive?.()
   unsubscribePanelRedock?.()
@@ -6022,7 +6070,7 @@ onBeforeUnmount(() => {
   appToastTimers.clear()
   activeMcpRequestsByTab.clear()
   window.removeEventListener('keydown', handleKeyDown)
-  window.removeEventListener('resize', reportShellHeight)
+  window.removeEventListener('resize', handleWindowResize)
   window.removeEventListener('pointermove', movePanelResize)
   window.removeEventListener('pointerup', finishPanelResize)
   window.removeEventListener('pointercancel', finishPanelResize)
@@ -6268,7 +6316,7 @@ onBeforeUnmount(() => {
         <IconStop v-if="activeTab?.loading" aria-hidden="true" />
         <IconRefresh v-else aria-hidden="true" />
       </button>
-      <form class="address-form" @submit.prevent="navigate" @focusout="handleAddressFocusOut">
+      <form ref="addressForm" class="address-form" @submit.prevent="navigate" @focusout="handleAddressFocusOut">
         <button
           ref="siteControlsButton"
           class="site-controls-button"
@@ -6387,35 +6435,18 @@ onBeforeUnmount(() => {
         </section>
         <section
           v-if="addressSuggestionsVisible"
-          class="address-suggestions"
-          data-shell-floating-panel
+          id="address-suggestions"
+          class="sr-only"
+          role="listbox"
+          aria-label="Local address suggestions"
         >
-          <div id="address-suggestions" role="listbox" aria-label="Local address suggestions">
-            <button
-              v-for="(suggestion, index) in addressSuggestions"
-              :id="addressSuggestionId(suggestion)"
-              :key="suggestion.id"
-              class="address-suggestion"
-              :class="{ selected: index === addressSuggestionSelection }"
-              type="button"
-              role="option"
-              :aria-selected="index === addressSuggestionSelection"
-              @click="selectAddressSuggestion(suggestion)"
-            >
-              <span class="address-suggestion-icon" :class="`kind-${suggestion.kind}`" aria-hidden="true">
-                <img v-if="suggestion.faviconDataUrl" :src="suggestion.faviconDataUrl" alt="" draggable="false" />
-                <IconStar v-else-if="suggestion.kind === 'bookmark'" />
-                <IconHistory v-else-if="suggestion.kind === 'history'" />
-                <IconLanguage v-else />
-              </span>
-              <span class="address-suggestion-copy">
-                <strong>{{ suggestion.title }}</strong>
-                <span>{{ suggestion.url }}</span>
-              </span>
-              <small>{{ addressSuggestionMeta(suggestion) }}</small>
-            </button>
-          </div>
-          <footer><span>Local only</span><span><kbd>@tabs</kbd> <kbd>@bookmarks</kbd> <kbd>@history</kbd></span></footer>
+          <span
+            v-for="(suggestion, index) in addressSuggestions"
+            :id="addressSuggestionId(suggestion)"
+            :key="suggestion.id"
+            role="option"
+            :aria-selected="index === addressSuggestionSelection"
+          >{{ suggestion.title }} {{ suggestion.url }} {{ addressSuggestionMeta(suggestion) }}</span>
         </section>
       </form>
       <button

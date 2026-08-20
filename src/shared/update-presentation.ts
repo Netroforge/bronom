@@ -14,10 +14,9 @@ interface ShellHeightOptions {
   shellHeight: number
   viewportHeight: number
   modalOpen: boolean
-  floatingOverlayBottom?: number
 }
 
-export function shellHeightForOverlays(options: ShellHeightOptions): number {
+export function shellHeightForBrowserContent(options: ShellHeightOptions): number {
   if (options.modalOpen) return Math.ceil(options.viewportHeight)
-  return Math.ceil(Math.max(options.shellHeight, options.floatingOverlayBottom ?? 0))
+  return Math.ceil(options.shellHeight)
 }

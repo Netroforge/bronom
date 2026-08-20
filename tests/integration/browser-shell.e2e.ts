@@ -864,7 +864,7 @@ test('supports standard tab and address shortcuts from the shell and websites', 
   await expect(appWindow.getByRole('tab')).toHaveCount(3)
 })
 
-test('suggests local tabs, bookmarks, and history from the address bar', async ({ appWindow, electronApp }) => {
+test('floats bookmark and history suggestions above pages while allowing duplicate addresses', async ({ appWindow, electronApp }) => {
   const requests: string[] = []
   const server = createServer((request, response) => {
     requests.push(request.url ?? '/')
@@ -881,92 +881,137 @@ test('suggests local tabs, bookmarks, and history from the address bar', async (
     if (!serverAddress || typeof serverAddress === 'string') throw new Error('Address-suggestion fixture did not expose a port')
     const historyUrl = `http://127.0.0.1:${serverAddress.port}/history`
     const bookmarkUrl = `http://127.0.0.1:${serverAddress.port}/bookmark`
-    const tabUrl = 'data:text/html,<title>Suggestion open tab</title><main>Already open</main>'
     await appWindow.evaluate(`window.bronom.newTab({ url: ${JSON.stringify(historyUrl)}, active: true })`)
     await expect.poll(() => appWindow.evaluate('window.bronomHistory.list()')).toEqual([
       expect.objectContaining({ url: historyUrl, title: 'Suggestion history' })
     ])
     await appWindow.evaluate(`window.bronom.getState().then((state) => window.bronom.closeTab(state.tabs.find((tab) => tab.url === ${JSON.stringify(historyUrl)}).id))`)
     await appWindow.evaluate('window.bronom.newTab({ active: true })')
-    await appWindow.evaluate(`window.bronom.newTab({ url: ${JSON.stringify(tabUrl)}, active: false })`)
-    await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => state.tabs.find((tab) => tab.url === ${JSON.stringify(tabUrl)})?.title)`)).toBe('Suggestion open tab')
+    await appWindow.evaluate(`window.bronom.newTab({ url: ${JSON.stringify(bookmarkUrl)}, active: false })`)
+    await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => state.tabs.find((tab) => tab.url === ${JSON.stringify(bookmarkUrl)})?.title)`)).toBe('Suggestion bookmark')
     await appWindow.evaluate(`window.bronomBookmarks.add(${JSON.stringify(bookmarkUrl)}, 'Suggestion bookmark')`)
 
     const browserViewY = (): Promise<number | undefined> => electronApp.evaluate(({ BrowserWindow }) => (
       BrowserWindow.getAllWindows()[0]?.contentView.children[0]?.getBounds().y
     ))
+    const addressOverlay = (): Promise<{
+      attached: boolean
+      topmost: boolean
+      visible: boolean
+      bounds?: { x: number; y: number; width: number; height: number }
+      optionCount: number
+      text: string
+    }> => electronApp.evaluate(async ({ BrowserWindow, webContents }) => {
+      const main = BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'Bronom')
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL().includes('address-overlay.html'))
+      const children = main?.contentView.children ?? []
+      const index = contents
+        ? children.findIndex((view) => (view as unknown as { webContents?: { id: number } }).webContents?.id === contents.id)
+        : -1
+      const view = index >= 0 ? children[index] : undefined
+      return {
+        attached: index >= 0,
+        topmost: index >= 0 && index === children.length - 1,
+        visible: view?.getVisible() ?? false,
+        bounds: view?.getBounds(),
+        optionCount: contents
+          ? await contents.executeJavaScript(`document.querySelectorAll('[role="option"]').length`)
+          : 0,
+        text: contents ? await contents.executeJavaScript('document.body.innerText') : ''
+      }
+    })
+    const clickOverlayOption = (index: number): Promise<void> => electronApp.evaluate(async ({ webContents }, optionIndex) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL().includes('address-overlay.html'))
+      if (!contents) throw new Error('Address suggestion overlay was not found')
+      await contents.executeJavaScript(`document.querySelectorAll('[role="option"]')[${optionIndex}]?.click()`)
+    }, index)
+    const overlayScrollTop = (): Promise<number> => electronApp.evaluate(async ({ webContents }) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL().includes('address-overlay.html'))
+      if (!contents) return 0
+      return contents.executeJavaScript(`document.querySelector('.address-suggestions')?.scrollTop ?? 0`)
+    })
     const address = appWindow.getByRole('combobox', { name: 'Address' })
-    const popup = appWindow.locator('.address-suggestions')
-    const listbox = appWindow.getByRole('listbox', { name: 'Local address suggestions' })
+    const listbox = appWindow.locator('#address-suggestions')
+    const options = listbox.locator('[role="option"]')
     const requestCountBeforeTyping = requests.length
-    // Reproduce normal human input: focus the empty address bar, pause, and
-    // only then type a query. The native website view must move after results
-    // appear, not only when focus and typing happen in the same render tick.
+    // Reproduce normal human input: focus the empty address bar, pause, then
+    // type. The website view must never move to make room for suggestions.
     await address.focus()
     await address.fill('')
-    await expect(popup).toBeHidden()
+    await expect(listbox).toBeHidden()
     await appWindow.waitForTimeout(100)
     const browserViewYWithoutPopup = await browserViewY()
     expect(browserViewYWithoutPopup).toBeDefined()
     await address.fill('Suggestion')
-    await expect(popup).toBeVisible()
     await expect(address).toHaveAttribute('aria-expanded', 'true')
-    await expect(listbox.getByRole('option')).toHaveCount(3)
-    await expect(listbox.getByRole('option').nth(0)).toContainText('Switch to tab')
-    await expect(listbox.getByRole('option').nth(1)).toContainText('Bookmark')
-    await expect(listbox.getByRole('option').nth(2)).toContainText('History')
-    await expect(popup).toContainText('Local only')
-    const initialPopupBounds = await popup.boundingBox()
-    expect(initialPopupBounds).not.toBeNull()
-    await expect.poll(browserViewY).toBeGreaterThanOrEqual(Math.ceil(initialPopupBounds!.y + initialPopupBounds!.height))
+    await expect(options).toHaveCount(2)
+    await expect(options.nth(0)).toContainText('Bookmark')
+    await expect(options.nth(1)).toContainText('History')
+    await expect.poll(addressOverlay).toMatchObject({
+      attached: true,
+      topmost: true,
+      visible: true,
+      optionCount: 2,
+      text: expect.stringContaining('Local only')
+    })
+    await expect.poll(browserViewY).toBe(browserViewYWithoutPopup)
     await address.fill('No local result should match this query')
-    await expect(popup).toBeHidden()
+    await expect(listbox).toBeHidden()
+    await expect.poll(addressOverlay).toMatchObject({ attached: false, visible: false })
     await expect.poll(browserViewY).toBe(browserViewYWithoutPopup)
     await address.fill('Suggestion')
-    await expect(popup).toBeVisible()
+    await expect.poll(addressOverlay).toMatchObject({ attached: true, topmost: true, visible: true })
     await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(760, 600))
     await expect.poll(() => appWindow.evaluate('window.innerWidth')).toBe(760)
-    await expect(popup).toBeVisible()
-    const compactPopupBounds = await popup.boundingBox()
-    expect(compactPopupBounds).not.toBeNull()
+    await expect.poll(addressOverlay).toMatchObject({ attached: true, topmost: true, visible: true })
+    await expect.poll(async () => {
+      const bounds = (await addressOverlay()).bounds
+      return bounds ? bounds.x + bounds.width : Number.POSITIVE_INFINITY
+    }).toBeLessThanOrEqual(760)
+    const compactPopupBounds = (await addressOverlay()).bounds
+    expect(compactPopupBounds).toBeDefined()
     expect(compactPopupBounds!.width).toBeGreaterThanOrEqual(550)
     expect(compactPopupBounds!.x + compactPopupBounds!.width).toBeLessThanOrEqual(760)
     expect(requests).toHaveLength(requestCountBeforeTyping)
-    await expect.poll(browserViewY).toBeGreaterThanOrEqual(Math.ceil(compactPopupBounds!.y + compactPopupBounds!.height))
+    await expect.poll(browserViewY).toBe(browserViewYWithoutPopup)
 
-    await listbox.getByRole('option').nth(0).click()
-    await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.find((tab) => tab.active)?.title)')).toBe('Suggestion open tab')
+    const duplicateNavigationTabId = await appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')
+    await clickOverlayOption(0)
+    await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.find((tab) => tab.active)?.title)')).toBe('Suggestion bookmark')
+    await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')).toBe(duplicateNavigationTabId)
+    await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => state.tabs.filter((tab) => tab.url === ${JSON.stringify(bookmarkUrl)}).length)`)).toBe(2)
 
     const directNavigation = await appWindow.evaluate('window.bronom.newTab({ active: true })') as BrowserState
     const directNavigationTabId = directNavigation.activeTabId
     await address.fill(bookmarkUrl)
-    await expect(listbox.getByRole('option')).toHaveCount(1)
+    await expect(options).toHaveCount(1)
     await expect(address).not.toHaveAttribute('aria-activedescendant')
     await address.press('Enter')
     await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.find((tab) => tab.active)?.title)')).toBe('Suggestion bookmark')
     await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')).toBe(directNavigationTabId)
+    await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => state.tabs.filter((tab) => tab.url === ${JSON.stringify(bookmarkUrl)}).length)`)).toBe(3)
 
     await appWindow.evaluate(`Promise.all(Array.from({ length: 10 }, (_value, index) => (
       window.bronomBookmarks.add('https://overflow-' + index + '.example/', 'Overflow suggestion ' + index)
     )))`)
     await address.fill('@bookmarks Overflow suggestion')
-    await expect(listbox.getByRole('option')).toHaveCount(8)
-    await expect.poll(() => popup.evaluate((element) => element.scrollTop)).toBe(0)
+    await expect(options).toHaveCount(8)
+    await expect.poll(overlayScrollTop).toBe(0)
     for (let index = 0; index < 8; index += 1) await address.press('ArrowDown')
-    await expect(listbox.getByRole('option').nth(7)).toHaveAttribute('aria-selected', 'true')
-    await expect.poll(() => popup.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+    await expect(options.nth(7)).toHaveAttribute('aria-selected', 'true')
+    await expect.poll(overlayScrollTop).toBeGreaterThan(0)
     await address.press('Escape')
 
     await appWindow.evaluate('window.bronom.newTab({ active: true })')
     await address.fill('@bookmarks Suggestion bookmark')
-    await expect(listbox.getByRole('option')).toHaveCount(1)
+    await expect(options).toHaveCount(1)
     await expect(listbox).toContainText('Suggestion bookmark')
     await address.press('ArrowDown')
     await address.press('Enter')
     await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.find((tab) => tab.active)?.title)')).toBe('Suggestion bookmark')
 
     await address.fill('@history Suggestion history')
-    await expect(listbox.getByRole('option')).toHaveCount(1)
+    await expect(options).toHaveCount(1)
     await address.press('ArrowDown')
     await address.press('Enter')
     await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.find((tab) => tab.active)?.title)')).toBe('Suggestion history')

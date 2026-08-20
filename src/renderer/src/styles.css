@@ -902,57 +902,6 @@ button { color: inherit; }
 .site-controls-secondary { border: 1px solid var(--border-soft); color: var(--text); background: transparent; }
 .site-controls-primary { border: 1px solid var(--accent); color: var(--button-text); background: var(--accent); }
 .site-controls-panel button:focus-visible, .site-controls-panel select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.address-suggestions {
-  position: absolute;
-  z-index: 45;
-  top: calc(100% + 7px);
-  left: -1px;
-  display: flex;
-  width: max(calc(100% + 2px), min(560px, calc(100vw - 24px)));
-  max-width: calc(100vw - 24px);
-  max-height: min(440px, calc(100vh - 130px));
-  overflow-x: hidden;
-  overflow-y: auto;
-  flex-direction: column;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface-raised);
-  box-shadow: 0 18px 54px rgba(16, 13, 36, .24);
-  user-select: text;
-}
-.address-suggestion {
-  display: grid;
-  min-height: 58px;
-  flex: 0 0 auto;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  margin: 3px 7px 0;
-  padding: 7px 9px;
-  border: 1px solid transparent;
-  border-radius: 9px;
-  color: var(--text);
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-.address-suggestions [role="listbox"] { flex: 0 0 auto; }
-.address-suggestion:first-child { margin-top: 7px; }
-.address-suggestion.selected { border-color: color-mix(in srgb, var(--accent) 45%, var(--border-soft)); background: var(--hover); }
-.address-suggestion-icon { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 9px; color: var(--accent-text); background: var(--surface-muted); }
-.address-suggestion-icon.kind-bookmark { color: #d49a16; }
-.address-suggestion-icon.kind-history { color: var(--muted); }
-.address-suggestion-icon svg,
-.address-suggestion-icon img { width: 18px; height: 18px; object-fit: contain; }
-.address-suggestion-copy { min-width: 0; }
-.address-suggestion-copy strong,
-.address-suggestion-copy span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.address-suggestion-copy strong { font-size: 14px; line-height: 1.35; }
-.address-suggestion-copy span { margin-top: 3px; color: var(--muted); font-size: 12px; }
-.address-suggestion small { color: var(--accent-text); font-size: 12px; font-weight: 700; white-space: nowrap; }
-.address-suggestions footer { position: sticky; bottom: 0; display: flex; min-height: 35px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; margin-top: 4px; padding: 6px 12px; border-top: 1px solid var(--border-soft); color: var(--muted); background: var(--surface); font-size: 12px; }
-.address-suggestions footer span { display: flex; align-items: center; gap: 5px; }
-.address-suggestions footer kbd { padding: 3px 5px; border: 1px solid var(--border-soft); border-radius: 5px; color: var(--text); background: var(--surface-muted); font: 650 11px/1 "SFMono-Regular", Consolas, monospace; }
 .interaction-locks {
   display: flex;
   height: 34px;

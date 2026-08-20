@@ -63,6 +63,7 @@ import type {
   MemorySaverTimeoutMinutes
 } from '../shared/types.js'
 import type { BrowserShortcutAction } from '../shared/browser-shortcuts.js'
+import type { AddressSuggestionOverlayRequest } from '../shared/address-suggestions.js'
 
 const api: BronomApi = {
   getState: () => ipcRenderer.invoke('browser:get-state'),
@@ -375,6 +376,15 @@ const panelWindowApi: BronomPanelWindowApi = {
   }
 }
 contextBridge.exposeInMainWorld('bronomPanelWindow', panelWindowApi)
+contextBridge.exposeInMainWorld('bronomAddressOverlay', {
+  show: (request: AddressSuggestionOverlayRequest) => ipcRenderer.send('address-overlay:show', request),
+  hide: () => ipcRenderer.send('address-overlay:hide'),
+  onSelected: (listener: (suggestionId: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, suggestionId: string): void => listener(suggestionId)
+    ipcRenderer.on('address-overlay:selected', handler)
+    return () => ipcRenderer.removeListener('address-overlay:selected', handler)
+  }
+})
 contextBridge.exposeInMainWorld('bronomShell', {
   setToolbarHeight: (height: number) => ipcRenderer.send('browser:toolbar-height', height),
   setContentInsets: (insets: { top: number; right: number; bottom: number; left: number }) =>

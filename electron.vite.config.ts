@@ -13,7 +13,8 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve('src/preload/index.ts'),
-          page: resolve('src/preload/page.ts')
+          page: resolve('src/preload/page.ts'),
+          addressOverlay: resolve('src/preload/address-overlay.ts')
         },
         output: {
           format: 'cjs',
@@ -28,6 +29,14 @@ export default defineConfig({
         '@renderer': resolve('src/renderer/src')
       }
     },
-    plugins: [vue(), Icons({ compiler: 'vue3' })]
+    plugins: [vue(), Icons({ compiler: 'vue3' })],
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve('src/renderer/index.html'),
+          addressOverlay: resolve('src/renderer/address-overlay.html')
+        }
+      }
+    }
   }
 })

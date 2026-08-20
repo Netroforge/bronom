@@ -155,7 +155,7 @@ The split control can switch between side-by-side and stacked layouts, allocate 
 
 ## Find local pages from the address bar
 
-Start typing a title or address to match open tabs, bookmarks, and browsing history in one dropdown. Open tabs are ranked first and switch directly instead of loading a duplicate; bookmarks follow, then recent history. Use Up/Down and Enter or click a result. Type **@tabs**, **@bookmarks**, or **@history** followed by optional keywords to limit the local source. Matching and ranking happen entirely inside Bronom: focus and keystrokes are not sent to a suggestion service. If you submit text that is not a local result or recognizable address, Bronom sends it to the provider selected under **Settings → Search engine** only after you press Enter.
+Start typing a title or address to match bookmarks and browsing history in a native dropdown that floats above the current website without resizing it. Use Up/Down and Enter or click a result. Type **@bookmarks** or **@history** followed by optional keywords to limit the local source. Open tabs are intentionally kept out of address suggestions: submitting an address always navigates the current tab, even when the same page is already open elsewhere, while the dedicated tab-search control remains available for switching between open pages. Matching happens entirely inside Bronom: focus and keystrokes are not sent to a suggestion service. If you submit text that is not an explicitly selected local result or recognizable address, Bronom sends it to the provider selected under **Settings → Search engine** only after you press Enter.
 
 ## Pin important tabs
 
