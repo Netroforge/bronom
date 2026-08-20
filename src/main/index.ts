@@ -179,6 +179,7 @@ let bookmarkStore: BookmarkStore | null = null
 let historyStore: HistoryStore | null = null
 let credentialStorageStatus: CredentialStorageStatus = { available: false, reason: 'Secure storage is initializing.' }
 let settings: AppSettings = { ...DEFAULT_SETTINGS }
+let settingsMutationQueue: Promise<void> = Promise.resolve()
 let updateState: AppUpdateState = { status: 'idle', currentVersion: app.getVersion() }
 let updaterConfigured = false
 let updateInstallationInProgress = false
@@ -290,13 +291,25 @@ function effectiveDownloadDirectory(value: AppSettings = settings): string {
   return resolve(value.downloadDirectory || defaultDownloadDirectory())
 }
 
-async function applyDownloadSettings(next: AppSettings): Promise<AppSettings> {
-  const directory = effectiveDownloadDirectory(next)
+function updateSettings(updates: Partial<AppSettings>): Promise<AppSettings> {
+  let committed: AppSettings | undefined
+  const operation = settingsMutationQueue.then(async () => {
+    const next = { ...settings, ...updates }
+    await settingsStore!.save(next)
+    settings = next
+    committed = { ...settings }
+  })
+  settingsMutationQueue = operation.catch(() => undefined)
+  return operation.then(() => committed!)
+}
+
+async function applyDownloadSettings(updates: Partial<AppSettings>): Promise<AppSettings> {
+  const directory = effectiveDownloadDirectory({ ...settings, ...updates })
   await mkdir(directory, { recursive: true })
-  await settingsStore!.save(next)
-  settings = next
-  persistentSession?.setDownloadPath(directory)
-  tabsManager?.setDownloadPreferences(directory, next.askWhereToSaveDownloads)
+  const next = await updateSettings(updates)
+  const committedDirectory = effectiveDownloadDirectory(next)
+  persistentSession?.setDownloadPath(committedDirectory)
+  tabsManager?.setDownloadPreferences(committedDirectory, next.askWhereToSaveDownloads)
   publishSettings()
   return { ...settings }
 }
@@ -2470,8 +2483,7 @@ function registerIpc(): void {
   ipcMain.handle('settings:set-theme', async (event, theme: unknown) => {
     assertTrustedShellSender(event)
     if (!isThemeName(theme)) throw new TypeError('Unsupported theme')
-    settings = { ...settings, theme }
-    await settingsStore!.save(settings)
+    await updateSettings({ theme })
     applyTheme(theme)
     publishSettings()
     return { ...settings }
@@ -2479,8 +2491,7 @@ function registerIpc(): void {
   ipcMain.handle('settings:set-interface-scale', async (event, scale: unknown) => {
     assertTrustedShellSender(event)
     if (!isInterfaceScale(scale)) throw new TypeError('Unsupported interface size')
-    settings = { ...settings, interfaceScale: scale }
-    await settingsStore!.save(settings)
+    await updateSettings({ interfaceScale: scale })
     applyInterfaceScale(scale)
     publishSettings()
     return { ...settings }
@@ -2488,8 +2499,7 @@ function registerIpc(): void {
   ipcMain.handle('settings:set-search-engine', async (event, searchEngine: unknown) => {
     assertTrustedShellSender(event)
     if (!isSearchEngineName(searchEngine)) throw new TypeError('Unsupported search engine')
-    settings = { ...settings, searchEngine }
-    await settingsStore!.save(settings)
+    await updateSettings({ searchEngine })
     publishSettings()
     return { ...settings }
   })
@@ -2509,18 +2519,18 @@ function registerIpc(): void {
     const directory = result.filePaths[0]
     if (result.canceled || !directory) return { settings: { ...settings }, canceled: true }
     return {
-      settings: await applyDownloadSettings({ ...settings, downloadDirectory: resolve(directory) }),
+      settings: await applyDownloadSettings({ downloadDirectory: resolve(directory) }),
       canceled: false
     }
   })
   ipcMain.handle('settings:set-ask-where-to-save-downloads', (event, enabled: unknown) => {
     assertTrustedShellSender(event)
     if (typeof enabled !== 'boolean') throw new TypeError('Ask-before-saving must be a boolean')
-    return applyDownloadSettings({ ...settings, askWhereToSaveDownloads: enabled })
+    return applyDownloadSettings({ askWhereToSaveDownloads: enabled })
   })
   ipcMain.handle('settings:reset-downloads', (event) => {
     assertTrustedShellSender(event)
-    return applyDownloadSettings({ ...settings, downloadDirectory: null, askWhereToSaveDownloads: false })
+    return applyDownloadSettings({ downloadDirectory: null, askWhereToSaveDownloads: false })
   })
   ipcMain.handle('settings:open-download-directory', async (event) => {
     assertTrustedShellSender(event)
@@ -2532,8 +2542,7 @@ function registerIpc(): void {
   ipcMain.handle('settings:set-memory-saver-enabled', async (event, enabled: unknown) => {
     assertTrustedShellSender(event)
     if (typeof enabled !== 'boolean') throw new TypeError('Memory Saver state must be a boolean')
-    settings = { ...settings, memorySaverEnabled: enabled }
-    await settingsStore!.save(settings)
+    await updateSettings({ memorySaverEnabled: enabled })
     tabsManager?.setMemorySaverSettings(settings.memorySaverEnabled, settings.memorySaverTimeoutMinutes)
     publishSettings()
     return { ...settings }
@@ -2541,8 +2550,7 @@ function registerIpc(): void {
   ipcMain.handle('settings:set-memory-saver-timeout', async (event, timeoutMinutes: unknown) => {
     assertTrustedShellSender(event)
     if (!isMemorySaverTimeoutMinutes(timeoutMinutes)) throw new TypeError('Unsupported Memory Saver timeout')
-    settings = { ...settings, memorySaverTimeoutMinutes: timeoutMinutes }
-    await settingsStore!.save(settings)
+    await updateSettings({ memorySaverTimeoutMinutes: timeoutMinutes })
     tabsManager?.setMemorySaverSettings(settings.memorySaverEnabled, settings.memorySaverTimeoutMinutes)
     publishSettings()
     return { ...settings }
@@ -2550,32 +2558,28 @@ function registerIpc(): void {
   ipcMain.handle('settings:set-hide-in-tray', async (event, enabled: unknown) => {
     assertTrustedShellSender(event)
     if (typeof enabled !== 'boolean') throw new TypeError('Hide in tray must be a boolean')
-    settings = { ...settings, hideInTray: enabled }
-    await settingsStore!.save(settings)
+    await updateSettings({ hideInTray: enabled })
     publishSettings()
     return { ...settings }
   })
   ipcMain.handle('settings:set-attention-sound', async (event, enabled: unknown) => {
     assertTrustedShellSender(event)
     if (typeof enabled !== 'boolean') throw new TypeError('Attention sound must be a boolean')
-    settings = { ...settings, attentionSound: enabled }
-    await settingsStore!.save(settings)
+    await updateSettings({ attentionSound: enabled })
     publishSettings()
     return { ...settings }
   })
   ipcMain.handle('settings:set-attention-sound-cue', async (event, cue: unknown) => {
     assertTrustedShellSender(event)
     if (!isAttentionSoundCue(cue)) throw new TypeError('Unsupported attention sound')
-    settings = { ...settings, attentionSoundCue: cue }
-    await settingsStore!.save(settings)
+    await updateSettings({ attentionSoundCue: cue })
     publishSettings()
     return { ...settings }
   })
   ipcMain.handle('settings:set-mcp-authentication', async (event, enabled: unknown) => {
     assertTrustedShellSender(event)
     if (typeof enabled !== 'boolean') throw new TypeError('MCP authentication must be a boolean')
-    settings = { ...settings, mcpAuthentication: enabled }
-    await settingsStore!.save(settings)
+    await updateSettings({ mcpAuthentication: enabled })
     mcpServer?.setAuthenticationToken(enabled ? mcpTokenConfiguration?.token : undefined)
     publishSettings()
     await tabsManager?.reloadHome()
@@ -2591,8 +2595,7 @@ function registerIpc(): void {
   ipcMain.handle('settings:set-check-on-startup', async (event, enabled: unknown) => {
     assertTrustedShellSender(event)
     if (typeof enabled !== 'boolean') throw new TypeError('Startup update check must be a boolean')
-    settings = { ...settings, checkForUpdatesOnStartup: enabled }
-    await settingsStore!.save(settings)
+    await updateSettings({ checkForUpdatesOnStartup: enabled })
     publishSettings()
     return { ...settings }
   })
@@ -2935,6 +2938,7 @@ async function releaseRuntimeResources(): Promise<void> {
   mcpServer = null
   runtimeShutdown = Promise.allSettled([
     manager?.flushPersist(),
+    settingsMutationQueue,
     flushWindowState(),
     flushPanelWindowState(),
     flushBrowserProfile(),
@@ -3059,9 +3063,9 @@ async function setMcpPort(port: number): Promise<AppSettings> {
     throw new Error(`Could not listen on ${MCP_HOST}:${port}: ${error instanceof Error ? error.message : String(error)}`)
   }
 
-  const nextSettings = { ...settings, mcpPort: port }
+  let nextSettings: AppSettings
   try {
-    await settingsStore!.save(nextSettings)
+    nextSettings = await updateSettings({ mcpPort: port })
   } catch (error) {
     await candidate.stop().catch(() => undefined)
     throw error
@@ -3071,7 +3075,6 @@ async function setMcpPort(port: number): Promise<AppSettings> {
   mcpServer = candidate
   mcpPort = port
   mcpUrl = `http://${MCP_HOST}:${port}/mcp`
-  settings = nextSettings
   mcpRuntimeStatus = 'ready'
   mcpStartupError = undefined
   tabsManager?.setMcpUrl(mcpUrl)

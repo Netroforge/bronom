@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { closeBronom, expect, launchBronom, test } from './fixtures.js'
 
@@ -43,6 +43,46 @@ test('offers System, Light, Dark, and Cyberpunk themes in Settings', async ({ ap
   await expect(appWindow.locator('html')).toHaveAttribute('data-theme', 'dark')
   await electronApp.evaluate(({ nativeTheme }) => { nativeTheme.themeSource = 'light' })
   await expect(appWindow.locator('html')).toHaveAttribute('data-theme', 'light')
+})
+
+test('keeps rejected settings out of live state and later persisted changes', async ({
+  appWindow,
+  profileDirectory
+}) => {
+  const settingsPath = join(profileDirectory, 'settings.json')
+  const blockedTemporaryPath = `${settingsPath}.tmp`
+  await rm(blockedTemporaryPath, { recursive: true, force: true })
+  await mkdir(blockedTemporaryPath)
+  try {
+    await appWindow.getByRole('button', { name: 'Settings' }).click()
+    await appWindow.getByTestId('theme-dark').click()
+    await expect(appWindow.getByRole('alert', { name: 'Setting not saved' })).toBeVisible()
+    await expect(appWindow.getByTestId('theme-system')).toHaveAttribute('aria-checked', 'true')
+    await expect.poll(() => appWindow.evaluate('window.bronomSettings.get()')).toMatchObject({ theme: 'system' })
+
+    await rm(blockedTemporaryPath, { recursive: true, force: true })
+    await appWindow.getByRole('button', { name: /Search engine/ }).click()
+    await appWindow.getByTestId('search-engine-duckduckgo').click()
+    await expect.poll(async () => JSON.parse(await readFile(settingsPath, 'utf8'))).toMatchObject({
+      theme: 'system',
+      searchEngine: 'duckduckgo'
+    })
+    await expect(appWindow.locator('html')).toHaveAttribute('data-theme-preference', 'system')
+
+    await appWindow.evaluate(`Promise.all([
+      window.bronomSettings.setTheme('cyberpunk'),
+      window.bronomSettings.setSearchEngine('brave'),
+      window.bronomSettings.setAttentionSound(false)
+    ])`)
+    await expect.poll(async () => JSON.parse(await readFile(settingsPath, 'utf8'))).toMatchObject({
+      theme: 'cyberpunk',
+      searchEngine: 'brave',
+      attentionSound: false
+    })
+    await expect(appWindow.locator('html')).toHaveAttribute('data-theme', 'cyberpunk')
+  } finally {
+    await rm(blockedTemporaryPath, { recursive: true, force: true })
+  }
 })
 
 test('keeps supporting text readable in Settings and page tools', async ({ appWindow }) => {

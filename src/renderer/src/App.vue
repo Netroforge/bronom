@@ -5234,30 +5234,52 @@ function handleSystemThemeChange(theme: 'light' | 'dark'): void {
   if (settings.value.theme === 'system') applyTheme(settings.value)
 }
 
-async function selectTheme(theme: ThemeName): Promise<void> {
-  applyTheme(await window.bronomSettings.setTheme(theme))
+async function applySettingsChange(operation: Promise<AppSettings>): Promise<boolean> {
+  try {
+    applyTheme(await operation)
+    return true
+  } catch (error) {
+    showAppToast('error', 'Setting not saved', friendlyUiError(error, 'Bronom kept your previous setting.'))
+    return false
+  }
+}
+
+async function selectTheme(theme: ThemeName): Promise<boolean> {
+  return applySettingsChange(window.bronomSettings.setTheme(theme))
 }
 
 async function selectInterfaceScale(event: Event): Promise<void> {
-  const scale = Number((event.target as HTMLSelectElement).value) as InterfaceScale
-  applyTheme(await window.bronomSettings.setInterfaceScale(scale))
+  const input = event.target as HTMLSelectElement
+  const scale = Number(input.value) as InterfaceScale
+  if (!(await applySettingsChange(window.bronomSettings.setInterfaceScale(scale)))) {
+    input.value = String(settings.value.interfaceScale)
+  }
 }
 
-async function selectSearchEngine(searchEngine: SearchEngineName): Promise<void> {
-  applyTheme(await window.bronomSettings.setSearchEngine(searchEngine))
+async function selectSearchEngine(searchEngine: SearchEngineName): Promise<boolean> {
+  return applySettingsChange(window.bronomSettings.setSearchEngine(searchEngine))
 }
 
 async function setHideInTray(event: Event): Promise<void> {
-  applyTheme(await window.bronomSettings.setHideInTray((event.target as HTMLInputElement).checked))
+  const input = event.target as HTMLInputElement
+  if (!(await applySettingsChange(window.bronomSettings.setHideInTray(input.checked)))) {
+    input.checked = settings.value.hideInTray
+  }
 }
 
 async function setAttentionSound(event: Event): Promise<void> {
-  applyTheme(await window.bronomSettings.setAttentionSound((event.target as HTMLInputElement).checked))
+  const input = event.target as HTMLInputElement
+  if (!(await applySettingsChange(window.bronomSettings.setAttentionSound(input.checked)))) {
+    input.checked = settings.value.attentionSound
+  }
 }
 
 async function setAttentionSoundCue(event: Event): Promise<void> {
-  const cue = (event.target as HTMLSelectElement).value as AttentionSoundCue
-  applyTheme(await window.bronomSettings.setAttentionSoundCue(cue))
+  const input = event.target as HTMLSelectElement
+  const cue = input.value as AttentionSoundCue
+  if (!(await applySettingsChange(window.bronomSettings.setAttentionSoundCue(cue)))) {
+    input.value = settings.value.attentionSoundCue
+  }
 }
 
 function downloadSettingsFailure(error: unknown): void {
@@ -5324,12 +5346,18 @@ async function resetDownloadSettings(): Promise<void> {
 }
 
 async function setMemorySaverEnabled(event: Event): Promise<void> {
-  applyTheme(await window.bronomSettings.setMemorySaverEnabled((event.target as HTMLInputElement).checked))
+  const input = event.target as HTMLInputElement
+  if (!(await applySettingsChange(window.bronomSettings.setMemorySaverEnabled(input.checked)))) {
+    input.checked = settings.value.memorySaverEnabled
+  }
 }
 
 async function setMemorySaverTimeout(event: Event): Promise<void> {
-  const timeoutMinutes = Number((event.target as HTMLSelectElement).value) as MemorySaverTimeoutMinutes
-  applyTheme(await window.bronomSettings.setMemorySaverTimeoutMinutes(timeoutMinutes))
+  const input = event.target as HTMLSelectElement
+  const timeoutMinutes = Number(input.value) as MemorySaverTimeoutMinutes
+  if (!(await applySettingsChange(window.bronomSettings.setMemorySaverTimeoutMinutes(timeoutMinutes)))) {
+    input.value = String(settings.value.memorySaverTimeoutMinutes)
+  }
 }
 
 async function sleepInactiveTabsNow(): Promise<void> {
@@ -5357,7 +5385,9 @@ async function setMcpAuthentication(event: Event): Promise<void> {
       return
     }
   }
-  applyTheme(await window.bronomSettings.setMcpAuthentication(input.checked))
+  if (!(await applySettingsChange(window.bronomSettings.setMcpAuthentication(input.checked)))) {
+    input.checked = settings.value.mcpAuthentication
+  }
 }
 
 async function applyMcpPort(): Promise<void> {
@@ -5384,7 +5414,10 @@ function editMcpPort(): void {
 }
 
 async function setCheckForUpdatesOnStartup(event: Event): Promise<void> {
-  applyTheme(await window.bronomSettings.setCheckForUpdatesOnStartup((event.target as HTMLInputElement).checked))
+  const input = event.target as HTMLInputElement
+  if (!(await applySettingsChange(window.bronomSettings.setCheckForUpdatesOnStartup(input.checked)))) {
+    input.checked = settings.value.checkForUpdatesOnStartup
+  }
 }
 
 async function setSitePermission(entry: SitePermissionEntry, event: Event): Promise<void> {
@@ -5770,11 +5803,11 @@ function toggleSettings(): void {
 
 async function resetCurrentSection(): Promise<void> {
   if (settingsSection.value === 'appearance') {
-    await selectTheme('system')
-    applyTheme(await window.bronomSettings.setInterfaceScale(DEFAULT_INTERFACE_SCALE))
-    applyTheme(await window.bronomSettings.setHideInTray(true))
-    applyTheme(await window.bronomSettings.setAttentionSound(true))
-    applyTheme(await window.bronomSettings.setAttentionSoundCue('warning'))
+    if (!(await selectTheme('system'))) return
+    if (!(await applySettingsChange(window.bronomSettings.setInterfaceScale(DEFAULT_INTERFACE_SCALE)))) return
+    if (!(await applySettingsChange(window.bronomSettings.setHideInTray(true)))) return
+    if (!(await applySettingsChange(window.bronomSettings.setAttentionSound(true)))) return
+    await applySettingsChange(window.bronomSettings.setAttentionSoundCue('warning'))
     return
   }
   if (settingsSection.value === 'search') {
@@ -5783,8 +5816,8 @@ async function resetCurrentSection(): Promise<void> {
   }
   if (settingsSection.value === 'downloads') return resetDownloadSettings()
   if (settingsSection.value === 'performance') {
-    applyTheme(await window.bronomSettings.setMemorySaverEnabled(true))
-    applyTheme(await window.bronomSettings.setMemorySaverTimeoutMinutes(DEFAULT_MEMORY_SAVER_TIMEOUT_MINUTES))
+    if (!(await applySettingsChange(window.bronomSettings.setMemorySaverEnabled(true)))) return
+    await applySettingsChange(window.bronomSettings.setMemorySaverTimeoutMinutes(DEFAULT_MEMORY_SAVER_TIMEOUT_MINUTES))
     return
   }
   if (settingsSection.value === 'permissions') {
@@ -5798,12 +5831,12 @@ async function resetCurrentSection(): Promise<void> {
     return
   }
   if (settingsSection.value === 'mcp') {
-    applyTheme(await window.bronomSettings.setMcpAuthentication(false))
+    if (!(await applySettingsChange(window.bronomSettings.setMcpAuthentication(false)))) return
     mcpPortDraft.value = String(DEFAULT_MCP_PORT)
     await applyMcpPort()
     return
   }
-  applyTheme(await window.bronomSettings.setCheckForUpdatesOnStartup(true))
+  await applySettingsChange(window.bronomSettings.setCheckForUpdatesOnStartup(true))
 }
 
 function isAllInteractionLockTarget(target: EventTarget | null): boolean {
