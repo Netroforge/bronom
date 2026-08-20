@@ -40,8 +40,13 @@ function validPersistedCredential(value: unknown): value is PersistedCredential 
   )
 }
 
+function credentialIdentity(entry: Pick<PersistedCredential, 'origin' | 'username'>): string {
+  return `${entry.origin}\u0000${entry.username}`
+}
+
 export class CredentialStore {
   private readonly entries = new Map<string, PersistedCredential>()
+  private mutationQueue: Promise<void> = Promise.resolve()
   private saveQueue: Promise<void> = Promise.resolve()
 
   constructor(
@@ -54,9 +59,21 @@ export class CredentialStore {
     try {
       const value = JSON.parse(await readFile(this.path, 'utf8')) as Partial<PersistedCredentialVault>
       if (value.version !== 1 || !Array.isArray(value.credentials)) return []
+      const accounts = new Map<string, PersistedCredential>()
+      let repairedDuplicates = false
       for (const entry of value.credentials) {
-        if (validPersistedCredential(entry)) this.entries.set(entry.id, { ...entry })
+        if (!validPersistedCredential(entry)) continue
+        const key = credentialIdentity(entry)
+        const existing = accounts.get(key)
+        if (!existing || existing.updatedAt.localeCompare(entry.updatedAt) <= 0) {
+          if (existing) repairedDuplicates = true
+          accounts.set(key, { ...entry })
+        } else {
+          repairedDuplicates = true
+        }
       }
+      for (const entry of accounts.values()) this.entries.set(entry.id, entry)
+      if (repairedDuplicates) await this.persist()
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code
       if (code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error
@@ -80,20 +97,22 @@ export class CredentialStore {
     if (!normalized) throw new TypeError('Credential origin must be an HTTP or HTTPS origin')
     if (username.length > 512) throw new TypeError('Credential username is too long')
     if (!password || password.length > 16_384) throw new TypeError('Credential password must be between 1 and 16384 characters')
-    const existing = [...this.entries.values()].find((entry) => entry.origin === normalized && entry.username === username)
-    const now = new Date().toISOString()
-    const entry: PersistedCredential = {
-      id: existing?.id ?? randomUUID(),
-      origin: normalized,
-      username,
-      encryptedPassword: (await this.encryption.encrypt(password)).toString('base64'),
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now
-    }
-    this.entries.set(entry.id, entry)
-    await this.persist()
-    const { encryptedPassword: _encryptedPassword, ...summary } = entry
-    return { ...summary }
+    return this.queueMutation(async () => {
+      const existing = [...this.entries.values()].find((entry) => entry.origin === normalized && entry.username === username)
+      const now = new Date().toISOString()
+      const entry: PersistedCredential = {
+        id: existing?.id ?? randomUUID(),
+        origin: normalized,
+        username,
+        encryptedPassword: (await this.encryption.encrypt(password)).toString('base64'),
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now
+      }
+      this.entries.set(entry.id, entry)
+      await this.persist()
+      const { encryptedPassword: _encryptedPassword, ...summary } = entry
+      return { ...summary }
+    })
   }
 
   async password(id: string): Promise<string> {
@@ -101,23 +120,36 @@ export class CredentialStore {
     if (!entry) throw new Error('Saved credential not found')
     const decrypted = await this.encryption.decrypt(Buffer.from(entry.encryptedPassword, 'base64'))
     if (decrypted.shouldReEncrypt) {
-      entry.encryptedPassword = (await this.encryption.encrypt(decrypted.result)).toString('base64')
-      entry.updatedAt = new Date().toISOString()
-      await this.persist()
+      await this.queueMutation(async () => {
+        if (this.entries.get(id) !== entry) return
+        entry.encryptedPassword = (await this.encryption.encrypt(decrypted.result)).toString('base64')
+        entry.updatedAt = new Date().toISOString()
+        await this.persist()
+      })
     }
     return decrypted.result
   }
 
   async remove(id: string): Promise<boolean> {
-    const removed = this.entries.delete(id)
-    if (removed) await this.persist()
-    return removed
+    return this.queueMutation(async () => {
+      const removed = this.entries.delete(id)
+      if (removed) await this.persist()
+      return removed
+    })
   }
 
   async clear(): Promise<void> {
-    if (!this.entries.size) return
-    this.entries.clear()
-    await this.persist()
+    await this.queueMutation(async () => {
+      if (!this.entries.size) return
+      this.entries.clear()
+      await this.persist()
+    })
+  }
+
+  private queueMutation<T>(mutation: () => Promise<T>): Promise<T> {
+    const operation = this.mutationQueue.then(mutation)
+    this.mutationQueue = operation.then(() => undefined, () => undefined)
+    return operation
   }
 
   private persist(): Promise<void> {
