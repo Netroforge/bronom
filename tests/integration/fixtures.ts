@@ -65,18 +65,44 @@ export async function closeBronom(app: ElectronApplication): Promise<void> {
   } catch {
     return
   }
-  if (child.exitCode !== null) return
-  const window = await app.firstWindow().catch(() => undefined)
-  if (window) {
-    await window.evaluate('setTimeout(() => window.bronom.quit(), 0)').catch(() => undefined)
+  const closePromise = app.close().catch(() => undefined)
+  await settleWithin(closePromise, 3_000)
+  if (child.exitCode === null) {
+    child.kill('SIGTERM')
+    await waitForExit(child, 2_000)
   }
   if (child.exitCode === null) {
-    await Promise.race([
-      new Promise<void>((resolve) => child.once('exit', () => resolve())),
-      new Promise<void>((resolve) => setTimeout(resolve, 3_000))
-    ])
+    child.kill('SIGKILL')
+    await waitForExit(child, 2_000)
   }
-  if (child.exitCode === null) child.kill('SIGTERM')
+  await settleWithin(closePromise, 1_000)
+}
+
+async function settleWithin(promise: Promise<unknown>, timeoutMs: number): Promise<void> {
+  let timer: NodeJS.Timeout | undefined
+  await Promise.race([
+    promise,
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, timeoutMs)
+    })
+  ])
+  if (timer) clearTimeout(timer)
+}
+
+async function waitForExit(
+  child: ReturnType<ElectronApplication['process']>,
+  timeoutMs: number
+): Promise<void> {
+  if (child.exitCode !== null) return
+  await new Promise<void>((resolve) => {
+    const finish = (): void => {
+      clearTimeout(timer)
+      child.off('exit', finish)
+      resolve()
+    }
+    const timer = setTimeout(finish, timeoutMs)
+    child.once('exit', finish)
+  })
 }
 
 export const test = base.extend<BronomFixtures>({
