@@ -4,6 +4,8 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ## [Unreleased]
 
+## [1.6.3] - 2026-08-20
+
 ### Changed
 
 - Show recent local browsing history as soon as the address bar is focused or cleared, while continuing to navigate the exact typed address on Enter unless a suggestion was explicitly selected.
