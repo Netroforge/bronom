@@ -2942,6 +2942,10 @@ watch(
     if (addressSuggestionSelection.value >= length) addressSuggestionSelection.value = -1
     await nextTick()
     revealSelectedAddressSuggestion()
+    // The native website WebContentsView is layered above renderer DOM. An
+    // address popup can appear after focus when the user starts typing, so its
+    // result-count transition must reserve (or release) native view space too.
+    reportShellHeight()
   }
 )
 

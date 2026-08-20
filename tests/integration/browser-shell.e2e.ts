@@ -896,10 +896,19 @@ test('suggests local tabs, bookmarks, and history from the address bar', async (
       BrowserWindow.getAllWindows()[0]?.contentView.children[0]?.getBounds().y
     ))
     const address = appWindow.getByRole('combobox', { name: 'Address' })
-    const requestCountBeforeTyping = requests.length
-    await address.fill('Suggestion')
     const popup = appWindow.locator('.address-suggestions')
     const listbox = appWindow.getByRole('listbox', { name: 'Local address suggestions' })
+    const requestCountBeforeTyping = requests.length
+    // Reproduce normal human input: focus the empty address bar, pause, and
+    // only then type a query. The native website view must move after results
+    // appear, not only when focus and typing happen in the same render tick.
+    await address.focus()
+    await address.fill('')
+    await expect(popup).toBeHidden()
+    await appWindow.waitForTimeout(100)
+    const browserViewYWithoutPopup = await browserViewY()
+    expect(browserViewYWithoutPopup).toBeDefined()
+    await address.fill('Suggestion')
     await expect(popup).toBeVisible()
     await expect(address).toHaveAttribute('aria-expanded', 'true')
     await expect(listbox.getByRole('option')).toHaveCount(3)
@@ -907,6 +916,14 @@ test('suggests local tabs, bookmarks, and history from the address bar', async (
     await expect(listbox.getByRole('option').nth(1)).toContainText('Bookmark')
     await expect(listbox.getByRole('option').nth(2)).toContainText('History')
     await expect(popup).toContainText('Local only')
+    const initialPopupBounds = await popup.boundingBox()
+    expect(initialPopupBounds).not.toBeNull()
+    await expect.poll(browserViewY).toBeGreaterThanOrEqual(Math.ceil(initialPopupBounds!.y + initialPopupBounds!.height))
+    await address.fill('No local result should match this query')
+    await expect(popup).toBeHidden()
+    await expect.poll(browserViewY).toBe(browserViewYWithoutPopup)
+    await address.fill('Suggestion')
+    await expect(popup).toBeVisible()
     await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(760, 600))
     await expect.poll(() => appWindow.evaluate('window.innerWidth')).toBe(760)
     await expect(popup).toBeVisible()

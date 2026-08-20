@@ -4,6 +4,10 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep address suggestions fully above the native website view when matches appear after the address bar was already focused, and immediately return that space when the query has no matches.
+
 ## [1.6.1] - 2026-08-20
 
 ### Fixed
