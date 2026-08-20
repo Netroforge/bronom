@@ -4949,30 +4949,83 @@ export class BrowserTabsManager {
 
   async waitForPage(tabId?: string, timeoutMs = 30_000): Promise<void> {
     const tab = this.getTab(tabId)
-    if (!tab.loading && !tab.view.webContents.isLoading()) return
-    await new Promise<void>((resolve) => {
-      let timer: NodeJS.Timeout
+    const webContents = tab.view.webContents
+    if (webContents.isDestroyed()) throw new Error('The tab closed while waiting for the page.')
+    try {
+      if (!tab.loading && !webContents.isLoading()) return
+    } catch {
+      throw new Error('The tab closed while waiting for the page.')
+    }
+    await new Promise<void>((resolve, reject) => {
+      let timer: NodeJS.Timeout | undefined
+      const cleanup = (): void => {
+        if (timer) clearTimeout(timer)
+        webContents.removeListener('did-stop-loading', done)
+        webContents.removeListener('did-fail-load', done)
+        webContents.removeListener('destroyed', onDestroyed)
+      }
       const done = (): void => {
-        clearTimeout(timer)
-        tab.view.webContents.removeListener('did-stop-loading', done)
-        tab.view.webContents.removeListener('did-fail-load', done)
+        cleanup()
         resolve()
       }
-      timer = setTimeout(done, Math.min(Math.max(timeoutMs, 1), 60_000))
-      tab.view.webContents.once('did-stop-loading', done)
-      tab.view.webContents.once('did-fail-load', done)
+      const onDestroyed = (): void => {
+        cleanup()
+        reject(new Error('The tab closed while waiting for the page.'))
+      }
+      const onTimeout = (): void => {
+        cleanup()
+        reject(new Error('Timed out waiting for the page to finish loading.'))
+      }
+      timer = setTimeout(onTimeout, Math.min(Math.max(timeoutMs, 1), 60_000))
+      webContents.once('did-stop-loading', done)
+      webContents.once('did-fail-load', done)
+      webContents.once('destroyed', onDestroyed)
+      // Close can race between the initial guard and listener registration.
+      if (webContents.isDestroyed()) onDestroyed()
     })
   }
 
   async waitForText(text: string, tabId?: string, timeoutMs = 30_000): Promise<boolean> {
     const tab = this.getTab(tabId)
+    const webContents = tab.view.webContents
     const deadline = Date.now() + Math.min(Math.max(timeoutMs, 1), 60_000)
     while (Date.now() < deadline) {
-      const found = await tab.view.webContents.executeJavaScript(
-        `document.body?.innerText?.includes(${JSON.stringify(text)}) ?? false`,
-        true
-      )
+      if (!this.tabs.has(tab.id) || webContents.isDestroyed()) {
+        throw new Error('The tab closed while waiting for page text.')
+      }
+      let found: boolean
+      let onDestroyed: () => void = () => undefined
+      let evaluationTimer: NodeJS.Timeout | undefined
+      try {
+        const evaluation = webContents.executeJavaScript(
+          `document.body?.innerText?.includes(${JSON.stringify(text)}) ?? false`,
+          true
+        )
+        const closed = new Promise<never>((_resolve, reject) => {
+          onDestroyed = () => reject(new Error('The tab closed while waiting for page text.'))
+          webContents.once('destroyed', onDestroyed)
+        })
+        const timedOut = new Promise<boolean>((resolve) => {
+          evaluationTimer = setTimeout(() => resolve(false), Math.max(1, deadline - Date.now()))
+        })
+        // Register the close race before checking state again so no teardown
+        // gap can strand executeJavaScript while an unfinished page is loading.
+        const pending = Promise.race([evaluation, closed, timedOut])
+        if (!this.tabs.has(tab.id) || webContents.isDestroyed()) {
+          throw new Error('The tab closed while waiting for page text.')
+        }
+        found = await pending
+      } catch (error) {
+        if (!this.tabs.has(tab.id) || webContents.isDestroyed()) {
+          throw new Error('The tab closed while waiting for page text.')
+        }
+        throw error
+      } finally {
+        if (evaluationTimer) clearTimeout(evaluationTimer)
+        webContents.removeListener('destroyed', onDestroyed)
+      }
       if (found) return true
+      if (Date.now() >= deadline) return false
       await new Promise((resolve) => setTimeout(resolve, 200))
     }
     return false
