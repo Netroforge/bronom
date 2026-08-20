@@ -9,10 +9,9 @@ interface BrowserStateResult {
 
 const endpoint = new URL(process.env.BRONOM_MCP_URL || 'http://127.0.0.1:47812/mcp')
 const token = process.env.BRONOM_MCP_TOKEN
-if (!token) throw new Error('Set BRONOM_MCP_TOKEN to the token for the running Bronom profile.')
 const client = new Client({ name: 'bronom-smoke', version: '1.0.0' })
 const transport = new StreamableHTTPClientTransport(endpoint, {
-  requestInit: { headers: { authorization: `Bearer ${token}` } }
+  ...(token ? { requestInit: { headers: { authorization: `Bearer ${token}` } } } : {})
 })
 
 function text(result: CallToolResult): string {

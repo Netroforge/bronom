@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -80,17 +80,13 @@ let transport: StreamableHTTPClientTransport | undefined
 try {
   await waitFor(async () => {
     try {
-      return (await fetch(`http://127.0.0.1:${mcpPort}/healthz`)).status === 401
+      return (await fetch(`http://127.0.0.1:${mcpPort}/healthz`)).ok
     } catch {
       return false
     }
   }, 'Bronom MCP server did not start')
-  const token = (await readFile(join(profileDirectory, 'mcp-token'), 'utf8')).trim()
-  const authorization = `Bearer ${token}`
   client = new Client({ name: 'bronom-dialog-integration', version: '1.0.0' })
-  transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${mcpPort}/mcp`), {
-    requestInit: { headers: { authorization } }
-  })
+  transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${mcpPort}/mcp`))
   await client.connect(transport)
   await useMcpWorkspace(client, 'Dialog integration')
 

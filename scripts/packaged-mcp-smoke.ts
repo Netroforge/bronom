@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -25,7 +25,7 @@ async function waitForServer(port: number, timeoutMs = 15_000): Promise<void> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     try {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`)).status === 401) return
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`)).ok) return
     } catch {
       // The packaged process is still starting.
     }
@@ -60,13 +60,12 @@ application.stderr.pipe(process.stderr)
 
 try {
   await waitForServer(mcpPort)
-  const token = (await readFile(join(profileDirectory, 'mcp-token'), 'utf8')).trim()
   const smoke = spawn(process.execPath, ['scripts/mcp-smoke.ts'], {
     cwd: repositoryRoot,
     env: {
       ...process.env,
       BRONOM_MCP_URL: `http://127.0.0.1:${mcpPort}/mcp`,
-      BRONOM_MCP_TOKEN: token
+      BRONOM_MCP_TOKEN: ''
     },
     stdio: 'inherit'
   })
