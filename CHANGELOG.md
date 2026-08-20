@@ -4,6 +4,10 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Leave MCP authentication off for new profiles so local agents can connect without token setup, while preserving an existing profile's explicit setting and keeping opt-in bearer authentication available in Settings.
+
 ## [1.6.4] - 2026-08-21
 
 ### Fixed

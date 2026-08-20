@@ -3,7 +3,7 @@ import { createServer } from 'node:net'
 import { join } from 'node:path'
 import { closeBronom, expect, launchBronom, test } from './fixtures.js'
 
-test('can disable and re-enable MCP authentication in Settings', async ({
+test('starts without MCP authentication and can enable or disable it in Settings', async ({
   appWindow,
   mcpPort,
   mcpToken,
@@ -18,12 +18,20 @@ test('can disable and re-enable MCP authentication in Settings', async ({
       return 0
     }
   }
-  await expect.poll(() => healthStatus(authorization)).toBe(200)
+  await expect.poll(() => healthStatus()).toBe(200)
 
   await appWindow.getByRole('button', { name: 'Settings' }).click()
   await appWindow.getByRole('button', { name: /MCP security/ }).click()
   const authentication = appWindow.getByRole('checkbox', { name: 'Require MCP authentication' })
-  await expect(authentication).toBeChecked()
+  await expect(authentication).not.toBeChecked()
+  await expect(appWindow.getByText('Authentication is off.')).toBeVisible()
+
+  await authentication.check()
+  await expect.poll(() => healthStatus()).toBe(401)
+  await expect.poll(() => healthStatus(authorization)).toBe(200)
+  await expect
+    .poll(async () => JSON.parse(await readFile(join(profileDirectory, 'settings.json'), 'utf8')).mcpAuthentication)
+    .toBe(true)
 
   appWindow.once('dialog', (dialog) => dialog.accept())
   await authentication.uncheck()
@@ -31,11 +39,6 @@ test('can disable and re-enable MCP authentication in Settings', async ({
   await expect
     .poll(async () => JSON.parse(await readFile(join(profileDirectory, 'settings.json'), 'utf8')).mcpAuthentication)
     .toBe(false)
-  await expect(appWindow.getByText('Authentication is off.')).toBeVisible()
-
-  await authentication.check()
-  await expect.poll(() => healthStatus()).toBe(401)
-  await expect.poll(() => healthStatus(authorization)).toBe(200)
 })
 
 test('moves the live MCP listener to a validated available port and rolls back on conflicts', async ({

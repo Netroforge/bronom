@@ -345,7 +345,7 @@ const settings = ref<AppSettings>({
   hideInTray: true,
   attentionSound: true,
   attentionSoundCue: 'warning',
-  mcpAuthentication: true,
+  mcpAuthentication: false,
   mcpPort: DEFAULT_MCP_PORT,
   downloadDirectory: null,
   askWhereToSaveDownloads: false,

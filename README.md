@@ -224,11 +224,10 @@ http://127.0.0.1:47812/mcp
 Health check:
 
 ```bash
-export BRONOM_MCP_TOKEN="$(cat ~/.config/Bronom/mcp-token)"
-curl -H "Authorization: Bearer $BRONOM_MCP_TOKEN" http://127.0.0.1:47812/healthz
+curl http://127.0.0.1:47812/healthz
 ```
 
-The exact profile path is shown on Bronom Home. On Linux, the packaged default is `~/.config/Bronom/mcp-token`; development builds use `~/.config/bronom-dev/mcp-token`. Bronom creates one random token per profile and restricts the token file to the profile owner.
+Authentication is off for a new profile so local agents can connect without token setup. If you enable **Require MCP authentication** in Settings, the exact token path is shown on Bronom Home. On Linux, the packaged default is `~/.config/Bronom/mcp-token`; development builds use `~/.config/bronom-dev/mcp-token`. Bronom creates one random token per profile and restricts the token file to the profile owner.
 
 ## Connect an MCP client
 
@@ -238,10 +237,7 @@ Use a Streamable HTTP MCP configuration and start Bronom before the client conne
 {
   "mcpServers": {
     "bronom": {
-      "url": "http://127.0.0.1:47812/mcp",
-      "headers": {
-        "Authorization": "Bearer <paste the token shown by Bronom Home>"
-      }
+      "url": "http://127.0.0.1:47812/mcp"
     }
   }
 }
@@ -254,7 +250,7 @@ Optional environment variables:
 - `BRONOM_MCP_PORT`: override the saved listen port for the current launch. Without the override, the port can be changed under **Settings → MCP security** and defaults to `47812` for new profiles.
 - `BRONOM_MCP_HOST`: loopback listen host, default `127.0.0.1`. Non-loopback values are rejected.
 - `BRONOM_MCP_TOKEN`: override the generated per-profile token with at least 32 URL-safe characters. While authentication is enabled, every MCP and health request must send `Authorization: Bearer <token>`.
-- `BRONOM_DISABLE_MCP_AUTH`: start the current launch with MCP authentication disabled. The same setting can be changed immediately under **Settings → MCP security**. Bronom remains loopback-only, but every local process can then control the profile; use this only on a trusted single-user machine.
+- `BRONOM_DISABLE_MCP_AUTH`: force the current launch to keep MCP authentication disabled even if the profile normally requires it. The setting can be changed immediately under **Settings → MCP security**. Bronom remains loopback-only, but every local process can control the profile while authentication is off; enable authentication on computers where local processes are not equally trusted.
 - `BRONOM_USER_DATA_DIR`: use an alternate profile directory instead of the packaged or `bronom-dev` default. This is primarily useful for isolated integration tests.
 - `BRONOM_DISABLE_AUTO_UPDATE`: set to `1` to disable update checks for the current launch.
 - `BRONOM_DOWNLOAD_DIR`: use this directory as the profile's default instead of the operating system's Downloads directory. A folder explicitly chosen in Settings takes precedence.
@@ -361,7 +357,7 @@ Bug reports, documentation suggestions, security reports, and focused code contr
 ## Security model
 
 - The MCP server binds to loopback by default and rejects non-local browser origins.
-- By default, every MCP and health request requires a strong bearer token. Bronom generates and reuses an owner-only token for each browser profile unless a valid `BRONOM_MCP_TOKEN` override is supplied. Authentication can be explicitly disabled in **Settings → MCP security** or for launch with `BRONOM_DISABLE_MCP_AUTH=1`.
+- MCP authentication is off for new profiles and the server remains loopback-only. Enable **Require MCP authentication** in **Settings → MCP security** when local processes are not equally trusted; Bronom then generates and reuses an owner-only token unless a valid `BRONOM_MCP_TOKEN` override is supplied.
 - Website tabs have Node.js disabled, context isolation enabled, Chromium sandboxing enabled, and web security enabled.
 - New browser windows become managed tabs.
 - Unknown site permission requests require explicit confirmation. Bronom remembers each decision per website origin and permission type, and lets you review or revoke it later in Settings.
