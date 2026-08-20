@@ -6706,7 +6706,14 @@ export class BrowserTabsManager {
   }
 
   private async withRenderableTab<T>(tab: BrowserTab, operation: () => Promise<T>): Promise<T> {
-    const webContentsId = tab.view.webContents.id
+    const webContents = tab.view.webContents
+    const webContentsId = webContents.id
+    const tabIsLive = (): boolean => (
+      !this.destroyed
+      && !this.window.isDestroyed()
+      && this.tabs.get(tab.id) === tab
+      && !webContents.isDestroyed()
+    )
     const previous = this.renderQueues.get(webContentsId) ?? Promise.resolve()
     let releaseQueue!: () => void
     const gate = new Promise<void>((resolve) => { releaseQueue = resolve })
@@ -6715,38 +6722,62 @@ export class BrowserTabsManager {
     await previous
 
     try {
-      if (this.window.isVisible() && (tab.id === this.activeTabId || this.splitViewContains(tab.id))) return await operation()
-
-      const originalBounds = tab.view.getBounds()
-      const wasAttached = tab.id === this.activeTabId || this.splitViewContains(tab.id)
-      // Chromium releases a WebContentsView's compositor surface when its host is hidden or detached.
-      // Present the same live tab offscreen so screenshots retain its current DOM, scroll, and session state.
-      const captureWindow = new BrowserWindow({
-        x: -32_000,
-        y: -32_000,
-        width: Math.max(1, originalBounds.width),
-        height: Math.max(1, originalBounds.height),
-        show: false,
-        frame: false,
-        focusable: false,
-        skipTaskbar: true
-      })
-      if (wasAttached) this.window.contentView.removeChildView(tab.view)
-      captureWindow.contentView.addChildView(tab.view)
-      tab.view.setBounds({ x: 0, y: 0, width: Math.max(1, originalBounds.width), height: Math.max(1, originalBounds.height) })
-
+      if (!tabIsLive()) throw new Error('The tab closed while rendering its page.')
       try {
-        captureWindow.showInactive()
-        await this.waitForPresentation(tab.view.webContents)
-        return await operation()
-      } finally {
-        captureWindow.contentView.removeChildView(tab.view)
-        captureWindow.destroy()
-        tab.view.setBounds(originalBounds)
-        if (wasAttached && !this.window.isDestroyed()) {
-          this.window.contentView.addChildView(tab.view)
-          this.layout()
+        if (this.window.isVisible() && (tab.id === this.activeTabId || this.splitViewContains(tab.id))) return await operation()
+
+        const originalBounds = tab.view.getBounds()
+        const wasAttached = tab.id === this.activeTabId || this.splitViewContains(tab.id)
+        // Chromium releases a WebContentsView's compositor surface when its host is hidden or detached.
+        // Present the same live tab offscreen so screenshots retain its current DOM, scroll, and session state.
+        const captureWindow = new BrowserWindow({
+          x: -32_000,
+          y: -32_000,
+          width: Math.max(1, originalBounds.width),
+          height: Math.max(1, originalBounds.height),
+          show: false,
+          frame: false,
+          focusable: false,
+          skipTaskbar: true
+        })
+        if (wasAttached) this.window.contentView.removeChildView(tab.view)
+        captureWindow.contentView.addChildView(tab.view)
+        tab.view.setBounds({ x: 0, y: 0, width: Math.max(1, originalBounds.width), height: Math.max(1, originalBounds.height) })
+
+        try {
+          captureWindow.showInactive()
+          await this.waitForPresentation(webContents)
+          return await operation()
+        } finally {
+          let cleanupError: unknown
+          try {
+            if (!captureWindow.isDestroyed()) captureWindow.contentView.removeChildView(tab.view)
+          } catch (error) {
+            cleanupError = error
+          }
+          try {
+            if (!captureWindow.isDestroyed()) captureWindow.destroy()
+          } catch (error) {
+            cleanupError ??= error
+          }
+          // Closing a tab destroys its WebContentsView. Never restore or add
+          // that stale child to the shell after the offscreen operation ends.
+          if (tabIsLive()) {
+            try {
+              tab.view.setBounds(originalBounds)
+              if (wasAttached) {
+                this.window.contentView.addChildView(tab.view)
+                this.layout()
+              }
+            } catch (error) {
+              cleanupError ??= error
+            }
+          }
+          if (cleanupError) throw cleanupError
         }
+      } catch (error) {
+        if (!tabIsLive()) throw new Error('The tab closed while rendering its page.')
+        throw error
       }
     } finally {
       releaseQueue()

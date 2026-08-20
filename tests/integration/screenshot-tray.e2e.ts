@@ -11,7 +11,7 @@ function text(result: CallToolResult): string {
   return content?.type === 'text' ? content.text : ''
 }
 
-test('captures screenshots and saves a PDF while Bronom is hidden in the tray', async ({
+test('captures hidden pages and survives tab teardown during offscreen rendering', async ({
   electronApp,
   mcpToken,
   mcpPort,
@@ -103,6 +103,26 @@ test('captures screenshots and saves a PDF while Bronom is hidden in the tray', 
     })
     expect((await readFile(join(profileDirectory, 'tray-hidden.pdf'))).subarray(0, 5).toString()).toBe('%PDF-')
     await expect.poll(() => electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible())).toBe(false)
+
+    const comparison = client.callTool({
+      name: 'browser_visual_compare',
+      arguments: { tabId, action: 'set-baseline', settleMs: 2_000 }
+    }) as Promise<CallToolResult>
+    await expect.poll(() => electronApp.evaluate(({ BrowserWindow }) => (
+      BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed()).length
+    ))).toBe(2)
+    const shellWindow = await electronApp.firstWindow()
+    await shellWindow.evaluate(`window.bronom.closeTab(${JSON.stringify(tabId)})`)
+    const closedDuringCapture = await comparison
+    expect(closedDuringCapture.isError).toBe(true)
+    expect(text(closedDuringCapture)).toContain('tab closed while rendering its page')
+    await expect.poll(() => electronApp.evaluate(({ BrowserWindow }) => (
+      BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed()).length
+    ))).toBe(1)
+
+    const recoveryTabId = await shellWindow.evaluate(`window.bronom.newTab({ url: 'about:blank', active: true }).then((state) => state.activeTabId)`)
+    await shellWindow.evaluate(`window.bronom.closeTab(${JSON.stringify(recoveryTabId)})`)
+    await expect.poll(() => shellWindow.evaluate('window.bronom.getState().then((state) => state.tabs.some((tab) => tab.id === ' + JSON.stringify(recoveryTabId) + '))')).toBe(false)
   } finally {
     await client.close().catch(() => undefined)
   }
