@@ -61,7 +61,7 @@
     "@types/express": "^5.0.6",
     "@types/node": "^26.2.0",
     "@vitejs/plugin-vue": "^6.0.8",
-    "electron": "42.9.1",
+    "electron": "42.9.3",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "typescript": "^6.0.3",
