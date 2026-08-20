@@ -5744,6 +5744,7 @@ function toggleSettings(): void {
 async function resetCurrentSection(): Promise<void> {
   if (settingsSection.value === 'appearance') {
     await selectTheme('system')
+    applyTheme(await window.bronomSettings.setInterfaceScale(DEFAULT_INTERFACE_SCALE))
     applyTheme(await window.bronomSettings.setHideInTray(true))
     applyTheme(await window.bronomSettings.setAttentionSound(true))
     applyTheme(await window.bronomSettings.setAttentionSoundCue('warning'))
@@ -5769,12 +5770,8 @@ async function resetCurrentSection(): Promise<void> {
     browsingDataState.value = 'idle'
     return
   }
-  if (settingsSection.value === 'credentials') {
-    await window.bronomCredentials.clear()
-    return
-  }
   if (settingsSection.value === 'mcp') {
-    applyTheme(await window.bronomSettings.setMcpAuthentication(true))
+    applyTheme(await window.bronomSettings.setMcpAuthentication(false))
     mcpPortDraft.value = String(DEFAULT_MCP_PORT)
     await applyMcpPort()
     return
@@ -10976,7 +10973,7 @@ onBeforeUnmount(() => {
         </div>
 
         <footer class="settings-footer">
-          <button v-if="settingsSection !== 'support'" class="secondary-button" type="button" @click="resetCurrentSection">Reset to default</button>
+          <button v-if="settingsSection !== 'support' && settingsSection !== 'credentials'" class="secondary-button" type="button" @click="resetCurrentSection">Reset to default</button>
           <button class="primary-button" type="button" @click="settingsOpen = false">Close</button>
         </footer>
       </section>

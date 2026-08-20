@@ -23,6 +23,7 @@ test('exposes metadata-only password controls and fails closed without secure st
 
   await appWindow.getByRole('button', { name: 'Settings' }).click()
   await appWindow.getByRole('button', { name: 'Passwords' }).click()
+  await expect(appWindow.getByRole('button', { name: 'Reset to default' })).toHaveCount(0)
   if (state.status.available) {
     await expect(appWindow.getByText('No saved passwords')).toBeVisible()
     await expect(appWindow.getByText(new RegExp(`Encrypted by ${state.status.backend}`))).toBeVisible()

@@ -158,6 +158,35 @@ test('scales Bronom without zooming the active website and persists the choice',
   }
 })
 
+test('resets every Appearance preference including interface size', async ({
+  appWindow,
+  electronApp,
+  profileDirectory
+}) => {
+  await appWindow.getByRole('button', { name: 'Settings' }).click()
+  await appWindow.getByTestId('theme-cyberpunk').click()
+  await appWindow.getByRole('combobox', { name: 'Interface size' }).selectOption('1.25')
+  await appWindow.getByRole('checkbox', { name: 'Hide in tray when closing' }).uncheck()
+  await appWindow.getByRole('checkbox', { name: 'Play attention sound' }).uncheck()
+
+  await appWindow.getByRole('button', { name: 'Reset to default' }).click()
+
+  await expect(appWindow.getByTestId('theme-system')).toHaveAttribute('aria-checked', 'true')
+  await expect(appWindow.getByRole('combobox', { name: 'Interface size' })).toHaveValue('1.1')
+  await expect(appWindow.getByRole('checkbox', { name: 'Hide in tray when closing' })).toBeChecked()
+  await expect(appWindow.getByRole('checkbox', { name: 'Play attention sound' })).toBeChecked()
+  await expect.poll(() => electronApp.evaluate(({ BrowserWindow }) => (
+    BrowserWindow.getAllWindows()[0]?.webContents.getZoomFactor()
+  ))).toBe(1.1)
+  await expect.poll(async () => JSON.parse(await readFile(join(profileDirectory, 'settings.json'), 'utf8'))).toMatchObject({
+    theme: 'system',
+    interfaceScale: 1.1,
+    hideInTray: true,
+    attentionSound: true,
+    attentionSoundCue: 'warning'
+  })
+})
+
 test('can disable hiding in the tray so closing the window quits Bronom', async ({ appWindow, electronApp }) => {
   await appWindow.getByRole('button', { name: 'Settings' }).click()
   const hideInTray = appWindow.getByRole('checkbox', { name: 'Hide in tray when closing' })

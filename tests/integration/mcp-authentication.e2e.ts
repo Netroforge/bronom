@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
+import { DEFAULT_MCP_PORT } from '../../src/shared/mcp-port.js'
 import { closeBronom, expect, launchBronom, test } from './fixtures.js'
 
 test('starts without MCP authentication and can enable or disable it in Settings', async ({
@@ -39,6 +40,22 @@ test('starts without MCP authentication and can enable or disable it in Settings
   await expect
     .poll(async () => JSON.parse(await readFile(join(profileDirectory, 'settings.json'), 'utf8')).mcpAuthentication)
     .toBe(false)
+
+  await authentication.check()
+  await expect.poll(() => healthStatus()).toBe(401)
+  await appWindow.getByRole('button', { name: 'Reset to default' }).click()
+  await expect(authentication).not.toBeChecked()
+  await expect.poll(async () => {
+    try {
+      return (await fetch(`http://127.0.0.1:${DEFAULT_MCP_PORT}/healthz`)).status
+    } catch {
+      return 0
+    }
+  }).toBe(200)
+  await expect.poll(() => healthStatus()).toBe(0)
+  await expect
+    .poll(async () => JSON.parse(await readFile(join(profileDirectory, 'settings.json'), 'utf8')))
+    .toMatchObject({ mcpAuthentication: false, mcpPort: DEFAULT_MCP_PORT })
 })
 
 test('moves the live MCP listener to a validated available port and rolls back on conflicts', async ({
