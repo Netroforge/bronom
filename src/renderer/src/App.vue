@@ -2323,7 +2323,7 @@ async function runCommandPaletteCommand(commandId: CommandPaletteCommandId): Pro
 async function selectSearchTab(tab: BrowserTabState): Promise<void> {
   tabSearchOpen.value = false
   expandTabGroupForTab(tab)
-  await syncState(browser.selectTab(tab.id))
+  await selectBrowserTab(tab.id)
 }
 
 async function closeSearchTab(event: MouseEvent, tabId: string): Promise<void> {
@@ -3276,6 +3276,16 @@ async function syncState(next: Promise<BrowserState> | BrowserState): Promise<vo
   state.value = await next
 }
 
+async function selectBrowserTab(tabId: string): Promise<boolean> {
+  try {
+    await syncState(browser.selectTab(tabId))
+    return true
+  } catch (error) {
+    showAppToast('error', 'Open tab failed', friendlyUiError(error, 'The selected tab could not be opened.'))
+    return false
+  }
+}
+
 async function navigate(): Promise<void> {
   if (!address.value.trim()) return
   closeAddressSuggestions()
@@ -3458,7 +3468,7 @@ async function openFind(): Promise<void> {
 async function focusAddress(): Promise<void> {
   if (activeIsHome.value) {
     const tab = preferredWebTab()
-    await syncState(tab ? browser.selectTab(tab.id) : browser.newTab())
+    if (!tab || !(await selectBrowserTab(tab.id))) await syncState(browser.newTab())
   }
   settingsOpen.value = false
   updateNoticeOpen.value = false
@@ -3475,7 +3485,7 @@ async function selectRelativeTab(offset: -1 | 1): Promise<void> {
   if (tabs.length < 2 || !state.value.activeTabId) return
   const current = tabs.findIndex((tab) => tab.id === state.value.activeTabId)
   const next = tabs[(current + offset + tabs.length) % tabs.length]
-  if (next) await syncState(browser.selectTab(next.id))
+  if (next) await selectBrowserTab(next.id)
 }
 
 async function runBrowserShortcut(action: BrowserShortcutAction): Promise<void> {
@@ -6195,7 +6205,7 @@ onBeforeUnmount(() => {
           role="tab"
           draggable="true"
           :aria-selected="tab.active"
-          @click="tabSearchOpen = false; syncState(browser.selectTab(tab.id))"
+          @click="tabSearchOpen = false; selectBrowserTab(tab.id)"
           @contextmenu.prevent="browser.showTabContextMenu(tab.id)"
           @dragstart="beginTabDrag($event, tab)"
           @dragover="updateTabDrop($event, tab)"

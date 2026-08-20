@@ -174,3 +174,61 @@ test('rejects a destroyed split target without corrupting the active tab or late
   await appWindow.evaluate(`window.bronom.closeTab(${JSON.stringify(activeTabId)})`)
   await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')).toBe(recoveryTabId)
 })
+
+test('collapses an open split when Electron destroys either native pane', async ({ appWindow, electronApp }) => {
+  const firstUrl = 'data:text/html,<title>Split survivor</title><h1>Survivor</h1>'
+  const secondUrl = 'data:text/html,<title>Split teardown</title><h1>Teardown</h1>'
+  const firstState = await appWindow.evaluate(`window.bronom.newTab({ url: ${JSON.stringify(firstUrl)}, active: true })`) as BrowserState
+  const firstTabId = firstState.activeTabId!
+  const secondState = await appWindow.evaluate(`window.bronom.newTab({ url: ${JSON.stringify(secondUrl)}, active: false })`) as BrowserState
+  const secondTabId = secondState.tabs.find((tab) => tab.url === secondUrl)!.id
+  await expect.poll(() => electronApp.evaluate(({ webContents }, url) => (
+    webContents.getAllWebContents().some((contents) => contents.getURL() === url)
+  ), secondUrl)).toBe(true)
+  await appWindow.evaluate(`window.bronom.openSplitView(${JSON.stringify(secondTabId)})`)
+  await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.splitView)')).toBeDefined()
+
+  await electronApp.evaluate(({ webContents }, url) => {
+    const pane = webContents.getAllWebContents().find((contents) => contents.getURL() === url)
+    if (!pane) throw new Error('Split teardown pane was not found')
+    pane.close()
+  }, secondUrl)
+
+  await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.splitView)')).toBeUndefined()
+  await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')).toBe(firstTabId)
+  await expect.poll(() => electronApp.evaluate(({ BrowserWindow, WebContentsView }) => (
+    (BrowserWindow.getAllWindows()[0]?.contentView.children ?? [])
+      .filter((view) => view instanceof WebContentsView)
+      .map((view) => view.webContents.getTitle())
+  ))).toEqual(['Split survivor'])
+  await appWindow.getByRole('tab', { name: /Split teardown/ }).click()
+  await expect(appWindow.getByRole('alert', { name: 'Open tab failed' })).toContainText(
+    'tab renderer is no longer available'
+  )
+  await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')).toBe(firstTabId)
+
+  await appWindow.evaluate(`window.bronom.closeTab(${JSON.stringify(secondTabId)})`)
+  const activeTeardownUrl = 'data:text/html,<title>Active split teardown</title><h1>Active teardown</h1>'
+  const activeTeardownState = await appWindow.evaluate(`window.bronom.newTab({ url: ${JSON.stringify(activeTeardownUrl)}, active: false })`) as BrowserState
+  const activeTeardownTabId = activeTeardownState.tabs.find((tab) => tab.url === activeTeardownUrl)!.id
+  await expect.poll(() => electronApp.evaluate(({ webContents }, url) => (
+    webContents.getAllWebContents().some((contents) => contents.getURL() === url)
+  ), activeTeardownUrl)).toBe(true)
+  await appWindow.evaluate(`window.bronom.openSplitView(${JSON.stringify(activeTeardownTabId)})`)
+  await appWindow.evaluate(`window.bronom.selectTab(${JSON.stringify(activeTeardownTabId)})`)
+  await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')).toBe(activeTeardownTabId)
+
+  await electronApp.evaluate(({ webContents }, url) => {
+    const pane = webContents.getAllWebContents().find((contents) => contents.getURL() === url)
+    if (!pane) throw new Error('Active split teardown pane was not found')
+    pane.close()
+  }, activeTeardownUrl)
+
+  await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.splitView)')).toBeUndefined()
+  await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')).toBe(firstTabId)
+  await expect.poll(() => electronApp.evaluate(({ BrowserWindow, WebContentsView }) => (
+    (BrowserWindow.getAllWindows()[0]?.contentView.children ?? [])
+      .filter((view) => view instanceof WebContentsView)
+      .map((view) => view.webContents.getTitle())
+  ))).toEqual(['Split survivor'])
+})

@@ -5370,6 +5370,28 @@ export class BrowserTabsManager {
 
   private attachTabEvents(tab: BrowserTab): void {
     const webContents = tab.webContents
+    webContents.once('destroyed', () => {
+      if (this.destroyed || this.tabs.get(tab.id) !== tab || !this.splitViewContains(tab.id)) return
+      const split = this.splitView!
+      const partnerId = split.firstTabId === tab.id ? split.secondTabId : split.firstTabId
+      const partner = this.tabs.get(partnerId)
+      this.splitView = null
+      try {
+        this.window.contentView.removeChildView(tab.view)
+      } catch (error) {
+        console.warn(`[browser] Could not detach destroyed split pane ${tab.id}:`, error)
+      }
+      if (partner && !partner.webContents.isDestroyed()) {
+        if (this.activeTabId === tab.id) {
+          this.activeTabId = partner.id
+          partner.lastActiveAt = Date.now()
+          this.markTabActiveInGroup(partner)
+        }
+        this.layout()
+        if (this.activeTabId === partner.id) partner.webContents.focus()
+      }
+      this.changed()
+    })
     webContents.on('focus', () => {
       if (this.restoringLayout) return
       tab.lastActiveAt = Date.now()
