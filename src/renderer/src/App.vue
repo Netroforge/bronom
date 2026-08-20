@@ -2938,13 +2938,17 @@ watch(
 
 watch(
   () => addressSuggestions.value.length,
-  (length) => {
+  async (length) => {
     if (addressSuggestionSelection.value >= length) addressSuggestionSelection.value = -1
+    await nextTick()
+    revealSelectedAddressSuggestion()
   }
 )
 
-watch(credentialPickerQuery, () => {
+watch(credentialPickerQuery, async () => {
   credentialPickerSelection.value = 0
+  await nextTick()
+  revealSelectedCredential()
 })
 
 watch(
@@ -3331,6 +3335,29 @@ async function selectAddressSuggestion(suggestion: AddressSuggestion): Promise<v
   await navigate()
 }
 
+function addressSuggestionId(suggestion: AddressSuggestion): string {
+  return `address-suggestion-${suggestion.id}`
+}
+
+function revealSelectedAddressSuggestion(): void {
+  const suggestion = selectedAddressSuggestion.value
+  if (!suggestion) return
+  document.getElementById(addressSuggestionId(suggestion))?.scrollIntoView({ block: 'nearest' })
+}
+
+async function moveAddressSuggestionSelection(offset: -1 | 1): Promise<void> {
+  const count = addressSuggestions.value.length
+  if (!count) return
+  if (addressSuggestionSelection.value < 0) {
+    addressSuggestionSelection.value = offset === 1 ? 0 : count - 1
+  } else {
+    addressSuggestionSelection.value = (addressSuggestionSelection.value + offset + count) % count
+  }
+  addressSuggestionsOpen.value = true
+  await nextTick()
+  revealSelectedAddressSuggestion()
+}
+
 function handleAddressKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape' && addressSuggestionsOpen.value) {
     event.preventDefault()
@@ -3340,18 +3367,12 @@ function handleAddressKeydown(event: KeyboardEvent): void {
   if (!addressSuggestions.value.length) return
   if (event.key === 'ArrowDown') {
     event.preventDefault()
-    addressSuggestionsOpen.value = true
-    addressSuggestionSelection.value = addressSuggestionSelection.value < 0
-      ? 0
-      : (addressSuggestionSelection.value + 1) % addressSuggestions.value.length
+    void moveAddressSuggestionSelection(1)
     return
   }
   if (event.key === 'ArrowUp') {
     event.preventDefault()
-    addressSuggestionsOpen.value = true
-    addressSuggestionSelection.value = addressSuggestionSelection.value < 0
-      ? addressSuggestions.value.length - 1
-      : (addressSuggestionSelection.value - 1 + addressSuggestions.value.length) % addressSuggestions.value.length
+    void moveAddressSuggestionSelection(-1)
     return
   }
   if (event.key === 'Enter' && addressSuggestionsVisible.value && selectedAddressSuggestion.value) {
@@ -5301,6 +5322,24 @@ async function fillSelectedCredential(credential: CredentialSummary): Promise<vo
   }
 }
 
+function credentialOptionId(credential: CredentialSummary): string {
+  return `credential-option-${credential.id}`
+}
+
+function revealSelectedCredential(): void {
+  const credential = selectedActiveCredential.value
+  if (!credential) return
+  document.getElementById(credentialOptionId(credential))?.scrollIntoView({ block: 'nearest' })
+}
+
+async function moveCredentialPickerSelection(offset: -1 | 1): Promise<void> {
+  const count = filteredActiveCredentials.value.length
+  if (!count) return
+  credentialPickerSelection.value = (credentialPickerSelection.value + offset + count) % count
+  await nextTick()
+  revealSelectedCredential()
+}
+
 function handleCredentialPickerKeydown(event: KeyboardEvent): void {
   const count = filteredActiveCredentials.value.length
   if (event.key === 'Escape') {
@@ -5311,12 +5350,12 @@ function handleCredentialPickerKeydown(event: KeyboardEvent): void {
   if (!count) return
   if (event.key === 'ArrowDown') {
     event.preventDefault()
-    credentialPickerSelection.value = (credentialPickerSelection.value + 1) % count
+    void moveCredentialPickerSelection(1)
     return
   }
   if (event.key === 'ArrowUp') {
     event.preventDefault()
-    credentialPickerSelection.value = (credentialPickerSelection.value - 1 + count) % count
+    void moveCredentialPickerSelection(-1)
     return
   }
   if (event.key === 'Enter' && selectedActiveCredential.value) {
@@ -6251,7 +6290,7 @@ onBeforeUnmount(() => {
           aria-autocomplete="list"
           aria-controls="address-suggestions"
           :aria-expanded="addressSuggestionsVisible"
-          :aria-activedescendant="addressSuggestionsVisible && selectedAddressSuggestion ? `address-suggestion-${selectedAddressSuggestion.id}` : undefined"
+          :aria-activedescendant="addressSuggestionsVisible && selectedAddressSuggestion ? addressSuggestionId(selectedAddressSuggestion) : undefined"
           autocomplete="off"
           spellcheck="false"
           placeholder="Search or enter address"
@@ -6350,7 +6389,7 @@ onBeforeUnmount(() => {
           <div id="address-suggestions" role="listbox" aria-label="Local address suggestions">
             <button
               v-for="(suggestion, index) in addressSuggestions"
-              :id="`address-suggestion-${suggestion.id}`"
+              :id="addressSuggestionId(suggestion)"
               :key="suggestion.id"
               class="address-suggestion"
               :class="{ selected: index === addressSuggestionSelection }"
@@ -10042,7 +10081,7 @@ onBeforeUnmount(() => {
             aria-autocomplete="list"
             aria-controls="credential-picker-results"
             :aria-expanded="filteredActiveCredentials.length > 0"
-            :aria-activedescendant="selectedActiveCredential ? `credential-option-${selectedActiveCredential.id}` : undefined"
+            :aria-activedescendant="selectedActiveCredential ? credentialOptionId(selectedActiveCredential) : undefined"
             autocomplete="off"
             spellcheck="false"
             placeholder="Search usernames"
@@ -10052,7 +10091,7 @@ onBeforeUnmount(() => {
         <div v-if="filteredActiveCredentials.length" id="credential-picker-results" class="credential-picker-results" role="listbox" aria-label="Saved accounts for this website">
           <button
             v-for="(credential, index) in filteredActiveCredentials"
-            :id="`credential-option-${credential.id}`"
+            :id="credentialOptionId(credential)"
             :key="credential.id"
             class="credential-picker-item"
             :class="{ selected: index === credentialPickerSelection }"

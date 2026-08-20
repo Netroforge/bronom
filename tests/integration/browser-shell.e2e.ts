@@ -929,8 +929,19 @@ test('suggests local tabs, bookmarks, and history from the address bar', async (
     await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.find((tab) => tab.active)?.title)')).toBe('Suggestion bookmark')
     await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')).toBe(directNavigationTabId)
 
+    await appWindow.evaluate(`Promise.all(Array.from({ length: 10 }, (_value, index) => (
+      window.bronomBookmarks.add('https://overflow-' + index + '.example/', 'Overflow suggestion ' + index)
+    )))`)
+    await address.fill('@bookmarks Overflow suggestion')
+    await expect(listbox.getByRole('option')).toHaveCount(8)
+    await expect.poll(() => popup.evaluate((element) => element.scrollTop)).toBe(0)
+    for (let index = 0; index < 8; index += 1) await address.press('ArrowDown')
+    await expect(listbox.getByRole('option').nth(7)).toHaveAttribute('aria-selected', 'true')
+    await expect.poll(() => popup.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+    await address.press('Escape')
+
     await appWindow.evaluate('window.bronom.newTab({ active: true })')
-    await address.fill('@bookmarks')
+    await address.fill('@bookmarks Suggestion bookmark')
     await expect(listbox.getByRole('option')).toHaveCount(1)
     await expect(listbox).toContainText('Suggestion bookmark')
     await address.press('ArrowDown')
