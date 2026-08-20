@@ -141,8 +141,12 @@ if (process.env.BRONOM_USER_DATA_DIR) {
 
 let mainWindow: BrowserWindow | null = null
 let panelWindow: BrowserWindow | null = null
-let addressSuggestionView: WebContentsView | null = null
-let addressSuggestionViewLoad: Promise<WebContentsView> | null = null
+interface AddressSuggestionSurface {
+  view: WebContentsView
+  webContents: WebContents
+}
+let addressSuggestionSurface: AddressSuggestionSurface | null = null
+let addressSuggestionSurfaceLoad: Promise<AddressSuggestionSurface> | null = null
 let addressSuggestionOverlayGeneration = 0
 let addressSuggestionOverlayBounds: { x: number; y: number; width: number; maxHeight: number } | null = null
 let addressSuggestionOverlayVisible = false
@@ -862,8 +866,8 @@ function applyInterfaceScale(scale: AppSettings['interfaceScale']): void {
       window.webContents.setZoomFactor(scale)
     }
   }
-  if (addressSuggestionView && !addressSuggestionView.webContents.isDestroyed()) {
-    addressSuggestionView.webContents.setZoomFactor(scale)
+  if (addressSuggestionSurface && !addressSuggestionSurface.webContents.isDestroyed()) {
+    addressSuggestionSurface.webContents.setZoomFactor(scale)
   }
 }
 
@@ -1248,8 +1252,8 @@ function trustedAddressOverlayUrl(): string {
 function assertAddressOverlaySender(event: Electron.IpcMainEvent): void {
   const actual = event.senderFrame?.url
   if (
-    !addressSuggestionView
-    || event.sender !== addressSuggestionView.webContents
+    !addressSuggestionSurface
+    || event.sender !== addressSuggestionSurface.webContents
     || !trustedUrlMatches(actual, trustedAddressOverlayUrl())
   ) {
     throw new Error('Rejected IPC from a non-address-overlay renderer')
@@ -1320,17 +1324,17 @@ function validatedAddressOverlayRequest(value: unknown): AddressSuggestionOverla
 function hideAddressSuggestionOverlay(): void {
   addressSuggestionOverlayVisible = false
   addressSuggestionOverlayBounds = null
-  const view = addressSuggestionView
+  const surface = addressSuggestionSurface
   const window = mainWindow
-  if (!view) return
-  view.setVisible(false)
-  if (window && !window.isDestroyed()) window.contentView.removeChildView(view)
+  if (!surface || surface.webContents.isDestroyed()) return
+  surface.view.setVisible(false)
+  if (window && !window.isDestroyed()) window.contentView.removeChildView(surface.view)
 }
 
-async function ensureAddressSuggestionView(): Promise<WebContentsView> {
-  if (addressSuggestionView && !addressSuggestionView.webContents.isDestroyed()) return addressSuggestionView
-  if (addressSuggestionViewLoad) return addressSuggestionViewLoad
-  addressSuggestionViewLoad = (async () => {
+async function ensureAddressSuggestionView(): Promise<AddressSuggestionSurface> {
+  if (addressSuggestionSurface && !addressSuggestionSurface.webContents.isDestroyed()) return addressSuggestionSurface
+  if (addressSuggestionSurfaceLoad) return addressSuggestionSurfaceLoad
+  addressSuggestionSurfaceLoad = (async () => {
     const expectedUrl = trustedAddressOverlayUrl()
     const view = new WebContentsView({
       webPreferences: {
@@ -1341,29 +1345,35 @@ async function ensureAddressSuggestionView(): Promise<WebContentsView> {
         backgroundThrottling: false
       }
     })
-    addressSuggestionView = view
+    // Cache WebContents while the native view is intact. Electron can
+    // invalidate WebContentsView.webContents during native teardown, so every
+    // asynchronous lifecycle path must use this stable reference instead of
+    // reading the getter again.
+    const webContents = view.webContents
+    const surface: AddressSuggestionSurface = { view, webContents }
+    addressSuggestionSurface = surface
     view.setBackgroundColor('#00000000')
     view.setVisible(false)
-    view.webContents.setZoomFactor(settings.interfaceScale)
-    view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-    view.webContents.on('will-navigate', (event, url) => {
+    webContents.setZoomFactor(settings.interfaceScale)
+    webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    webContents.on('will-navigate', (event, url) => {
       if (!trustedUrlMatches(url, expectedUrl)) event.preventDefault()
     })
-    view.webContents.on('destroyed', () => {
-      if (addressSuggestionView === view) addressSuggestionView = null
+    webContents.on('destroyed', () => {
+      if (addressSuggestionSurface === surface) addressSuggestionSurface = null
     })
     try {
-      await view.webContents.loadURL(expectedUrl)
-      return view
+      await webContents.loadURL(expectedUrl)
+      return surface
     } catch (error) {
-      if (!view.webContents.isDestroyed()) view.webContents.close()
-      if (addressSuggestionView === view) addressSuggestionView = null
+      if (!webContents.isDestroyed()) webContents.close()
+      if (addressSuggestionSurface === surface) addressSuggestionSurface = null
       throw error
     } finally {
-      addressSuggestionViewLoad = null
+      addressSuggestionSurfaceLoad = null
     }
   })()
-  return addressSuggestionViewLoad
+  return addressSuggestionSurfaceLoad
 }
 
 function isDetachablePanelId(value: unknown): value is DetachablePanelId {
@@ -1560,19 +1570,19 @@ function registerIpc(): void {
       selectedIndex: request.selectedIndex,
       theme: request.theme
     }
-    void ensureAddressSuggestionView().then((view) => {
+    void ensureAddressSuggestionView().then(({ view, webContents }) => {
       if (
         generation !== addressSuggestionOverlayGeneration
         || !mainWindow
         || mainWindow.isDestroyed()
-        || view.webContents.isDestroyed()
+        || webContents.isDestroyed()
       ) return
       addressSuggestionOverlayVisible = true
       addressSuggestionOverlayBounds = bounds
       view.setBounds({ x: bounds.x, y: bounds.y, width: bounds.width, height: 1 })
       view.setVisible(false)
       mainWindow.contentView.addChildView(view)
-      view.webContents.send('address-overlay:state', state)
+      webContents.send('address-overlay:state', state)
     }).catch((error) => console.error('[address-overlay] Failed to show suggestions:', error))
   })
   ipcMain.on('address-overlay:hide', (event) => {
@@ -1585,7 +1595,7 @@ function registerIpc(): void {
     if (
       !addressSuggestionOverlayVisible
       || !addressSuggestionOverlayBounds
-      || !addressSuggestionView
+      || !addressSuggestionSurface
       || !mainWindow
       || mainWindow.isDestroyed()
       || typeof value !== 'number'
@@ -1596,16 +1606,16 @@ function registerIpc(): void {
       addressSuggestionOverlayBounds.maxHeight,
       scaleShellMetric(value, event.sender.getZoomFactor())
     )
-    addressSuggestionView.setBounds({
+    addressSuggestionSurface.view.setBounds({
       x: addressSuggestionOverlayBounds.x,
       y: addressSuggestionOverlayBounds.y,
       width: addressSuggestionOverlayBounds.width,
       height: Math.max(1, height)
     })
-    addressSuggestionView.setVisible(true)
+    addressSuggestionSurface.view.setVisible(true)
     // Re-adding an existing child explicitly makes the overlay the topmost
     // native view, including after a website tab was selected meanwhile.
-    mainWindow.contentView.addChildView(addressSuggestionView)
+    mainWindow.contentView.addChildView(addressSuggestionSurface.view)
   })
   ipcMain.on('address-overlay:select', (event, value: unknown) => {
     assertAddressOverlaySender(event)
@@ -2785,11 +2795,11 @@ async function createWindow(): Promise<void> {
   })
   mainWindow.on('closed', () => {
     if (panelWindow && !panelWindow.isDestroyed()) panelWindow.close()
-    if (addressSuggestionView && !addressSuggestionView.webContents.isDestroyed()) {
-      addressSuggestionView.webContents.close()
+    if (addressSuggestionSurface && !addressSuggestionSurface.webContents.isDestroyed()) {
+      addressSuggestionSurface.webContents.close()
     }
-    addressSuggestionView = null
-    addressSuggestionViewLoad = null
+    addressSuggestionSurface = null
+    addressSuggestionSurfaceLoad = null
     addressSuggestionOverlayBounds = null
     addressSuggestionOverlayVisible = false
     mainWindow = null

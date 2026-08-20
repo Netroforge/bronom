@@ -6,6 +6,7 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ### Fixed
 
+- Keep a stable renderer reference for the native address-suggestion overlay so an independently destroyed overlay can be recreated without touching an invalid Electron child view.
 - Catch address-bar navigation rejections and surface them as top-level application toasts while retaining the recoverable site-error bar.
 - Mark independently destroyed page renderers as unavailable and immediately activate another live tab, or create a safe Default tab when no live renderer remains.
 - Record a committed website as soon as its main document is ready so it appears in recent address suggestions even while slow page resources are still loading.

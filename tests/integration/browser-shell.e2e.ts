@@ -957,6 +957,7 @@ test('floats bookmark and history suggestions above pages while allowing duplica
       BrowserWindow.getAllWindows()[0]?.contentView.children[0]?.getBounds().y
     ))
     const addressOverlay = (): Promise<{
+      id?: number
       attached: boolean
       topmost: boolean
       visible: boolean
@@ -972,6 +973,7 @@ test('floats bookmark and history suggestions above pages while allowing duplica
         : -1
       const view = index >= 0 ? children[index] : undefined
       return {
+        ...(contents ? { id: contents.id } : {}),
         attached: index >= 0,
         topmost: index >= 0 && index === children.length - 1,
         visible: view?.getVisible() ?? false,
@@ -1011,6 +1013,18 @@ test('floats bookmark and history suggestions above pages while allowing duplica
       optionCount: 2,
       text: expect.stringContaining('Local only')
     })
+    const originalOverlayId = (await addressOverlay()).id
+    expect(originalOverlayId).toBeDefined()
+    await electronApp.evaluate(({ webContents }, contentsId) => {
+      const contents = webContents.fromId(contentsId)
+      if (!contents) throw new Error('Address suggestion overlay was not found for teardown')
+      contents.close()
+    }, originalOverlayId!)
+    await expect.poll(addressOverlay).toMatchObject({ attached: false, visible: false })
+    await address.fill('')
+    await address.fill('Suggestion')
+    await expect.poll(addressOverlay).toMatchObject({ attached: true, topmost: true, visible: true, optionCount: 2 })
+    expect((await addressOverlay()).id).not.toBe(originalOverlayId)
     await appWindow.waitForTimeout(100)
     const browserViewYWithoutPopup = await browserViewY()
     expect(browserViewYWithoutPopup).toBeDefined()
@@ -1108,7 +1122,7 @@ test('floats bookmark and history suggestions above pages while allowing duplica
   }
 })
 
-test('suggests a committed address before every page resource finishes loading', async ({ appWindow }) => {
+test('suggests a committed address before every page resource finishes loading', async ({ appWindow, electronApp }) => {
   let finishPendingResource: (() => void) | undefined
   const server = createServer((request, response) => {
     if (request.url === '/pending-resource') {
@@ -1144,6 +1158,19 @@ test('suggests a committed address before every page resource finishes loading',
     const options = appWindow.locator('#address-suggestions [role="option"]')
     await expect(options).toHaveCount(1)
     await expect(options.first()).toContainText('Committed history')
+
+    expect(await appWindow.evaluate(`window.bronomHistory.list().then((entries) => entries.find((entry) => entry.url === ${JSON.stringify(historyUrl)})?.visitCount)`)).toBe(1)
+    await electronApp.evaluate(({ webContents }, url) => {
+      const page = webContents.getAllWebContents().find((contents) => contents.getURL() === url)
+      if (!page) throw new Error('Committed-history page was not found')
+      page.emit('did-stop-loading')
+    }, historyUrl)
+    await expect.poll(() => appWindow.evaluate(`window.bronomHistory.list().then((entries) => entries.find((entry) => entry.url === ${JSON.stringify(historyUrl)})?.visitCount)`)).toBe(1)
+
+    finishPendingResource?.()
+    finishPendingResource = undefined
+    await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.find((tab) => tab.title === "Committed history")?.loading)')).toBe(false)
+    await expect.poll(() => appWindow.evaluate(`window.bronomHistory.list().then((entries) => entries.find((entry) => entry.url === ${JSON.stringify(historyUrl)})?.visitCount)`)).toBe(1)
   } finally {
     finishPendingResource?.()
     await new Promise<void>((resolve) => server.close(() => resolve()))
