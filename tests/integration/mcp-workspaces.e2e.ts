@@ -112,12 +112,27 @@ test('requires visible workspaces and keeps each tool inside its selected worksp
   try {
     const availableTools = await first.listTools()
     const groupsTool = availableTools.tools.find((tool) => tool.name === 'browser_workspaces')
+    expect(groupsTool?.description).toContain('storage=scratch (the default) for clean isolated site storage')
+    expect(groupsTool?.description).toContain('storage=fork-default to make a one-time copy')
+    expect(groupsTool?.description).toContain('use action=save-default only if the resulting site state should be merged back into Default')
+    expect(groupsTool?.description).toContain('not ongoing synchronization')
+    expect(groupsTool?.description).toContain("MCP deliberately does not expose Default's origin inventory")
+    expect(groupsTool?.description).toContain('Use list-origins to review your own workspace before a selective save-default')
     expect(groupsTool?.description).toContain('Use only the id returned by your own create call, or the fresh id returned when you reopen your own archive')
     expect(groupsTool?.description).toContain('never touch the human Default workspace')
     expect(groupsTool?.inputSchema).toMatchObject({
       properties: {
-        storage: { enum: ['scratch', 'fork-default'] },
-        origins: { type: 'array' }
+        action: {
+          description: expect.stringContaining("list-origins lists only your workspace and never reveals Default's origin inventory")
+        },
+        storage: {
+          enum: ['scratch', 'fork-default'],
+          description: expect.stringContaining('scratch (default) starts with clean isolated site storage')
+        },
+        origins: {
+          type: 'array',
+          description: expect.stringContaining("Default's origin list is private")
+        }
       }
     })
     const initialWorkspaces = await first.callTool({ name: 'browser_workspaces', arguments: { action: 'list' } }) as CallToolResult
@@ -132,6 +147,12 @@ test('requires visible workspaces and keeps each tool inside its selected worksp
     }) as CallToolResult
     expect(defaultStatus.isError).toBe(true)
     expect(text(defaultStatus)).toContain('Default workspace is not available through MCP')
+    const defaultOrigins = await first.callTool({
+      name: 'browser_workspaces',
+      arguments: { action: 'list-origins', workspaceId: defaultWorkspaceId }
+    }) as CallToolResult
+    expect(defaultOrigins.isError).toBe(true)
+    expect(text(defaultOrigins)).toContain('Default workspace is not available through MCP')
     const defaultRename = await first.callTool({
       name: 'browser_workspaces',
       arguments: { action: 'rename', workspaceId: defaultWorkspaceId, name: 'Agent profile' }

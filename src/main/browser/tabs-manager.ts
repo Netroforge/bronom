@@ -6964,10 +6964,12 @@ export class BrowserTabsManager {
   private async waitForPresentation(webContents: BrowserTab['view']['webContents']): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       let finished = false
+      let invalidateTimer: NodeJS.Timeout | undefined
       const finish = (error?: Error): void => {
         if (finished) return
         finished = true
         clearTimeout(timer)
+        if (invalidateTimer) clearInterval(invalidateTimer)
         try {
           webContents.endFrameSubscription()
         } catch {
@@ -6983,7 +6985,23 @@ export class BrowserTabsManager {
       const timer = setTimeout(() => finish(new Error('Timed out waiting for the tab to become renderable')), 5_000)
       try {
         webContents.beginFrameSubscription(false, () => finish())
-        webContents.invalidate()
+        const invalidate = (): void => {
+          if (webContents.isDestroyed()) {
+            finish(new Error('The tab closed while waiting for a renderable frame'))
+            return
+          }
+          try {
+            webContents.invalidate()
+          } catch (error) {
+            finish(error instanceof Error ? error : new Error(String(error)))
+          }
+        }
+        // A newly shown offscreen host can occasionally miss Chromium's first
+        // invalidation while the compositor is busy. Retry within the existing
+        // bounded wait instead of turning transient suite load into a false timeout.
+        invalidateTimer = setInterval(invalidate, 250)
+        invalidateTimer.unref()
+        invalidate()
       } catch (error) {
         finish(error instanceof Error ? error : new Error(String(error)))
       }

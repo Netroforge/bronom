@@ -4,6 +4,19 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-08-22
+
+### Changed
+
+- Explain directly in the MCP workspace tool and schema how agents create clean workspaces, make one-time forks from Default, review their own origins, and optionally merge selected site state back without treating either copy as synchronization or exposing Default's origin inventory.
+- Split workspace creation, editing, profile transfer, and permanent-close behavior out of the application shell into a focused component and lifecycle-aware controller while retaining the authoritative browser-store synchronization path.
+
+### Fixed
+
+- Read Site controls cookie counts from the active tab's Default or isolated profile, ignore delayed results after a tab or workspace change, and send isolated workspaces to their own loaded Site storage view instead of Default privacy controls.
+- Ignore delayed workspace-origin inventories after the transfer direction changes or the editor closes, preventing an older Default list from replacing the selected workspace's sites.
+- Retry hidden Chromium frame invalidation within the existing bounded render wait so screenshots and PDF exports do not fail when a busy compositor misses the first request.
+
 ## [1.7.0] - 2026-08-21
 
 ### Added

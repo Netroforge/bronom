@@ -101,6 +101,15 @@ test('captures hidden pages and survives tab teardown during offscreen rendering
     const status = await client.callTool({ name: 'browser_status', arguments: {} }) as CallToolResult
     const tabId = JSON.parse(text(status)).activeTabId as string
 
+    await electronApp.evaluate(({ webContents }) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === 'about:blank')
+      if (!contents) throw new Error('Hidden screenshot tab was not found')
+      const originalInvalidate = contents.invalidate.bind(contents)
+      contents.invalidate = () => {
+        contents.invalidate = originalInvalidate
+      }
+    })
+
     await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close())
     await expect.poll(() => electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible())).toBe(false)
 

@@ -184,6 +184,53 @@ test('isolates workspace profiles and explicitly forks or saves data through Def
     expect(forkData.cookies).toContain('path-cookie=default-private')
     expect(requestCookies.get('/inspect-fork')).toContain('workspace-cookie=default')
 
+    const directionState = await appWindow.evaluate(`window.bronom.createWorkspace({ name: 'Direction source', storage: 'scratch' })`) as {
+      activeTabId: string
+      mcpTabGroups: Array<{ id: string; name: string }>
+    }
+    const directionWorkspace = directionState.mcpTabGroups.find((workspace) => workspace.name === 'Direction source')!
+    const directionUrl = `${origin}/direction-source`
+    await appWindow.evaluate(`window.bronom.navigate({ tabId: ${JSON.stringify(directionState.activeTabId)}, url: ${JSON.stringify(directionUrl)} })`)
+    await expect.poll(() => appWindow.evaluate(`window.bronom.listWorkspaceStorageOrigins(${JSON.stringify(directionWorkspace.id)})`)).toEqual([origin])
+    await electronApp.evaluate(async ({ webContents }, url) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === url)
+      if (!contents) throw new Error('Direction workspace page was not found')
+      await contents.executeJavaScript("localStorage.setItem('direction-only', 'isolated')")
+      await contents.session.cookies.set({ url, name: 'direction-only', value: 'isolated', path: '/' })
+    }, directionUrl)
+    await appWindow.getByRole('button', { name: 'Site controls for 127.0.0.1' }).click()
+    const directionSiteControls = appWindow.getByRole('dialog', { name: '127.0.0.1' })
+    await expect(directionSiteControls.getByLabel('1 cookie available to this address')).toBeVisible()
+    await directionSiteControls.getByRole('button', { name: 'Site storage' }).click()
+    const directionStorage = appWindow.getByRole('dialog', { name: 'Site storage · 127.0.0.1' })
+    await expect(directionStorage).toBeVisible()
+    await expect(directionStorage.getByText('direction-only', { exact: true })).toBeVisible()
+    await directionStorage.getByRole('button', { name: 'Close site storage' }).click()
+    await electronApp.evaluate(({ Menu }) => {
+      ;(globalThis as typeof globalThis & { __workspaceStorageMenu?: Electron.Menu }).__workspaceStorageMenu = undefined
+      Menu.prototype.popup = function (): void {
+        ;(globalThis as typeof globalThis & { __workspaceStorageMenu?: Electron.Menu }).__workspaceStorageMenu = this
+      }
+    })
+    await appWindow.locator('.tab.active').click({ button: 'right' })
+    await expect.poll(() => electronApp.evaluate(() => Boolean(
+      (globalThis as typeof globalThis & { __workspaceStorageMenu?: Electron.Menu })
+        .__workspaceStorageMenu?.getMenuItemById('edit-workspace')
+    ))).toBe(true)
+    await electronApp.evaluate(() => {
+      const menu = (globalThis as typeof globalThis & { __workspaceStorageMenu?: Electron.Menu }).__workspaceStorageMenu
+      const item = menu?.getMenuItemById('edit-workspace')
+      if (!item?.click) throw new Error('Edit Workspace context action was not found')
+      ;(item.click as unknown as () => void)()
+    })
+    const transferEditor = appWindow.getByRole('dialog', { name: 'Edit workspace' })
+    await expect(transferEditor.getByText(secondaryOrigin, { exact: true })).toBeVisible()
+    await transferEditor.getByRole('radio', { name: 'Save to Default' }).click()
+    await expect(transferEditor.getByText(secondaryOrigin, { exact: true })).toBeHidden()
+    await expect(transferEditor.getByText(origin, { exact: true })).toBeVisible()
+    await transferEditor.getByRole('button', { name: 'Cancel' }).click()
+    await appWindow.evaluate(`window.bronom.closeWorkspace(${JSON.stringify(directionWorkspace.id)})`)
+
     await electronApp.evaluate(async ({ webContents }, url) => {
       const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === url)
       if (!contents) throw new Error('Forked workspace page was not found for rollback setup')

@@ -243,7 +243,7 @@ const historyApi: BronomHistoryApi = {
 contextBridge.exposeInMainWorld('bronomHistory', historyApi)
 const browsingDataApi: BronomBrowsingDataApi = {
   summary: () => ipcRenderer.invoke('browsing-data:summary'),
-  siteSummary: (url: string) => ipcRenderer.invoke('browsing-data:site-summary', url),
+  siteSummary: (url: string, tabId?: string) => ipcRenderer.invoke('browsing-data:site-summary', url, tabId),
   websites: () => ipcRenderer.invoke('browsing-data:websites'),
   clear: (options: BrowsingDataClearOptions) => ipcRenderer.invoke('browsing-data:clear', options)
 }

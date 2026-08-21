@@ -2160,10 +2160,15 @@ function registerIpc(): void {
     assertTrustedShellSender(event)
     return currentBrowsingDataSummary()
   })
-  ipcMain.handle('browsing-data:site-summary', (event, url: unknown) => {
+  ipcMain.handle('browsing-data:site-summary', (event, url: unknown, tabId: unknown) => {
     assertTrustedShellSender(event)
     if (typeof url !== 'string') throw new TypeError('Invalid website')
-    return currentBrowsingDataSiteSummary(url)
+    if (tabId !== undefined && typeof tabId !== 'string') throw new TypeError('Invalid tab ID')
+    if (typeof tabId !== 'string') return currentBrowsingDataSiteSummary(url)
+    const tab = tabsManager?.getState().tabs.find((candidate) => candidate.id === tabId)
+    if (!tab) throw new Error(`Tab not found: ${tabId}`)
+    const browserSession = tab.mcpGroupId ? tabsManager?.workspaceSession(tab.mcpGroupId) : persistentSession ?? undefined
+    return currentBrowsingDataSiteSummary(url, browserSession)
   })
   ipcMain.handle('browsing-data:websites', (event) => {
     assertTrustedShellSender(event)
