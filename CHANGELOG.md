@@ -4,6 +4,8 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ## [Unreleased]
 
+## [1.6.8] - 2026-08-21
+
 ### Fixed
 
 - Wait for Chromium to flush Default plus every active and archived isolated workspace profile before exiting, preventing an updater restart or normal shutdown from cutting off cookies, local storage, and other profile writes in flight.
