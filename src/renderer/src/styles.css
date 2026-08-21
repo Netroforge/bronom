@@ -946,36 +946,14 @@ button { color: inherit; }
 .interaction-lock-button.locked { color: #9a5b00; background: color-mix(in srgb, #e49a32 18%, var(--surface-muted)); }
 :root:not([data-theme="light"]) .interaction-lock-button.locked { color: #ffc56e; }
 .interaction-lock-button:disabled { opacity: 0.52; cursor: default; }
-.shell.all-human-interaction-locked .app-home-button,
-.shell.all-human-interaction-locked .tabs-strip > :not(.tab),
-.shell.all-human-interaction-locked .topbar-actions > :not(.all-lock-button),
-.shell.all-human-interaction-locked .toolbar > *,
-.shell.all-human-interaction-locked .page-problem-bar > *,
-.shell.all-human-interaction-locked .find-bar > *,
-.shell.all-human-interaction-locked .zoom-bar > *,
-.shell.all-human-interaction-locked .tab-search-panel > *,
-.shell.all-human-interaction-locked .downloads-panel > *,
-.shell.all-human-interaction-locked .bookmarks-panel > *,
-.shell.all-human-interaction-locked .history-panel > *,
-.shell.all-human-interaction-locked .site-storage-panel > *,
-.shell.all-human-interaction-locked .page-tools-panel > *,
-.shell.all-human-interaction-locked .accessibility-panel > * {
-  opacity: 0.42;
-  filter: saturate(0.55);
-}
-.shell.all-human-interaction-locked .performance-panel > * {
-  pointer-events: none;
-  opacity: .55;
-}
-.shell.all-human-interaction-locked .design-overview-panel > * { pointer-events: none; }
-.shell.all-human-interaction-locked .page-metadata-panel > * { pointer-events: none; }
-.shell.all-human-interaction-locked .security-panel > * { pointer-events: none; }
-.shell.all-human-interaction-locked .coverage-panel > * { pointer-events: none; }
-.shell.all-human-interaction-locked .memory-panel > * { pointer-events: none; }
-.shell.all-human-interaction-locked .console-panel > * { pointer-events: none; }
-.shell.all-human-interaction-locked .environment-panel > * { pointer-events: none; }
 .shell.all-human-interaction-locked .all-lock-button {
   box-shadow: 0 0 0 3px color-mix(in srgb, #e49a32 14%, transparent);
+}
+.shell.all-human-interaction-locked .tab-close,
+.shell.all-human-interaction-locked .tab-search-close:disabled,
+.shell.all-human-interaction-locked [data-lock-protected-tab-close]:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
 }
 
 .page-problem-bar {

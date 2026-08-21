@@ -1344,8 +1344,8 @@ const tabInteractionLockLabel = computed(() => {
 })
 const allInteractionLockLabel = computed(() => (
   state.value.allHumanInteractionLocked
-    ? 'Allow human interaction in Bronom'
-    : 'Block human interaction in Bronom'
+    ? 'Allow human interaction in all tabs'
+    : 'Block human interaction in all tabs'
 ))
 const pdfExportLabel = computed(() => {
   if (pdfExportState.value === 'saving') return 'Saving page as PDF'
@@ -2052,6 +2052,10 @@ async function transferWorkspaceStorage(): Promise<void> {
 async function closeEditedWorkspace(): Promise<void> {
   const workspace = state.value.mcpTabGroups.find((candidate) => candidate.id === tabGroupEditorId.value)
   if (!workspace || workspace.isDefault) return
+  if (state.value.allHumanInteractionLocked) {
+    tabGroupEditorError.value = 'Unlock all tabs before closing a workspace.'
+    return
+  }
   if (!window.confirm(`Close workspace "${workspace.name}"? Its tabs, cookies, local storage, cache, and other private browser data will be permanently deleted.`)) return
   try {
     await syncState(browser.closeWorkspace(workspace.id))
@@ -2328,6 +2332,7 @@ async function selectSearchTab(tab: BrowserTabState): Promise<void> {
 
 async function closeSearchTab(event: MouseEvent, tabId: string): Promise<void> {
   event.stopPropagation()
+  if (state.value.allHumanInteractionLocked) return
   await syncState(browser.closeTab(tabId))
   tabSearchSelection.value = Math.min(tabSearchSelection.value, Math.max(0, tabSearchResults.value.length - 1))
   await nextTick()
@@ -3493,11 +3498,7 @@ async function selectRelativeTab(offset: -1 | 1): Promise<void> {
 }
 
 async function runBrowserShortcut(action: BrowserShortcutAction): Promise<void> {
-  if (
-    state.value.allHumanInteractionLocked
-    && action !== 'next-tab'
-    && action !== 'previous-tab'
-  ) return
+  if (state.value.allHumanInteractionLocked && action === 'close-tab') return
   switch (action) {
     case 'focus-address': return focusAddress()
     case 'find': return openFind()
@@ -3692,6 +3693,7 @@ async function saveActivePdf(): Promise<void> {
 
 async function closeTab(event: MouseEvent, tabId: string): Promise<void> {
   event.stopPropagation()
+  if (state.value.allHumanInteractionLocked) return
   await syncState(browser.closeTab(tabId))
 }
 
@@ -5843,21 +5845,12 @@ async function resetCurrentSection(): Promise<void> {
   await applySettingsChange(window.bronomSettings.setCheckForUpdatesOnStartup(true))
 }
 
-function isTabActivationTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element) || target.closest('button.tab') === null) return false
-  return target.closest('.tab-close, .tab-audio') === null
-}
-
-function isAllInteractionLockTarget(event: Event): boolean {
-  if (!(event.target instanceof Element)) return false
-  if (event.target.closest('.all-lock-button') !== null) return true
-  if (!isTabActivationTarget(event.target)) return false
-  if (event.type === 'click' || event.type === 'pointerdown') return true
-  return event instanceof KeyboardEvent && (event.key === 'Enter' || event.key === ' ')
-}
-
 function guardShellInteraction(event: Event): void {
-  if (!state.value.allHumanInteractionLocked || isAllInteractionLockTarget(event)) return
+  if (
+    !state.value.allHumanInteractionLocked
+    || !(event.target instanceof Element)
+    || event.target.closest('[data-lock-protected-tab-close]') === null
+  ) return
   event.preventDefault()
   event.stopImmediatePropagation()
 }
@@ -5872,9 +5865,7 @@ function handleKeyDown(event: KeyboardEvent): void {
     repeat: event.repeat,
     composing: event.isComposing
   })
-  const lockedTabSwitch = state.value.allHumanInteractionLocked
-    && (shortcut === 'next-tab' || shortcut === 'previous-tab')
-  if (!lockedTabSwitch) guardShellInteraction(event)
+  guardShellInteraction(event)
   if (event.defaultPrevented) return
   if (commandPaletteOpen.value && shortcut !== 'command-palette') {
     if (event.key === 'Escape') commandPaletteOpen.value = false
@@ -6329,7 +6320,7 @@ onBeforeUnmount(() => {
             <IconVolumeOff v-if="tab.muted" aria-hidden="true" />
             <IconVolumeUp v-else aria-hidden="true" />
           </span>
-          <span class="tab-close" role="button" title="Close tab (Ctrl/Cmd+W)" aria-label="Close tab" aria-keyshortcuts="Control+W Meta+W" @click="closeTab($event, tab.id)"><IconClose aria-hidden="true" /></span>
+          <span class="tab-close" role="button" title="Close tab (Ctrl/Cmd+W)" aria-label="Close tab" aria-keyshortcuts="Control+W Meta+W" :aria-disabled="state.allHumanInteractionLocked" data-lock-protected-tab-close @click="closeTab($event, tab.id)"><IconClose aria-hidden="true" /></span>
         </button>
         </template>
         </template>
@@ -6396,7 +6387,7 @@ onBeforeUnmount(() => {
         >
           <IconLock v-if="state.allHumanInteractionLocked" aria-hidden="true" />
           <IconLockOpen v-else aria-hidden="true" />
-          Bronom
+          All tabs
         </button>
         <UpdateNotification
           v-if="showUpdateStatusPill"
@@ -9682,7 +9673,7 @@ onBeforeUnmount(() => {
                 :aria-pressed="tab.pinned"
                 @click="togglePinnedSearchTab($event, tab)"
               ><IconKeep aria-hidden="true" /></button>
-              <button class="tab-search-close" type="button" :aria-label="`Close ${tab.title || 'New tab'}`" title="Close tab" @click="closeSearchTab($event, tab.id)"><IconClose aria-hidden="true" /></button>
+              <button class="tab-search-close" type="button" :aria-label="`Close ${tab.title || 'New tab'}`" title="Close tab" :disabled="state.allHumanInteractionLocked" data-lock-protected-tab-close @click="closeSearchTab($event, tab.id)"><IconClose aria-hidden="true" /></button>
             </article>
           </div>
         </section>
@@ -10213,7 +10204,7 @@ onBeforeUnmount(() => {
           </div>
           <button class="workspace-transfer-button" type="button" :disabled="workspaceStorageState === 'saving' || workspaceStorageState === 'loading' || workspaceStorageState === 'error'" @click="transferWorkspaceStorage"><IconSwapHoriz aria-hidden="true" /> {{ workspaceStorageState === 'saving' ? 'Copying…' : workspaceTransferDirection === 'from-default' ? 'Import selected data' : 'Save selected data to Default' }}</button>
           <output v-if="workspaceStorageMessage" :class="{ error: workspaceStorageState === 'error' }" role="status">{{ workspaceStorageMessage }}</output>
-          <div class="workspace-danger-zone"><div><strong>Close workspace permanently</strong><span>Closes its tabs and deletes its isolated browser data.</span></div><button type="button" @click="closeEditedWorkspace">Close workspace</button></div>
+          <div class="workspace-danger-zone"><div><strong>Close workspace permanently</strong><span>Closes its tabs and deletes its isolated browser data.</span></div><button type="button" :disabled="state.allHumanInteractionLocked" :title="state.allHumanInteractionLocked ? 'Unlock all tabs before closing a workspace' : undefined" data-lock-protected-tab-close @click="closeEditedWorkspace">Close workspace</button></div>
         </section>
         <output v-if="tabGroupEditorError" class="workspace-editor-error" role="alert">{{ tabGroupEditorError }}</output>
         </div>

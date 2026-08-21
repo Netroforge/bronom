@@ -2239,7 +2239,7 @@ export class BrowserTabsManager {
             {
               id: 'archive-workspace',
               label: 'Archive Workspace',
-              enabled: currentGroup.id !== this.defaultHumanGroupId,
+              enabled: currentGroup.id !== this.defaultHumanGroupId && !this.allHumanInteractionLocked,
               click: () => { void this.saveAndCloseTabGroup(currentGroup.id).catch(reportError('archive the workspace')) }
             }
           ]
@@ -2353,24 +2353,25 @@ export class BrowserTabsManager {
       {
         id: 'close-tab',
         label: 'Close Tab',
+        enabled: !this.allHumanInteractionLocked,
         click: () => { void this.closeTab(tab.id).catch(reportError('close the tab')) }
       },
       {
         id: 'close-other-tabs',
         label: 'Close Other Tabs',
-        enabled: otherTabs.length > 0,
+        enabled: !this.allHumanInteractionLocked && otherTabs.length > 0,
         click: () => { void this.closeTabs(otherTabs.map((candidate) => candidate.id)).catch(reportError('close other tabs')) }
       },
       {
         id: 'close-tabs-to-right',
         label: 'Close Tabs to the Right',
-        enabled: tabsToRight.length > 0,
+        enabled: !this.allHumanInteractionLocked && tabsToRight.length > 0,
         click: () => { void this.closeTabs(tabsToRight.map((candidate) => candidate.id)).catch(reportError('close tabs to the right')) }
       },
       {
         id: 'close-duplicate-tabs',
         label: 'Close Duplicate Tabs',
-        enabled: duplicateTabs.length > 0,
+        enabled: !this.allHumanInteractionLocked && duplicateTabs.length > 0,
         click: () => { void this.closeTabs(duplicateTabs.map((candidate) => candidate.id)).catch(reportError('close duplicate tabs')) }
       },
       { type: 'separator' },
@@ -5519,10 +5520,6 @@ export class BrowserTabsManager {
         else if (shortcut === 'pick-element') void this.cancelElementPicker(tab.id).catch(() => undefined)
         return
       }
-      if (this.shouldBlockHumanKeyboardInput(tab)) {
-        event.preventDefault()
-        return
-      }
       const shortcut = input.type === 'keyDown' ? browserShortcutAction({
         key: input.key,
         control: input.control,
@@ -5532,6 +5529,14 @@ export class BrowserTabsManager {
         repeat: input.isAutoRepeat,
         composing: input.isComposing
       }) : null
+      if (this.shouldBlockHumanKeyboardInput(tab)) {
+        event.preventDefault()
+        if (this.allHumanInteractionLocked && shortcut && shortcut !== 'close-tab') {
+          this.options.onUserInteraction?.()
+          this.options.onShortcutRequested?.(shortcut)
+        }
+        return
+      }
       if (shortcut) {
         event.preventDefault()
         this.options.onUserInteraction?.()
