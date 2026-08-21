@@ -383,6 +383,11 @@ contextBridge.exposeInMainWorld('bronomAddressOverlay', {
     const handler = (_event: Electron.IpcRendererEvent, suggestionId: string): void => listener(suggestionId)
     ipcRenderer.on('address-overlay:selected', handler)
     return () => ipcRenderer.removeListener('address-overlay:selected', handler)
+  },
+  onDismissed: (listener: () => void) => {
+    const handler = (): void => listener()
+    ipcRenderer.on('address-overlay:dismissed', handler)
+    return () => ipcRenderer.removeListener('address-overlay:dismissed', handler)
   }
 })
 contextBridge.exposeInMainWorld('bronomShell', {

@@ -4,6 +4,10 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Dismiss address suggestions in both the shell and native overlay when the popup renderer exits unexpectedly, preventing stale work from immediately resurrecting it and keeping later typing able to reopen a fresh popup.
+
 ## [1.6.8] - 2026-08-21
 
 ### Fixed

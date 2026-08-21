@@ -19,6 +19,7 @@ declare global {
       show(request: AddressSuggestionOverlayRequest): void
       hide(): void
       onSelected(listener: (suggestionId: string) => void): () => void
+      onDismissed(listener: () => void): () => void
     }
     bronomShell: {
       setToolbarHeight(height: number): void

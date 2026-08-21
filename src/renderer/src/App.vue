@@ -692,6 +692,7 @@ let unsubscribeClipboardFailed: (() => void) | undefined
 let unsubscribeActionFailed: (() => void) | undefined
 let unsubscribeTabGroupEdit: (() => void) | undefined
 let unsubscribeAddressOverlay: (() => void) | undefined
+let unsubscribeAddressOverlayDismissed: (() => void) | undefined
 let resizeObserver: ResizeObserver | undefined
 let updateNoticeDismissTimer: number | undefined
 let elementPickerResetTimer: number | undefined
@@ -6064,6 +6065,12 @@ onMounted(async () => {
       const suggestion = addressSuggestions.value.find((candidate) => candidate.id === suggestionId)
       if (suggestion) void selectAddressSuggestion(suggestion)
     })
+    unsubscribeAddressOverlayDismissed = window.bronomAddressOverlay.onDismissed(() => {
+      addressSuggestionsOpen.value = false
+      // Always acknowledge the native dismissal, even if another shell action
+      // already closed suggestions and the ref value therefore did not change.
+      window.bronomAddressOverlay.hide()
+    })
   }
   unsubscribeSettings = window.bronomSettings.onChanged(applyTheme)
   unsubscribeSystemTheme = window.bronomSettings.onSystemThemeChanged(handleSystemThemeChange)
@@ -6158,6 +6165,7 @@ onBeforeUnmount(() => {
   unsubscribeActionFailed?.()
   unsubscribeTabGroupEdit?.()
   unsubscribeAddressOverlay?.()
+  unsubscribeAddressOverlayDismissed?.()
   if (!isDetachedPanelWindow) window.bronomAddressOverlay.hide()
   unsubscribePanelRequested?.()
   unsubscribePanelActive?.()

@@ -1014,6 +1014,7 @@ test('floats bookmark and history suggestions above pages while allowing duplica
       if (!contents) throw new Error('Address suggestion overlay was not found for teardown')
       contents.close()
     }, originalOverlayId!)
+    await expect(address).toHaveAttribute('aria-expanded', 'false')
     await expect.poll(addressOverlay).toMatchObject({ attached: false, visible: false })
     await address.fill('')
     await address.fill('Suggestion')

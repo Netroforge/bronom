@@ -151,6 +151,7 @@ let addressSuggestionSurfaceLoad: Promise<AddressSuggestionSurface> | null = nul
 let addressSuggestionOverlayGeneration = 0
 let addressSuggestionOverlayBounds: { x: number; y: number; width: number; maxHeight: number } | null = null
 let addressSuggestionOverlayVisible = false
+let addressSuggestionOverlayDismissalPending = false
 let panelWindowUrl: string | null = null
 let panelWindowRedocking = false
 let tabsManager: BrowserTabsManager | null = null
@@ -1382,8 +1383,12 @@ async function ensureAddressSuggestionView(): Promise<AddressSuggestionSurface> 
     webContents.on('destroyed', () => {
       if (addressSuggestionSurface !== surface) return
       addressSuggestionOverlayGeneration += 1
+      addressSuggestionOverlayDismissalPending = true
       hideAddressSuggestionOverlay()
       addressSuggestionSurface = null
+      if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+        mainWindow.webContents.send('address-overlay:dismissed')
+      }
     })
     try {
       await webContents.loadURL(expectedUrl)
@@ -1580,6 +1585,11 @@ function registerIpc(): void {
   ipcMain.on('address-overlay:show', (event, value: unknown) => {
     assertMainShellSender(event)
     const request = validatedAddressOverlayRequest(value)
+    // When the native renderer exits unexpectedly, ignore any already-queued
+    // show requests until the shell acknowledges the dismissal with hide.
+    // This prevents a stale resize/reactivity update from resurrecting the
+    // dead popup before fresh user input opens a new one.
+    if (addressSuggestionOverlayDismissalPending) return
     const generation = ++addressSuggestionOverlayGeneration
     const scale = event.sender.getZoomFactor()
     const bounds = {
@@ -1610,6 +1620,7 @@ function registerIpc(): void {
   })
   ipcMain.on('address-overlay:hide', (event) => {
     assertMainShellSender(event)
+    addressSuggestionOverlayDismissalPending = false
     addressSuggestionOverlayGeneration += 1
     hideAddressSuggestionOverlay()
   })
@@ -2820,6 +2831,7 @@ async function createWindow(): Promise<void> {
     addressSuggestionSurfaceLoad = null
     addressSuggestionOverlayBounds = null
     addressSuggestionOverlayVisible = false
+    addressSuggestionOverlayDismissalPending = false
     mainWindow = null
   })
   mainWindow.on('focus', acknowledgeUserAttention)
