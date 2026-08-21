@@ -64,4 +64,26 @@ describe('CredentialPicker', () => {
     expect(carolOption).toHaveAttribute('aria-selected', 'true')
     nowSpy.mockRestore()
   })
+
+  it('accepts the first pointer move after opening over recently loaded credentials', async () => {
+    const now = 1_000
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    const view = render(CredentialPicker, {
+      global: { plugins: [createBronomI18n('en-US')] },
+      props: {
+        open: false,
+        credentials: [],
+        origin: 'https://example.test',
+        fillCredential: vi.fn()
+      }
+    })
+
+    await view.rerender({ credentials: [credential('alice', 'Alice'), credential('bob', 'Bob')] })
+    await view.rerender({ open: true })
+    const bobOption = screen.getByRole('option', { name: /Bob/ })
+    await fireEvent.pointerMove(bobOption, { clientX: 40, clientY: 80 })
+
+    expect(bobOption).toHaveAttribute('aria-selected', 'true')
+    nowSpy.mockRestore()
+  })
 })

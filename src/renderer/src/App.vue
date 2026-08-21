@@ -126,6 +126,7 @@ import CommandPalette from './components/CommandPalette.vue'
 import ConsolePanelContainer from './components/ConsolePanelContainer.vue'
 import CredentialPicker from './components/CredentialPicker.vue'
 import DiagnosticsPanels from './components/DiagnosticsPanels.vue'
+import DownloadsPanel from './components/DownloadsPanel.vue'
 import NetworkPanel from './components/NetworkPanel.vue'
 import PanelDockPicker from './components/PanelDockPicker.vue'
 import SiteStoragePanel from './components/SiteStoragePanel.vue'
@@ -216,6 +217,7 @@ const settingsStore = useSettingsStore()
 const { state } = storeToRefs(browserStore)
 const { settings, systemTheme, resolvedLocale } = storeToRefs(settingsStore)
 const browser = window.bronom
+const downloadsApi = window.bronomDownloads
 const activeTab = computed(() => state.value.tabs.find((tab) => tab.id === state.value.activeTabId))
 const detachedPanelParameter = new URLSearchParams(window.location.search).get('bronomPanel')
 const detachedPanelId = isDetachablePanelId(detachedPanelParameter) ? detachedPanelParameter : null
@@ -273,7 +275,6 @@ const pdfExportState = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
 const pdfExport = ref<BrowserPdfExport | null>(null)
 const downloads = ref<BrowserDownloadState[]>([])
 const downloadsOpen = ref(false)
-const downloadActionError = ref('')
 const bookmarks = ref<BrowserBookmark[]>([])
 const bookmarksOpen = ref(false)
 const bookmarkSearch = ref('')
@@ -896,7 +897,6 @@ const activeSitePermissions = computed(() => (
 const activeAddressKind = computed(() => activeWebUrl.value?.startsWith('https:') ? t('runtime.address.https') : t('runtime.address.http'))
 const activeCredentials = computed(() => credentials.value.filter((credential) => credential.origin === activeOrigin.value))
 const activeDownloads = computed(() => downloads.value.filter((download) => download.state === 'progressing'))
-const finishedDownloads = computed(() => downloads.value.filter((download) => download.state !== 'progressing'))
 const effectiveDownloadDirectory = computed(() => settings.value.downloadDirectory || defaultDownloadDirectory.value || t('runtime.storage.systemDownloads'))
 const activeWebUrl = computed(() => {
   try {
@@ -1040,12 +1040,6 @@ const pdfExportLabel = computed(() => {
   return t('runtime.pdf.save')
 })
 
-function downloadProgress(download: BrowserDownloadState): number {
-  if (download.state === 'completed') return 100
-  if (download.totalBytes <= 0) return 0
-  return Math.min(100, Math.max(0, Math.round(download.receivedBytes / download.totalBytes * 100)))
-}
-
 function formatBytes(bytes: number): string {
   return formatLocalizedBytes(resolvedLocale.value, bytes)
 }
@@ -1066,18 +1060,6 @@ function localPercent(percent: number, maximumFractionDigits = 0): string {
   return formatPercent(resolvedLocale.value, percent / 100, { maximumFractionDigits })
 }
 
-function downloadMeta(download: BrowserDownloadState): string {
-  if (download.state === 'progressing') {
-    const received = formatBytes(download.receivedBytes)
-    return download.totalBytes > 0
-      ? `${localPercent(downloadProgress(download))} · ${t('downloads.received', { received, total: formatBytes(download.totalBytes) })}`
-      : t('downloads.downloaded', { received })
-  }
-  if (download.state === 'completed') return t('downloads.complete', { size: formatBytes(download.receivedBytes) })
-  if (download.state === 'cancelled') return t('downloads.cancelled')
-  return t('downloads.interrupted')
-}
-
 function applyDownloads(next: BrowserDownloadState[]): void {
   const hasNewDownload = next.some((download) => !knownDownloadIds.has(download.id))
   downloads.value = next
@@ -1090,7 +1072,6 @@ async function toggleDownloads(): Promise<void> {
   bookmarksOpen.value = false
   historyOpen.value = false
   tabSearchOpen.value = false
-  downloadActionError.value = ''
   if (!downloadsOpen.value) downloads.value = await window.bronomDownloads.list()
   downloadsOpen.value = !downloadsOpen.value
 }
@@ -1718,29 +1699,6 @@ async function resetEnvironment(): Promise<void> {
   environmentDraft.value = browserEnvironmentFromEmulation()
   environmentLocationEnabled.value = false
   await applyEnvironment(false)
-}
-
-async function cancelDownload(downloadId: string): Promise<void> {
-  downloadActionError.value = ''
-  try {
-    downloads.value = await window.bronomDownloads.cancel(downloadId)
-  } catch (error) {
-    downloadActionError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function clearFinishedDownloads(): Promise<void> {
-  downloadActionError.value = ''
-  downloads.value = await window.bronomDownloads.clearFinished()
-}
-
-async function showDownloadInFolder(downloadId: string): Promise<void> {
-  downloadActionError.value = ''
-  try {
-    await window.bronomDownloads.showInFolder(downloadId)
-  } catch (error) {
-    downloadActionError.value = error instanceof Error ? error.message : String(error)
-  }
 }
 
 watch(settingsOpen, async () => {
@@ -5062,42 +5020,15 @@ onBeforeUnmount(() => {
       <button class="zoom-reset" type="button" :disabled="(activeTab?.zoomPercent ?? 100) === 100" @click="setActiveZoom('reset')">{{ t('zoom.reset') }}</button>
       <button type="button" :title="t('zoom.closeTitle')" :aria-label="t('zoom.close')" @click="zoomOpen = false"><IconClose aria-hidden="true" /></button>
     </div>
-    <section v-if="downloadsOpen" class="downloads-panel" data-shell-side-panel role="dialog" aria-modal="false" aria-labelledby="downloads-title">
-      <header>
-        <div>
-          <span class="eyebrow">{{ t('downloads.kicker') }}</span>
-          <h2 id="downloads-title">{{ t('downloads.heading') }}</h2>
-        </div>
-        <div class="downloads-header-actions">
-          <button type="button" :disabled="!finishedDownloads.length" @click="clearFinishedDownloads">{{ t('downloads.clearFinished') }}</button>
-          <button class="panel-close" type="button" :aria-label="t('downloads.close')" @click="downloadsOpen = false"><IconClose aria-hidden="true" /></button>
-        </div>
-      </header>
-      <div v-if="!downloads.length" class="downloads-empty">
-        <IconDownload aria-hidden="true" />
-        <strong>{{ t('downloads.empty') }}</strong>
-        <span>{{ t('downloads.emptyDescription') }}</span>
-      </div>
-      <div v-else class="downloads-list">
-        <article v-for="download in downloads" :key="download.id" class="download-item" :class="download.state">
-          <span class="download-state-icon" aria-hidden="true">
-            <IconProgress v-if="download.state === 'progressing'" class="state-spinner" />
-            <IconDownloadDone v-else-if="download.state === 'completed'" />
-            <IconWarning v-else />
-          </span>
-          <div class="download-copy">
-            <strong :title="download.filename">{{ download.filename }}</strong>
-            <span>{{ downloadMeta(download) }}</span>
-            <div v-if="download.state === 'progressing'" class="download-progress" role="progressbar" :aria-label="t('downloads.downloading', { filename: download.filename })" :aria-valuenow="download.totalBytes > 0 ? downloadProgress(download) : undefined" aria-valuemin="0" aria-valuemax="100">
-              <span :class="{ indeterminate: download.totalBytes <= 0 }" :style="download.totalBytes > 0 ? { width: `${downloadProgress(download)}%` } : undefined" />
-            </div>
-          </div>
-          <button v-if="download.state === 'progressing'" class="download-action" type="button" :aria-label="t('downloads.cancelAria', { filename: download.filename })" :title="t('downloads.cancel')" @click="cancelDownload(download.id)"><IconClose aria-hidden="true" /></button>
-          <button v-else-if="download.state === 'completed'" class="download-action" type="button" :aria-label="t('downloads.showAria', { filename: download.filename })" :title="t('downloads.show')" @click="showDownloadInFolder(download.id)"><IconFolderOpen aria-hidden="true" /></button>
-        </article>
-      </div>
-      <p v-if="downloadActionError" class="downloads-error" role="alert">{{ downloadActionError }}</p>
-    </section>
+    <DownloadsPanel
+      v-model:open="downloadsOpen"
+      v-model:downloads="downloads"
+      :format-bytes="formatBytes"
+      :format-percent="localPercent"
+      :cancel-download="downloadsApi.cancel"
+      :clear-finished="downloadsApi.clearFinished"
+      :show-in-folder="downloadsApi.showInFolder"
+    />
     <section v-if="bookmarksOpen" class="bookmarks-panel" data-shell-docked-panel role="dialog" aria-modal="false" aria-labelledby="bookmarks-title">
       <header>
         <div>

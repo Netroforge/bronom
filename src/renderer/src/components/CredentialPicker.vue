@@ -45,9 +45,15 @@ let pointerSelectionBlockedUntil = 0
 const stopCredentialIdTracking = watch(credentialIds, () => {
   pointerSelectionBlockedUntil = Date.now() + liveListPointerGuardMs
 })
+const stopOpenTracking = watch(open, (isOpen) => {
+  if (!isOpen) return
+  lastPointerPosition = null
+  pointerSelectionBlockedUntil = 0
+}, { flush: 'sync' })
 
 async function openPanel(): Promise<void> {
   lastPointerPosition = null
+  pointerSelectionBlockedUntil = 0
   await openControllerPanel()
 }
 
@@ -61,6 +67,7 @@ function selectFromPointer(event: PointerEvent, index: number): void {
 
 function disposeComponent(): void {
   stopCredentialIdTracking()
+  stopOpenTracking()
   dispose()
 }
 
