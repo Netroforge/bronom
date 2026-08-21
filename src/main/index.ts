@@ -31,6 +31,7 @@ import trayIconPath from '../../build/icons/24x24.png?asset'
 import trayAttentionIconPath from '../../build/icons/tray-attention.png?asset'
 import { BrowserTabsManager } from './browser/tabs-manager.js'
 import type { BrowserCredentialCandidate } from './browser/tabs-manager.js'
+import { flushBrowserSessionStorage } from './browser/workspace-storage.js'
 import { BookmarkStore } from './bookmark-store.js'
 import { HistoryStore } from './history-store.js'
 import { CredentialStore } from './credential-store.js'
@@ -1001,8 +1002,7 @@ async function flushPanelWindowState(): Promise<void> {
 
 async function flushBrowserProfile(): Promise<void> {
   if (!persistentSession) return
-  await persistentSession.flushStorageData()
-  await persistentSession.cookies.flushStore()
+  await flushBrowserSessionStorage(persistentSession)
 }
 
 function loadTrayIcon(path: string): NativeImage {
@@ -2946,16 +2946,23 @@ async function releaseRuntimeResources(): Promise<void> {
   const server = mcpServer
   tabsManager = null
   mcpServer = null
-  runtimeShutdown = Promise.allSettled([
-    manager?.flushPersist(),
-    settingsMutationQueue,
-    flushWindowState(),
-    flushPanelWindowState(),
-    flushBrowserProfile(),
-    server?.stop()
-  ]).then(() => {
+  runtimeShutdown = (async () => {
+    const results = [
+      ...await Promise.allSettled([server?.stop()]),
+      ...await Promise.allSettled([
+        manager?.flushPersist(),
+        manager?.flushWorkspaceProfiles(),
+        settingsMutationQueue,
+        flushWindowState(),
+        flushPanelWindowState(),
+        flushBrowserProfile()
+      ])
+    ]
+    for (const result of results) {
+      if (result.status === 'rejected') console.error('[shutdown] Runtime cleanup failed:', result.reason)
+    }
     manager?.destroy()
-  })
+  })()
   return runtimeShutdown
 }
 

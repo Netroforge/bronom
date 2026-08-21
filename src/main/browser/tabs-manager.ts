@@ -271,6 +271,7 @@ import { normalizeTabTitle } from './tab-metadata.js'
 import { normalizeAddress } from './url.js'
 import {
   destroyWorkspaceStorage,
+  flushBrowserSessionStorage,
   normalizeWorkspaceStorageOrigins,
   transferWorkspaceStorage,
   workspacePartition
@@ -5169,6 +5170,25 @@ export class BrowserTabsManager {
       this.downloadNotifyTimer = null
     }
     await this.store.save(this.persistedState())
+  }
+
+  async flushWorkspaceProfiles(): Promise<void> {
+    const storageIds = new Set<string>()
+    for (const workspace of this.mcpTabGroups.values()) {
+      if (workspace.storageId) storageIds.add(workspace.storageId)
+    }
+    for (const workspace of this.savedTabGroups.values()) {
+      if (workspace.storageId) storageIds.add(workspace.storageId)
+    }
+    const results = await Promise.allSettled([...storageIds].map(async (storageId) => {
+      const browserSession = session.fromPartition(workspacePartition(this.options.partition, storageId), { cache: true })
+      this.options.configureSession?.(browserSession)
+      await flushBrowserSessionStorage(browserSession)
+    }))
+    const errors = results.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])
+    if (errors.length) {
+      throw new AggregateError(errors, `${errors.length} isolated browser profile${errors.length === 1 ? '' : 's'} could not be fully flushed.`)
+    }
   }
 
   destroy(): void {

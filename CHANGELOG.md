@@ -6,7 +6,7 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ### Fixed
 
-- Wait for Chromium's persistent browser-profile flush before exiting, preventing an updater restart or normal shutdown from cutting off local-storage and profile writes in flight.
+- Wait for Chromium to flush Default plus every active and archived isolated workspace profile before exiting, preventing an updater restart or normal shutdown from cutting off cookies, local storage, and other profile writes in flight.
 
 ## [1.6.7] - 2026-08-21
 

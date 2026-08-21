@@ -32,6 +32,17 @@ interface LocalStorageRollbackEntry {
   previous: Array<[string, string]>
 }
 
+export async function flushBrowserSessionStorage(browserSession: Session): Promise<void> {
+  const results = await Promise.allSettled([
+    browserSession.flushStorageData(),
+    browserSession.cookies.flushStore()
+  ])
+  const errors = results.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])
+  if (errors.length) {
+    throw new AggregateError(errors, 'Browser profile storage could not be fully flushed.')
+  }
+}
+
 export function workspacePartition(defaultPartition: string, storageId: string): string {
   const profile = defaultPartition.startsWith('persist:') ? defaultPartition.slice('persist:'.length) : defaultPartition
   return `persist:${profile}-workspace-${storageId}`
@@ -242,7 +253,7 @@ export async function transferWorkspaceStorage(
         targetSurface.close()
       }
     }
-    await target.flushStorageData()
+    await flushBrowserSessionStorage(target)
     return {
       cookieCount: cookies.length,
       localStorageOriginCount,
@@ -284,7 +295,7 @@ export async function transferWorkspaceStorage(
       }
     }
     try {
-      await target.flushStorageData()
+      await flushBrowserSessionStorage(target)
     } catch (error) {
       rollbackErrors.push(error)
     }
@@ -306,5 +317,5 @@ export async function destroyWorkspaceStorage(
   configureSession?.(browserSession)
   await browserSession.closeAllConnections()
   await browserSession.clearData()
-  await browserSession.flushStorageData()
+  await flushBrowserSessionStorage(browserSession)
 }
