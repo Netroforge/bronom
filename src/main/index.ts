@@ -1340,9 +1340,15 @@ function hideAddressSuggestionOverlay(): void {
   addressSuggestionOverlayBounds = null
   const surface = addressSuggestionSurface
   const window = mainWindow
-  if (!surface || surface.webContents.isDestroyed()) return
-  surface.view.setVisible(false)
-  if (window && !window.isDestroyed()) window.contentView.removeChildView(surface.view)
+  if (!surface) return
+  if (!surface.webContents.isDestroyed()) surface.view.setVisible(false)
+  if (window && !window.isDestroyed()) {
+    try {
+      window.contentView.removeChildView(surface.view)
+    } catch (error) {
+      console.error('[address-overlay] Failed to detach suggestion view:', error)
+    }
+  }
 }
 
 async function ensureAddressSuggestionView(): Promise<AddressSuggestionSurface> {
@@ -1374,7 +1380,10 @@ async function ensureAddressSuggestionView(): Promise<AddressSuggestionSurface> 
       if (!trustedUrlMatches(url, expectedUrl)) event.preventDefault()
     })
     webContents.on('destroyed', () => {
-      if (addressSuggestionSurface === surface) addressSuggestionSurface = null
+      if (addressSuggestionSurface !== surface) return
+      addressSuggestionOverlayGeneration += 1
+      hideAddressSuggestionOverlay()
+      addressSuggestionSurface = null
     })
     try {
       await webContents.loadURL(expectedUrl)
