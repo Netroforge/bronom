@@ -3,6 +3,7 @@ import { bind as bindFoley, play as playFoley, set as setFoley } from '@foleyjs/
 import { computed, defineComponent, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { formatReproAsPlaywright } from '../../shared/repro-export'
 import IconAdd from '~icons/material-symbols/add-rounded'
+import IconAddBox from '~icons/material-symbols/add-box-rounded'
 import IconAdsClick from '~icons/material-symbols/ads-click-rounded'
 import IconAccountTree from '~icons/material-symbols/account-tree-rounded'
 import IconAccessibility from '~icons/material-symbols/accessibility-new-rounded'
@@ -72,7 +73,6 @@ import IconTune from '~icons/material-symbols/tune-rounded'
 import IconStop from '~icons/material-symbols/stop-rounded'
 import IconSystemUpdate from '~icons/material-symbols/system-update-alt-rounded'
 import IconTabSearch from '~icons/material-symbols/tab-search-rounded'
-import IconWorkspaces from '~icons/material-symbols/workspaces-rounded'
 import IconTerminal from '~icons/material-symbols/terminal-rounded'
 import IconSwapHoriz from '~icons/material-symbols/swap-horiz-rounded'
 import IconVerticalSplit from '~icons/material-symbols/vertical-split-rounded'
@@ -6334,7 +6334,10 @@ onBeforeUnmount(() => {
         </template>
         </template>
         <span class="workspace-action-divider" aria-hidden="true" />
-        <button class="new-workspace" type="button" title="New isolated workspace" aria-label="Create workspace" @click="openNewWorkspaceEditor"><IconWorkspaces aria-hidden="true" /></button>
+        <button class="new-workspace" type="button" title="Create a new isolated workspace" aria-label="Create workspace" @click="openNewWorkspaceEditor">
+          <IconAddBox aria-hidden="true" />
+          <span>Workspace</span>
+        </button>
       </div>
       <div class="topbar-actions">
         <button

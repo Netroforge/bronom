@@ -82,6 +82,8 @@ test('keeps empty workspaces visible and opens a tab from each workspace action'
     expect(Math.round(createBounds?.height ?? 0)).toBe(28)
     expect(Math.round(newTabBounds?.y ?? 0)).toBe(Math.round(workspaceBounds?.y ?? -1))
     expect(Math.round(createBounds?.y ?? 0)).toBe(Math.round(workspaceBounds?.y ?? -1))
+    expect(Math.abs((workspaceBounds?.x ?? 0) + (workspaceBounds?.width ?? 0) - (newTabBounds?.x ?? 0))).toBeLessThanOrEqual(1)
+    await expect(createWorkspaceButton).toHaveText('Workspace')
 
     await workspaceNewTab.click()
     await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => ({

@@ -175,10 +175,10 @@ button { color: inherit; }
   max-width: 150px;
   flex: 0 0 auto;
   height: 28px;
-  margin: 0 1px 5px 5px;
+  margin: 0 0 5px 5px;
   padding: 0 8px;
   border: 1px solid color-mix(in srgb, var(--tab-group-color) 52%, var(--border-soft));
-  border-radius: 999px;
+  border-radius: 999px 8px 8px 999px;
   background: color-mix(in srgb, var(--tab-group-color) 16%, var(--toolbar));
   color: color-mix(in srgb, var(--tab-group-color) 74%, var(--text));
   font-size: 12px;
@@ -396,9 +396,9 @@ button { color: inherit; }
 .new-tab svg { width: 21px; height: 21px; }
 .workspace-new-tab {
   margin-right: 2px;
-  margin-left: -2px;
+  margin-left: -4px;
   border: 1px solid color-mix(in srgb, var(--tab-group-color) 38%, var(--border-soft));
-  border-radius: 999px;
+  border-radius: 8px 999px 999px 8px;
   color: color-mix(in srgb, var(--tab-group-color) 72%, var(--text));
   background: color-mix(in srgb, var(--tab-group-color) 10%, transparent);
 }
@@ -416,10 +416,20 @@ button { color: inherit; }
   background: var(--border-soft);
 }
 .new-workspace {
+  display: flex;
+  width: auto;
+  min-width: 28px;
+  gap: 5px;
+  padding: 0 8px;
+  align-items: center;
   color: var(--muted);
   border: 1px solid transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
 }
-.new-workspace svg { width: 18px; height: 18px; }
+.new-workspace svg { width: 17px; height: 17px; flex: 0 0 auto; }
 .new-workspace:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .new-tab:hover, .new-workspace:hover, .icon-button:hover:not(:disabled), .panel-close:hover { background: var(--hover); }
 .browser-lock-button {
