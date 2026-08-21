@@ -61,7 +61,6 @@ import IconPlay from '~icons/material-symbols/play-arrow-rounded'
 import IconProgress from '~icons/material-symbols/progress-activity-rounded'
 import IconPrivacy from '~icons/material-symbols/privacy-tip-rounded'
 import IconRefresh from '~icons/material-symbols/refresh-rounded'
-import IconRestore from '~icons/material-symbols/restore-page-rounded'
 import IconRecord from '~icons/material-symbols/fiber-manual-record-rounded'
 import IconRoute from '~icons/material-symbols/route-rounded'
 import IconSearch from '~icons/material-symbols/search-rounded'
@@ -94,8 +93,6 @@ import {
   BrowserViewportEmulation,
   BrowserViewportOrientation,
   BrowserViewportPresetId,
-  BrowserClosedTabState,
-  BrowserSavedTabGroupState,
   BrowserTabState,
   BrowserTabGroupColor,
   BrowserFindResult,
@@ -130,6 +127,7 @@ import DiagnosticsPanels from './components/DiagnosticsPanels.vue'
 import NetworkPanel from './components/NetworkPanel.vue'
 import PanelDockPicker from './components/PanelDockPicker.vue'
 import SiteStoragePanel from './components/SiteStoragePanel.vue'
+import TabSearchPanel from './components/TabSearchPanel.vue'
 import WorkspaceEditor from './components/WorkspaceEditor.vue'
 import { useBrowserStore } from './stores/browser'
 import { useSettingsStore } from './stores/settings'
@@ -332,9 +330,7 @@ const siteDataController = useSiteDataSummaryController({
 })
 const { summary: siteDataSummary, state: siteDataState, message: siteDataMessage } = siteDataController
 const tabSearchOpen = ref(false)
-const tabSearchQuery = ref('')
-const tabSearchInput = ref<HTMLInputElement | null>(null)
-const tabSearchSelection = ref(0)
+const tabSearchPanel = ref<InstanceType<typeof TabSearchPanel> | null>(null)
 const commandPaletteOpen = ref(false)
 const commandPaletteQuery = ref('')
 const commandPaletteInput = ref<HTMLInputElement | null>(null)
@@ -946,40 +942,6 @@ const filteredVisitHistory = computed(() => {
     entry.title.toLocaleLowerCase().includes(query) || entry.url.toLocaleLowerCase().includes(query)
   ))
 })
-const filteredTabs = computed(() => {
-  const query = tabSearchQuery.value.trim().toLocaleLowerCase()
-  if (!query) return regularTabs.value
-  return regularTabs.value.filter((tab) => (
-    (tab.title || t('tabSearch.newTabTitle')).toLocaleLowerCase().includes(query)
-    || tab.url.toLocaleLowerCase().includes(query)
-    || tab.mcpGroupName?.toLocaleLowerCase().includes(query)
-  ))
-})
-const filteredClosedTabs = computed(() => {
-  const query = tabSearchQuery.value.trim().toLocaleLowerCase()
-  if (!query) return state.value.closedTabs
-  return state.value.closedTabs.filter((tab) => (
-    tab.title.toLocaleLowerCase().includes(query) || tab.url.toLocaleLowerCase().includes(query)
-  ))
-})
-const filteredSavedTabGroups = computed(() => {
-  const query = tabSearchQuery.value.trim().toLocaleLowerCase()
-  if (!query) return state.value.savedTabGroups
-  return state.value.savedTabGroups.filter((group) => (
-    group.name.toLocaleLowerCase().includes(query)
-    || group.tabs.some((tab) => tab.title.toLocaleLowerCase().includes(query) || tab.url.toLocaleLowerCase().includes(query))
-  ))
-})
-type TabSearchResult =
-  | { kind: 'open'; tab: BrowserTabState }
-  | { kind: 'closed'; tab: BrowserClosedTabState }
-  | { kind: 'saved'; tab: BrowserSavedTabGroupState }
-const tabSearchResults = computed<TabSearchResult[]>(() => [
-  ...filteredSavedTabGroups.value.map((tab): TabSearchResult => ({ kind: 'saved', tab })),
-  ...filteredTabs.value.map((tab): TabSearchResult => ({ kind: 'open', tab })),
-  ...filteredClosedTabs.value.map((tab): TabSearchResult => ({ kind: 'closed', tab }))
-])
-const selectedTabSearchResult = computed(() => tabSearchResults.value[tabSearchSelection.value])
 const localizedCommandPaletteCommands = computed<CommandPaletteCommand[]>(() => COMMAND_PALETTE_COMMANDS.map((command) => ({
   ...command,
   label: t(`commandCatalog.commands.${command.id}.label`),
@@ -1410,6 +1372,7 @@ function historyEntryMeta(entry: BrowserHistoryEntry): string {
 
 async function toggleTabSearch(): Promise<void> {
   if (tabSearchOpen.value) {
+    tabSearchPanel.value?.close()
     tabSearchOpen.value = false
     return
   }
@@ -1419,14 +1382,9 @@ async function toggleTabSearch(): Promise<void> {
   bookmarksOpen.value = false
   historyOpen.value = false
   zoomOpen.value = false
-  if (findOpen.value) await closeFind()
-  tabSearchQuery.value = ''
-  tabSearchSelection.value = Math.max(0, tabSearchResults.value.findIndex((result) => result.kind === 'open' && result.tab.active))
-  tabSearchOpen.value = true
-  await nextTick()
-  tabSearchInput.value?.focus()
-  tabSearchInput.value?.select()
-  revealSelectedTabSearchResult()
+  const stopFind = findOpen.value ? closeFind() : undefined
+  await tabSearchPanel.value?.openPanel()
+  await stopFind
 }
 
 async function toggleCommandPalette(): Promise<void> {
@@ -1539,35 +1497,6 @@ async function runCommandPaletteCommand(commandId: CommandPaletteCommandId): Pro
   }
 }
 
-async function selectSearchTab(tab: BrowserTabState): Promise<void> {
-  tabSearchOpen.value = false
-  expandTabGroupForTab(tab)
-  await selectBrowserTab(tab.id)
-}
-
-async function closeSearchTab(event: MouseEvent, tabId: string): Promise<void> {
-  event.stopPropagation()
-  if (state.value.allHumanInteractionLocked) return
-  await syncState(browser.closeTab(tabId))
-  tabSearchSelection.value = Math.min(tabSearchSelection.value, Math.max(0, tabSearchResults.value.length - 1))
-  await nextTick()
-  tabSearchInput.value?.focus()
-  revealSelectedTabSearchResult()
-}
-
-async function restoreSearchTab(tab: BrowserClosedTabState): Promise<void> {
-  tabSearchOpen.value = false
-  await syncState(browser.reopenClosedTab(tab.id))
-}
-
-async function togglePinnedSearchTab(event: MouseEvent, tab: BrowserTabState): Promise<void> {
-  event.stopPropagation()
-  await syncState(browser.setTabPinned(tab.id, !tab.pinned))
-  await nextTick()
-  tabSearchInput.value?.focus()
-  revealSelectedTabSearchResult()
-}
-
 function clearTabDrag(): void {
   draggedTabId.value = null
   tabDropTargetId.value = null
@@ -1609,87 +1538,6 @@ async function finishTabDrop(event: DragEvent, tab: BrowserTabState): Promise<vo
   const placement = tabDropPlacement.value
   clearTabDrag()
   await syncState(browser.reorderTab(tabId, tab.id, placement))
-}
-
-function tabSearchResultId(result: TabSearchResult): string {
-  return `tab-search-${result.kind}-${result.tab.id}`
-}
-
-function tabSearchResultLabel(result: TabSearchResult): string {
-  return result.kind === 'saved' ? result.tab.name : result.tab.title || t('tabSearch.newTabTitle')
-}
-
-function tabSearchResultIndex(kind: TabSearchResult['kind'], id: string): number {
-  return tabSearchResults.value.findIndex((result) => result.kind === kind && result.tab.id === id)
-}
-
-function revealSelectedTabSearchResult(): void {
-  const result = selectedTabSearchResult.value
-  if (!result) return
-  document.getElementById(tabSearchResultId(result))?.scrollIntoView({ block: 'nearest' })
-}
-
-async function moveTabSearchSelection(offset: -1 | 1): Promise<void> {
-  if (!tabSearchResults.value.length) return
-  tabSearchSelection.value = (tabSearchSelection.value + offset + tabSearchResults.value.length) % tabSearchResults.value.length
-  await nextTick()
-  revealSelectedTabSearchResult()
-}
-
-function handleTabSearchKeydown(event: KeyboardEvent): void {
-  if (event.key === 'ArrowDown') {
-    event.preventDefault()
-    void moveTabSearchSelection(1)
-    return
-  }
-  if (event.key === 'ArrowUp') {
-    event.preventDefault()
-    void moveTabSearchSelection(-1)
-    return
-  }
-  if (event.key === 'Enter' && selectedTabSearchResult.value) {
-    event.preventDefault()
-    const result = selectedTabSearchResult.value
-    if (result.kind === 'open') void selectSearchTab(result.tab)
-    else if (result.kind === 'closed') void restoreSearchTab(result.tab)
-    else void restoreSavedTabGroup(result.tab)
-  }
-}
-
-async function restoreSavedTabGroup(group: BrowserSavedTabGroupState): Promise<void> {
-  try {
-    await syncState(browser.restoreSavedTabGroup(group.id))
-    tabSearchOpen.value = false
-  } catch (error) {
-    showAppToast('error', t('runtime.workspace.restoreFailed'), friendlyUiError(error, t('runtime.workspace.restoreDescription')))
-  }
-}
-
-async function deleteSavedTabGroup(event: MouseEvent, group: BrowserSavedTabGroupState): Promise<void> {
-  event.stopPropagation()
-  if (!window.confirm(t('runtimeActions.workspace.deleteConfirm', { name: group.name, count: localNumber(group.tabs.length) }, group.tabs.length))) return
-  try {
-    await syncState(browser.deleteSavedTabGroup(group.id))
-    tabSearchSelection.value = Math.min(tabSearchSelection.value, Math.max(0, tabSearchResults.value.length - 1))
-    await nextTick()
-    tabSearchInput.value?.focus()
-  } catch (error) {
-    showAppToast('error', t('runtime.workspace.deleteFailed'), friendlyUiError(error, t('runtime.workspace.deleteDescription')))
-  }
-}
-
-function tabSearchMeta(tab: BrowserTabState): string {
-  const status: string[] = []
-  if (tab.mcpGroupName) status.push(t('tabSearch.meta.group', { name: tab.mcpGroupName }))
-  if (tab.pinned) status.push(t('tabSearch.meta.pinned'))
-  if (tab.active) status.push(t('tabSearch.meta.current'))
-  if (state.value.allHumanInteractionLocked || tab.humanInteractionLocked) status.push(t('tabSearch.meta.locked'))
-  if (tab.muted) status.push(t('tabSearch.meta.muted'))
-  else if (tab.audible) status.push(t('tabSearch.meta.audio'))
-  if (mcpActivityByTab.value[tab.id]) status.push(t('tabSearch.meta.agent'))
-  if (tab.emulation) status.push(t('tabSearch.meta.emulated', { state: emulationDescription(tab.emulation) }))
-  if (tab.networkRouteCount) status.push(t('tabSearch.meta.routes', { count: localNumber(tab.networkRouteCount) }, tab.networkRouteCount))
-  return status.join(' · ')
 }
 
 function networkEmulationLabel(network: BrowserEmulationState['network']): string {
@@ -1940,19 +1788,6 @@ async function resetEnvironment(): Promise<void> {
   await applyEnvironment(false)
 }
 
-function closedTabMeta(tab: BrowserClosedTabState): string {
-  const elapsed = Math.max(0, Date.now() - Date.parse(tab.closedAt))
-  let closed: string
-  if (elapsed < 60_000) closed = t('tabSearch.meta.justNow')
-  else if (elapsed < 60 * 60_000) {
-    const minutes = Math.max(1, Math.floor(elapsed / 60_000))
-    closed = t('tabSearch.meta.minutesAgo', { count: localNumber(minutes) })
-  } else {
-    closed = t('tabSearch.meta.closedAt', { time: localTime(tab.closedAt) })
-  }
-  return tab.pinned ? `${t('tabSearch.meta.pinned')} · ${closed}` : closed
-}
-
 async function cancelDownload(downloadId: string): Promise<void> {
   downloadActionError.value = ''
   try {
@@ -2108,12 +1943,6 @@ watch(fullModalOpen, (open) => {
   if (open) closeAddressSuggestions()
 }, { flush: 'sync' })
 
-watch(tabSearchQuery, async () => {
-  tabSearchSelection.value = 0
-  await nextTick()
-  revealSelectedTabSearchResult()
-})
-
 watch(commandPaletteQuery, async () => {
   commandPaletteSelection.value = 0
   await nextTick()
@@ -2126,15 +1955,6 @@ watch(
     commandPaletteSelection.value = Math.min(commandPaletteSelection.value, Math.max(0, length - 1))
     await nextTick()
     revealSelectedCommandPaletteCommand()
-  }
-)
-
-watch(
-  () => tabSearchResults.value.length,
-  async (length) => {
-    tabSearchSelection.value = Math.min(tabSearchSelection.value, Math.max(0, length - 1))
-    await nextTick()
-    revealSelectedTabSearchResult()
   }
 )
 
@@ -2893,6 +2713,14 @@ function friendlyUiError(error: unknown, fallback: string): string {
     .replace(/^Error:\s*/i, '')
     .trim()
   return message || fallback
+}
+
+function describeTabEmulation(tab: BrowserTabState): string {
+  return tab.emulation ? emulationDescription(tab.emulation) : ''
+}
+
+function showTabSearchError(title: string, message: string): void {
+  showAppToast('error', title, message)
 }
 
 async function copyAppText(text: string): Promise<boolean> {
@@ -5306,136 +5134,21 @@ onBeforeUnmount(() => {
       :accept-browser-state="browserStore.acceptAuthoritativeState"
       :keeps-separate-panel-open="keepsSeparatePanelOpen"
     />
-    <section v-if="tabSearchOpen" class="tab-search-panel" data-shell-side-panel role="dialog" aria-modal="false" aria-labelledby="tab-search-title">
-      <header>
-        <div>
-          <span class="eyebrow">{{ t('tabSearch.kicker') }}</span>
-          <h2 id="tab-search-title">{{ t('tabSearch.heading') }}</h2>
-        </div>
-        <span class="tab-search-count">{{ t('tabSearch.countOpen', { count: localNumber(regularTabs.length) }) }}{{ state.savedTabGroups.length ? ` ${t('tabSearch.countSaved', { count: localNumber(state.savedTabGroups.length) })}` : '' }}{{ state.closedTabs.length ? ` ${t('tabSearch.countClosed', { count: localNumber(state.closedTabs.length) })}` : '' }}</span>
-        <button class="panel-close" type="button" :aria-label="t('tabSearch.close')" @click="tabSearchOpen = false"><IconClose aria-hidden="true" /></button>
-      </header>
-      <div v-if="regularTabs.length || state.closedTabs.length || state.savedTabGroups.length" class="tab-search-field">
-        <IconSearch aria-hidden="true" />
-        <input
-          ref="tabSearchInput"
-          v-model="tabSearchQuery"
-          type="search"
-          :aria-label="t('tabSearch.search')"
-          aria-controls="tab-search-results"
-          aria-describedby="tab-search-status"
-          autocomplete="off"
-          spellcheck="false"
-          :placeholder="t('tabSearch.placeholder')"
-          @keydown="handleTabSearchKeydown"
-        />
-        <kbd>⌃/⌘ ⇧ A</kbd>
-      </div>
-      <span id="tab-search-status" class="sr-only" role="status" aria-live="polite">
-        {{ t('tabSearch.matches', { count: localNumber(tabSearchResults.length) }, tabSearchResults.length) }}<template v-if="selectedTabSearchResult"> {{ t('tabSearch.selected', { item: tabSearchResultLabel(selectedTabSearchResult) }) }}</template>
-      </span>
-      <div v-if="!regularTabs.length && !state.closedTabs.length && !state.savedTabGroups.length" class="tab-search-empty">
-        <IconTabSearch aria-hidden="true" />
-        <strong>{{ t('tabSearch.empty') }}</strong>
-        <span>{{ t('tabSearch.homeAvailable') }}</span>
-        <button type="button" @click="runBrowserShortcut('new-tab')">{{ t('tabSearch.newTab') }}</button>
-      </div>
-      <div v-else-if="!tabSearchResults.length" class="tab-search-empty compact">
-        <IconSearch aria-hidden="true" />
-        <strong>{{ t('tabSearch.noMatches') }}</strong>
-        <span>{{ t('tabSearch.tryAnother') }}</span>
-      </div>
-      <div v-else id="tab-search-results" class="tab-search-list">
-        <section v-if="filteredSavedTabGroups.length" class="tab-search-section saved-groups" aria-labelledby="saved-groups-title">
-          <h3 id="saved-groups-title">{{ t('tabSearch.archived') }} <span>{{ localNumber(filteredSavedTabGroups.length) }}</span></h3>
-          <div role="list" :aria-label="t('tabSearch.archivedAria')">
-            <article
-              v-for="group in filteredSavedTabGroups"
-              :id="`tab-search-saved-${group.id}`"
-              :key="group.id"
-              class="tab-search-item saved-group"
-              :class="{ selected: tabSearchResultIndex('saved', group.id) === tabSearchSelection }"
-              role="listitem"
-              @mouseenter="tabSearchSelection = tabSearchResultIndex('saved', group.id)"
-            >
-              <button class="tab-search-open" type="button" :title="group.tabs.map((tab) => tab.url).join('\n')" @click="restoreSavedTabGroup(group)">
-                <span class="tab-search-site-icon saved" :style="tabGroupColorStyle(group.color)" aria-hidden="true"><IconFolderOpen /></span>
-                <span class="tab-search-copy">
-                  <strong>{{ group.name }}</strong>
-                  <span>{{ t('tabSearch.savedTabs', { count: localNumber(group.tabs.length) }, group.tabs.length) }}</span>
-                  <small>{{ group.tabs.slice(0, 3).map((tab) => tab.title || tab.url).join(' · ') }}</small>
-                </span>
-              </button>
-              <button class="tab-search-restore" type="button" :aria-label="t('tabSearch.restoreWorkspaceAria', { name: group.name })" :title="t('tabSearch.restoreWorkspace')" @click="restoreSavedTabGroup(group)"><IconRestore aria-hidden="true" /></button>
-              <button class="tab-search-close" type="button" :aria-label="t('tabSearch.deleteWorkspaceAria', { name: group.name })" :title="t('tabSearch.deleteWorkspace')" @click="deleteSavedTabGroup($event, group)"><IconDelete aria-hidden="true" /></button>
-            </article>
-          </div>
-        </section>
-        <section v-if="filteredTabs.length" class="tab-search-section" aria-labelledby="open-tabs-title">
-          <h3 id="open-tabs-title">{{ t('tabSearch.openTabs') }} <span>{{ localNumber(filteredTabs.length) }}</span></h3>
-          <div role="list" :aria-label="t('tabSearch.openTabs')">
-            <article
-              v-for="tab in filteredTabs"
-              :id="`tab-search-open-${tab.id}`"
-              :key="tab.id"
-              class="tab-search-item"
-              :class="{ selected: tabSearchResultIndex('open', tab.id) === tabSearchSelection, active: tab.active }"
-              role="listitem"
-              @mouseenter="tabSearchSelection = tabSearchResultIndex('open', tab.id)"
-            >
-              <button class="tab-search-open" type="button" :title="tab.url" @click="selectSearchTab(tab)">
-                <span class="tab-search-site-icon" aria-hidden="true">
-                  <span v-if="tab.loading" class="spinner" />
-                  <img v-else-if="tab.faviconDataUrl" :src="tab.faviconDataUrl" alt="" draggable="false" />
-                  <span v-else-if="tab.url === 'about:blank'">✦</span>
-                  <IconLanguage v-else />
-                </span>
-                <span class="tab-search-copy">
-                  <strong>{{ tab.title || t('tabSearch.newTabTitle') }}</strong>
-                  <span>{{ tab.url === 'about:blank' ? t('tabSearch.blankPage') : tab.url }}</span>
-                  <small v-if="tabSearchMeta(tab)">{{ tabSearchMeta(tab) }}</small>
-                </span>
-              </button>
-              <button
-                class="tab-search-pin"
-                :class="{ active: tab.pinned }"
-                type="button"
-                :aria-label="tab.pinned ? t('tabSearch.unpinAria', { title: tab.title || t('tabSearch.newTabTitle') }) : t('tabSearch.pinAria', { title: tab.title || t('tabSearch.newTabTitle') })"
-                :title="tab.pinned ? t('tabSearch.unpin') : t('tabSearch.pin')"
-                :aria-pressed="tab.pinned"
-                @click="togglePinnedSearchTab($event, tab)"
-              ><IconKeep aria-hidden="true" /></button>
-              <button class="tab-search-close" type="button" :aria-label="t('tabSearch.closeTabAria', { title: tab.title || t('tabSearch.newTabTitle') })" :title="t('tabSearch.closeTab')" :disabled="state.allHumanInteractionLocked" data-lock-protected-tab-close @click="closeSearchTab($event, tab.id)"><IconClose aria-hidden="true" /></button>
-            </article>
-          </div>
-        </section>
-        <section v-if="filteredClosedTabs.length" class="tab-search-section recently-closed" aria-labelledby="closed-tabs-title">
-          <h3 id="closed-tabs-title">{{ t('tabSearch.recentlyClosed') }} <span>{{ localNumber(filteredClosedTabs.length) }}</span></h3>
-          <div role="list" :aria-label="t('accessibility.recentlyClosedTabs')">
-            <article
-              v-for="tab in filteredClosedTabs"
-              :id="`tab-search-closed-${tab.id}`"
-              :key="tab.id"
-              class="tab-search-item closed"
-              :class="{ selected: tabSearchResultIndex('closed', tab.id) === tabSearchSelection }"
-              role="listitem"
-              @mouseenter="tabSearchSelection = tabSearchResultIndex('closed', tab.id)"
-            >
-              <button class="tab-search-open" type="button" :title="tab.url" @click="restoreSearchTab(tab)">
-                <span class="tab-search-site-icon closed" aria-hidden="true"><IconHistory /></span>
-                <span class="tab-search-copy">
-                  <strong>{{ tab.title || t('tabSearch.newTabTitle') }}</strong>
-                  <span>{{ tab.url === 'about:blank' ? t('tabSearch.blankPage') : tab.url }}</span>
-                  <small>{{ closedTabMeta(tab) }}</small>
-                </span>
-              </button>
-              <button class="tab-search-restore" type="button" :aria-label="t('tabSearch.restoreAria', { title: tab.title || t('tabSearch.newTabTitle') })" :title="t('tabSearch.restore')" @click="restoreSearchTab(tab)"><IconRestore aria-hidden="true" /></button>
-            </article>
-          </div>
-        </section>
-      </div>
-      <footer v-if="tabSearchResults.length"><span><kbd>↑</kbd><kbd>↓</kbd> {{ t('tabSearch.navigate') }}</span><span><kbd>Enter</kbd> {{ t('tabSearch.open') }}</span><span><kbd>Esc</kbd> {{ t('tabSearch.close') }}</span></footer>
-    </section>
+    <TabSearchPanel
+      ref="tabSearchPanel"
+      v-model:open="tabSearchOpen"
+      :state="state"
+      :mcp-activity-by-tab="mcpActivityByTab"
+      :sync-state="syncState"
+      :select-tab="selectBrowserTab"
+      :expand-tab-group="expandTabGroupForTab"
+      :describe-emulation="describeTabEmulation"
+      :format-number="localNumber"
+      :format-time="localTime"
+      :format-error="friendlyUiError"
+      :show-error="showTabSearchError"
+      @new-tab="runBrowserShortcut('new-tab')"
+    />
     <div v-if="findOpen" class="find-bar" role="search" :aria-label="t('find.region')">
       <div class="find-field">
         <IconSearch aria-hidden="true" />
