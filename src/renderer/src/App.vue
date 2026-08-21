@@ -1337,15 +1337,15 @@ const effectiveHumanInteractionLocked = computed(() => (
 ))
 const tabInteractionLockLabel = computed(() => {
   if (activeIsHome.value) return 'Tab lock is available on websites'
-  if (state.value.allHumanInteractionLocked) return 'All tabs are locked'
+  if (state.value.allHumanInteractionLocked) return 'All tabs locked — page input and tab closing are blocked'
   return tabHumanInteractionLocked.value
-    ? 'Allow human interaction in this tab'
-    : 'Block human interaction in this tab'
+    ? 'Unlock page input in this tab'
+    : 'Lock page input in this tab'
 })
 const allInteractionLockLabel = computed(() => (
   state.value.allHumanInteractionLocked
-    ? 'Allow human interaction in all tabs'
-    : 'Block human interaction in all tabs'
+    ? 'Unlock all tabs'
+    : 'Lock all tabs — blocks page input and tab closing; tab switching and Bronom controls stay available'
 ))
 const pdfExportLabel = computed(() => {
   if (pdfExportState.value === 'saving') return 'Saving page as PDF'
@@ -3701,7 +3701,7 @@ function tabTooltip(tab: BrowserTabState): string {
   const pinned = tab.pinned ? ' — pinned' : ''
   const sleeping = tab.sleeping ? ' — sleeping; reloads when selected' : ''
   const audio = tab.muted ? ' — muted' : tab.audible ? ' — playing audio' : ''
-  const locked = state.value.allHumanInteractionLocked || tab.humanInteractionLocked ? ' — human interaction locked' : ''
+  const locked = state.value.allHumanInteractionLocked || tab.humanInteractionLocked ? ' — page input locked' : ''
   const problem = tab.pageProblem ? ` — ${tab.pageProblem.title}` : ''
   const emulation = tab.emulation ? ` — emulated: ${emulationDescription(tab.emulation)}` : ''
   const networkRoutes = tab.networkRouteCount ? ` — ${tab.networkRouteCount} temporary network ${tab.networkRouteCount === 1 ? 'route' : 'routes'}` : ''
@@ -6306,7 +6306,7 @@ onBeforeUnmount(() => {
           />
           <IconSpeed v-if="tab.emulation" class="tab-emulation-mark" :aria-label="`Emulated: ${emulationDescription(tab.emulation)}`" />
           <IconRoute v-if="tab.networkRouteCount" class="tab-network-route-mark" :aria-label="`${tab.networkRouteCount} temporary network ${tab.networkRouteCount === 1 ? 'route' : 'routes'}`" />
-          <IconLock v-if="state.allHumanInteractionLocked || tab.humanInteractionLocked" class="tab-lock-mark" aria-label="Human interaction locked" />
+          <IconLock v-if="state.allHumanInteractionLocked || tab.humanInteractionLocked" class="tab-lock-mark" aria-label="Page input locked" />
           <span
             v-if="tab.audible || tab.muted"
             class="tab-audio"
@@ -6320,10 +6320,20 @@ onBeforeUnmount(() => {
             <IconVolumeOff v-if="tab.muted" aria-hidden="true" />
             <IconVolumeUp v-else aria-hidden="true" />
           </span>
-          <span class="tab-close" role="button" title="Close tab (Ctrl/Cmd+W)" aria-label="Close tab" aria-keyshortcuts="Control+W Meta+W" :aria-disabled="state.allHumanInteractionLocked" data-lock-protected-tab-close @click="closeTab($event, tab.id)"><IconClose aria-hidden="true" /></span>
+          <span
+            class="tab-close"
+            role="button"
+            :title="state.allHumanInteractionLocked ? 'Unlock all tabs to close this tab' : 'Close tab (Ctrl/Cmd+W)'"
+            :aria-label="state.allHumanInteractionLocked ? 'Close tab unavailable while all tabs are locked' : 'Close tab'"
+            aria-keyshortcuts="Control+W Meta+W"
+            :aria-disabled="state.allHumanInteractionLocked"
+            data-lock-protected-tab-close
+            @click="closeTab($event, tab.id)"
+          ><IconClose aria-hidden="true" /></span>
         </button>
         </template>
         </template>
+        <span class="workspace-action-divider" aria-hidden="true" />
         <button class="new-workspace" type="button" title="New isolated workspace" aria-label="Create workspace" @click="openNewWorkspaceEditor"><IconWorkspaces aria-hidden="true" /></button>
       </div>
       <div class="topbar-actions">
@@ -6387,7 +6397,7 @@ onBeforeUnmount(() => {
         >
           <IconLock v-if="state.allHumanInteractionLocked" aria-hidden="true" />
           <IconLockOpen v-else aria-hidden="true" />
-          All tabs
+          {{ state.allHumanInteractionLocked ? 'Tabs locked' : 'Lock tabs' }}
         </button>
         <UpdateNotification
           v-if="showUpdateStatusPill"
@@ -6603,7 +6613,7 @@ onBeforeUnmount(() => {
       <div
         class="interaction-locks"
         role="group"
-        :aria-label="effectiveHumanInteractionLocked ? 'Human interaction is blocked' : 'Human interaction locks'"
+        :aria-label="effectiveHumanInteractionLocked ? 'Page input is locked' : 'Page input lock'"
       >
         <button
           class="interaction-lock-button"

@@ -108,7 +108,7 @@ test('inspects bounded IndexedDB schema and records for people and grouped agent
       expect.objectContaining({ name: 'settings', entryCount: 3, indexes: [expect.objectContaining({ name: 'by-category' })] })
     ]))
 
-    await appWindow.getByRole('button', { name: 'Block human interaction in this tab' }).click()
+    await appWindow.getByRole('button', { name: 'Lock page input in this tab' }).click()
     const recordsResult = await client.callTool({
       name: 'browser_indexeddb',
       arguments: { workspaceId, tabId, database: 'app-cache', objectStore: 'settings', limit: 1 }

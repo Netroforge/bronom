@@ -7,6 +7,7 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 ### Changed
 
 - Define the Bronom-wide human lock as an all-tabs safety lock: block website input and every human tab-closing path while leaving browser chrome, Settings, diagnostics, and tab switching available.
+- Align workspace chips, workspace-specific new-tab buttons, and the new-workspace action on one compact icon-control baseline; clarify the lock labels and disabled close affordances so their scope is visible before clicking.
 
 ### Fixed
 

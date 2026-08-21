@@ -2370,8 +2370,8 @@ test('locks website input and tab closing across Bronom while keeping browser ch
     await clickFixture(firstPath)
     await expect.poll(() => fixtureClicks(firstPath)).toBe(1)
 
-    await appWindow.getByRole('button', { name: 'Block human interaction in this tab' }).click()
-    await expect(appWindow.getByRole('button', { name: 'Allow human interaction in this tab' })).toHaveAttribute('aria-pressed', 'true')
+    await appWindow.getByRole('button', { name: 'Lock page input in this tab' }).click()
+    await expect(appWindow.getByRole('button', { name: 'Unlock page input in this tab' })).toHaveAttribute('aria-pressed', 'true')
     await clickFixture(firstPath)
     await expect.poll(() => fixtureClicks(firstPath)).toBe(1)
 
@@ -2381,15 +2381,15 @@ test('locks website input and tab closing across Bronom while keeping browser ch
     }, firstPath)
     await expect.poll(() => fixtureClicks(firstPath)).toBe(2)
 
-    await appWindow.getByRole('button', { name: 'Allow human interaction in this tab' }).click()
+    await appWindow.getByRole('button', { name: 'Unlock page input in this tab' }).click()
     await appWindow.evaluate(`window.bronom.newTab({ url: ${JSON.stringify(`${baseUrl}${secondPath}`)}, active: true })`)
     await expect.poll(() => fixtureClicks(secondPath)).toBe(0)
-    const browserLock = appWindow.getByRole('button', { name: 'Block human interaction in all tabs' })
-    const tabLock = appWindow.getByRole('button', { name: 'Block human interaction in this tab' })
+    const browserLock = appWindow.getByRole('button', { name: /Lock all tabs/ })
+    const tabLock = appWindow.getByRole('button', { name: 'Lock page input in this tab' })
     const [browserLockBounds, tabLockBounds] = await Promise.all([browserLock.boundingBox(), tabLock.boundingBox()])
     expect(browserLockBounds?.y).toBeLessThan(tabLockBounds?.y ?? 0)
     await browserLock.click()
-    await expect(appWindow.getByRole('button', { name: 'Allow human interaction in all tabs' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(appWindow.getByRole('button', { name: 'Unlock all tabs' })).toHaveAttribute('aria-pressed', 'true')
 
     await appWindow.getByRole('button', { name: 'Settings' }).click()
     await expect(appWindow.getByRole('dialog', { name: 'Settings' })).toBeVisible()
@@ -2441,8 +2441,8 @@ test('locks website input and tab closing across Bronom while keeping browser ch
     await appWindow.keyboard.press('Control+Shift+Tab')
     await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')).toBe(firstTabId)
 
-    await appWindow.getByRole('button', { name: 'Allow human interaction in all tabs' }).click()
-    await expect(appWindow.getByRole('button', { name: 'Block human interaction in all tabs' })).toHaveAttribute('aria-pressed', 'false')
+    await appWindow.getByRole('button', { name: 'Unlock all tabs' }).click()
+    await expect(appWindow.getByRole('button', { name: /Lock all tabs/ })).toHaveAttribute('aria-pressed', 'false')
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()))
   }

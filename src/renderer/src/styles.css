@@ -174,8 +174,9 @@ button { color: inherit; }
   overflow: hidden;
   max-width: 150px;
   flex: 0 0 auto;
-  margin: 0 1px 7px 5px;
-  padding: 4px 8px;
+  height: 28px;
+  margin: 0 1px 5px 5px;
+  padding: 0 8px;
   border: 1px solid color-mix(in srgb, var(--tab-group-color) 52%, var(--border-soft));
   border-radius: 999px;
   background: color-mix(in srgb, var(--tab-group-color) 16%, var(--toolbar));
@@ -391,25 +392,35 @@ button { color: inherit; }
   border-radius: 9px;
   cursor: pointer;
 }
-.new-tab, .new-workspace { display: grid; width: 34px; height: 34px; place-items: center; }
+.new-tab, .new-workspace { display: grid; width: 28px; height: 28px; flex: 0 0 28px; margin-bottom: 5px; place-items: center; }
 .new-tab svg { width: 21px; height: 21px; }
 .workspace-new-tab {
-  width: 27px;
-  height: 27px;
-  flex: 0 0 27px;
-  margin: 0 2px 5px -2px;
+  margin-right: 2px;
+  margin-left: -2px;
   border: 1px solid color-mix(in srgb, var(--tab-group-color) 38%, var(--border-soft));
   border-radius: 999px;
   color: color-mix(in srgb, var(--tab-group-color) 72%, var(--text));
   background: color-mix(in srgb, var(--tab-group-color) 10%, transparent);
 }
-.workspace-new-tab svg { width: 17px; height: 17px; }
+.workspace-new-tab svg { width: 18px; height: 18px; }
 .workspace-new-tab:hover,
 .workspace-new-tab:focus-visible {
   border-color: var(--tab-group-color);
   background: color-mix(in srgb, var(--tab-group-color) 22%, var(--toolbar));
 }
+.workspace-action-divider {
+  width: 1px;
+  height: 20px;
+  flex: 0 0 1px;
+  margin: 0 2px 9px 1px;
+  background: var(--border-soft);
+}
+.new-workspace {
+  color: var(--muted);
+  border: 1px solid transparent;
+}
 .new-workspace svg { width: 18px; height: 18px; }
+.new-workspace:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .new-tab:hover, .new-workspace:hover, .icon-button:hover:not(:disabled), .panel-close:hover { background: var(--hover); }
 .browser-lock-button {
   display: flex;

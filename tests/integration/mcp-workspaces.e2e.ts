@@ -70,7 +70,20 @@ test('keeps empty workspaces visible and opens a tab from each workspace action'
     await expect(workspaceControl).toHaveAccessibleName('Collapse workspace Empty investigation, 0 tabs')
     await expect(appWindow.getByRole('tab')).toHaveCount(0)
 
-    await appWindow.getByRole('button', { name: 'New tab in Empty investigation workspace' }).click()
+    const workspaceNewTab = appWindow.getByRole('button', { name: 'New tab in Empty investigation workspace' })
+    const createWorkspaceButton = appWindow.getByRole('button', { name: 'Create workspace' })
+    const [workspaceBounds, newTabBounds, createBounds] = await Promise.all([
+      workspaceControl.boundingBox(),
+      workspaceNewTab.boundingBox(),
+      createWorkspaceButton.boundingBox()
+    ])
+    expect(Math.round(workspaceBounds?.height ?? 0)).toBe(28)
+    expect(Math.round(newTabBounds?.height ?? 0)).toBe(28)
+    expect(Math.round(createBounds?.height ?? 0)).toBe(28)
+    expect(Math.round(newTabBounds?.y ?? 0)).toBe(Math.round(workspaceBounds?.y ?? -1))
+    expect(Math.round(createBounds?.y ?? 0)).toBe(Math.round(workspaceBounds?.y ?? -1))
+
+    await workspaceNewTab.click()
     await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => ({
       activeTabId: state.activeTabId,
       workspaceTabIds: state.tabs

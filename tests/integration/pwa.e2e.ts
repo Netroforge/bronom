@@ -94,7 +94,7 @@ test('inspects service workers and Cache Storage for people and grouped agents',
     const tabId = (JSON.parse(text(opened)) as { activeTabId: string }).activeTabId
     await client.callTool({ name: 'browser_wait', arguments: { workspaceId, tabId, text: 'Offline app ready' } })
 
-    await appWindow.getByRole('button', { name: 'Block human interaction in this tab' }).click()
+    await appWindow.getByRole('button', { name: 'Lock page input in this tab' }).click()
     let usageReport: {
       usage: number
       quota: number
@@ -180,7 +180,7 @@ test('inspects service workers and Cache Storage for people and grouped agents',
     await expect(storagePanel).toContainText('% used')
     await storagePanel.getByRole('button', { name: 'Copy report' }).click()
     await expect(storagePanel.getByRole('button', { name: 'Copied' })).toBeVisible()
-    await appWindow.getByRole('button', { name: 'Allow human interaction in this tab' }).click()
+    await appWindow.getByRole('button', { name: 'Unlock page input in this tab' }).click()
     expect(await appWindow.evaluate(`window.bronom.toggleDevTools(${JSON.stringify(tabId)})`)).toBe(true)
     let fallback: { source: string; usage: number; quota: number; caveats: string[] } | undefined
     await expect.poll(async () => {
