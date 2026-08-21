@@ -1,10 +1,13 @@
 import type { McpDashboardState } from './mcp/server.js'
+import { localeMessages } from '../shared/i18n.js'
+import type { SupportedLocale } from '../shared/locale.js'
 
 interface HomePageOptions {
   endpoint: string
   tokenPath?: string
   authenticationDisabled?: boolean
   initialState: McpDashboardState
+  locale: SupportedLocale
 }
 
 interface AgentGuide {
@@ -32,7 +35,13 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`
 }
 
-function agentGuides(endpoint: string, tokenPath?: string, authenticationDisabled = false): AgentGuide[] {
+function agentGuides(
+  endpoint: string,
+  locale: SupportedLocale,
+  tokenPath?: string,
+  authenticationDisabled = false
+): AgentGuide[] {
+  const home = localeMessages[locale].home
   const tokenSetup = tokenPath
     ? `export BRONOM_MCP_TOKEN="$(cat ${shellQuote(tokenPath)})"\n`
     : ''
@@ -42,7 +51,7 @@ function agentGuides(endpoint: string, tokenPath?: string, authenticationDisable
     {
       id: 'codex',
       name: 'Codex',
-      note: 'Adds Bronom to your user-level Codex configuration.',
+      note: home.connect.guides.codex,
       location: '~/.codex/config.toml',
       code: authenticationDisabled
         ? `codex mcp add bronom --url ${endpoint}`
@@ -51,7 +60,7 @@ function agentGuides(endpoint: string, tokenPath?: string, authenticationDisable
     {
       id: 'claude-code',
       name: 'Claude Code',
-      note: 'Uses the recommended Streamable HTTP transport for every project.',
+      note: home.connect.guides.claudeCode,
       location: '~/.claude.json',
       code: authenticationDisabled
         ? `claude mcp add --transport http --scope user bronom ${endpoint}`
@@ -60,42 +69,43 @@ function agentGuides(endpoint: string, tokenPath?: string, authenticationDisable
     {
       id: 'cursor',
       name: 'Cursor',
-      note: 'Save globally, or move the same object to .cursor/mcp.json for one project.',
+      note: home.connect.guides.cursor,
       location: '~/.cursor/mcp.json',
       code: JSON.stringify({ mcpServers: { bronom: { url: endpoint, ...(headers && { headers }) } } }, null, 2)
     },
     {
       id: 'vscode',
       name: 'VS Code / Copilot',
-      note: 'Save in the workspace, or use MCP: Open User Configuration for global access.',
+      note: home.connect.guides.vscode,
       location: '.vscode/mcp.json',
       code: JSON.stringify({ servers: { bronom: { type: 'http', url: endpoint, ...(headers && { headers }) } } }, null, 2)
     },
     {
       id: 'generic',
       name: 'Generic MCP client',
-      note: 'Use Streamable HTTP and point the client directly at Bronom.',
-      location: 'Client MCP settings',
+      note: home.connect.guides.generic,
+      location: home.connect.guides.genericLocation,
       code: JSON.stringify({ name: 'bronom', transport: 'streamable-http', url: endpoint, ...(headers && { headers }) }, null, 2)
     }
   ]
 }
 
 export function renderHomePage(options: HomePageOptions): string {
+  const home = localeMessages[options.locale].home
   const endpoint = escapeHtml(options.endpoint)
-  const guides = agentGuides(options.endpoint, options.tokenPath, options.authenticationDisabled)
+  const guides = agentGuides(options.endpoint, options.locale, options.tokenPath, options.authenticationDisabled)
   const securityNote = options.authenticationDisabled
-    ? 'Warning: MCP authentication is disabled for this launch. Any process on this computer can control this browser profile.'
+    ? home.security.disabled
     : options.tokenPath
-    ? `Authentication is required. Bronom generated an owner-only token at ${options.tokenPath}. The token is never displayed on this page.`
-    : 'Authentication is required. Use the BRONOM_MCP_TOKEN value supplied when Bronom was launched.'
+    ? home.security.tokenFile.replace('{path}', options.tokenPath)
+    : home.security.tokenEnvironment
 
   return `<!doctype html>
-<html lang="en">
+<html lang="${options.locale}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Bronom Home</title>
+  <title>${escapeHtml(home.title)}</title>
   <style>
     :root {
       color-scheme: light dark;
@@ -240,39 +250,39 @@ export function renderHomePage(options: HomePageOptions): string {
   <main class="page">
     <section class="hero">
       <div>
-        <div class="brand"><span class="mark">B</span> Bronom home</div>
-        <h1>Your browser, ready for coding agents.</h1>
-        <p class="lead">Keep one visible browser session open, share its cookies and storage across tabs, and let any MCP-compatible coding agent navigate it with you.</p>
+        <div class="brand"><span class="mark">B</span> ${escapeHtml(home.brand)}</div>
+        <h1>${escapeHtml(home.hero)}</h1>
+        <p class="lead">${escapeHtml(home.lead)}</p>
       </div>
       <div class="hero-status" aria-live="polite">
-        <span id="server-state" class="status-label"><span class="dot"></span> MCP server online</span>
-        <strong id="active-count" class="status-value">0 active</strong>
-        <span id="request-count" class="status-detail">Waiting for the first tool call</span>
+        <span id="server-state" class="status-label"><span class="dot"></span> ${escapeHtml(home.status.online)}</span>
+        <strong id="active-count" class="status-value">${escapeHtml(home.status.activeOther.replace('{count}', '0'))}</strong>
+        <span id="request-count" class="status-detail">${escapeHtml(home.status.waiting)}</span>
       </div>
     </section>
 
     <div class="endpoint">
-      <span class="endpoint-label">Streamable HTTP</span>
+      <span class="endpoint-label">${escapeHtml(home.endpoint)}</span>
       <code id="endpoint">${endpoint}</code>
-      <button class="copy-button" type="button" data-copy-target="endpoint">Copy URL</button>
+      <button class="copy-button" type="button" data-copy-target="endpoint">${escapeHtml(home.copyUrl)}</button>
     </div>
 
     <div class="grid">
       <section class="panel" aria-labelledby="connect-title">
         <header class="panel-heading">
-          <div><h2 id="connect-title">Connect your coding agent</h2><p>Choose a client, copy the setup, then create a named workspace before browsing.</p></div>
-          <span class="count">5 clients</span>
+          <div><h2 id="connect-title">${escapeHtml(home.connect.heading)}</h2><p>${escapeHtml(home.connect.description)}</p></div>
+          <span class="count">${escapeHtml(home.connect.clients)}</span>
         </header>
         <div class="agent-layout">
-          <nav id="agent-list" class="agents" aria-label="Coding agents"></nav>
+          <nav id="agent-list" class="agents" aria-label="${escapeHtml(home.connect.agentsLabel)}"></nav>
           <div class="guide">
-            <span class="guide-kicker">Setup instructions</span>
+            <span class="guide-kicker">${escapeHtml(home.connect.instructions)}</span>
             <h3 id="guide-name"></h3>
             <p id="guide-note" class="guide-note"></p>
             <div id="guide-location" class="location"></div>
             <div class="code-wrap">
               <pre><code id="guide-code"></code></pre>
-              <button class="copy-button code-copy" type="button" data-copy-target="guide-code">Copy</button>
+              <button class="copy-button code-copy" type="button" data-copy-target="guide-code">${escapeHtml(home.connect.copy)}</button>
             </div>
             <p class="security">${escapeHtml(securityNote)}</p>
           </div>
@@ -281,8 +291,8 @@ export function renderHomePage(options: HomePageOptions): string {
 
       <section class="panel" aria-labelledby="connections-title">
         <header class="panel-heading">
-          <div><h2 id="connections-title">Connections</h2><p>Active requests and recently seen MCP clients.</p></div>
-          <span id="client-count" class="count">0 clients</span>
+          <div><h2 id="connections-title">${escapeHtml(home.connections.heading)}</h2><p>${escapeHtml(home.connections.description)}</p></div>
+          <span id="client-count" class="count">${escapeHtml(home.counts.clientsOther.replace('{count}', '0'))}</span>
         </header>
         <div id="connections" class="connections-body"></div>
       </section>
@@ -290,42 +300,44 @@ export function renderHomePage(options: HomePageOptions): string {
 
     <section class="panel activity" aria-labelledby="activity-title">
       <header class="panel-heading">
-        <div><h2 id="activity-title">Agent activity</h2><p>A local, content-free view of what Bronom handled during this launch.</p></div>
-        <span id="activity-count" class="count">0 actions</span>
+        <div><h2 id="activity-title">${escapeHtml(home.activity.heading)}</h2><p>${escapeHtml(home.activity.description)}</p></div>
+        <span id="activity-count" class="count">${escapeHtml(home.counts.actionsOther.replace('{count}', '0'))}</span>
       </header>
       <div class="impact-grid">
-        <div class="impact"><strong id="completed-count">0</strong><span>Tab actions completed</span></div>
-        <div class="impact"><strong id="tool-types-count">0</strong><span>Tools used</span></div>
-        <div class="impact"><strong id="success-rate">—</strong><span>Successful actions</span></div>
+        <div class="impact"><strong id="completed-count">0</strong><span>${escapeHtml(home.activity.tabActionsCompleted)}</span></div>
+        <div class="impact"><strong id="tool-types-count">0</strong><span>${escapeHtml(home.activity.toolsUsed)}</span></div>
+        <div class="impact"><strong id="success-rate">—</strong><span>${escapeHtml(home.activity.successfulActions)}</span></div>
       </div>
       <div class="activity-layout">
         <div class="activity-column">
-          <h3>Recent activity</h3>
+          <h3>${escapeHtml(home.activity.recent)}</h3>
           <div id="activity-list" class="activity-list"></div>
-          <p class="privacy-note">Bronom records only tool names, timing, and outcome in memory. URLs, selectors, typed text, screenshots, and page content are not stored here.</p>
+          <p class="privacy-note">${escapeHtml(home.activity.privacy)}</p>
         </div>
         <aside class="support-card">
-          <span>Open source</span>
-          <h3 id="support-heading">Use Bronom anywhere. Help improve it.</h3>
-          <p id="support-message">Apache 2.0 permits personal and commercial use, modification, and redistribution under its terms.</p>
-          <a href="https://github.com/Netroforge/bronom/blob/main/CONTRIBUTING.md" target="_blank" rel="noreferrer">Contribute ↗</a>
-          <small>Focused issues and signed-off code contributions are welcome.</small>
+          <span>${escapeHtml(home.support.kicker)}</span>
+          <h3 id="support-heading">${escapeHtml(home.support.heading)}</h3>
+          <p id="support-message">${escapeHtml(home.support.message)}</p>
+          <a href="https://github.com/Netroforge/bronom/blob/main/CONTRIBUTING.md" target="_blank" rel="noreferrer">${escapeHtml(home.support.contribute)}</a>
+          <small>${escapeHtml(home.support.welcome)}</small>
         </aside>
       </div>
     </section>
 
     <section class="panel tools" aria-labelledby="tools-title">
       <header class="panel-heading">
-        <div><h2 id="tools-title">Browser tooling</h2><p>The live MCP catalog available to every connected agent.</p></div>
-        <span id="tool-count" class="count">0 tools</span>
+        <div><h2 id="tools-title">${escapeHtml(home.tools.heading)}</h2><p>${escapeHtml(home.tools.description)}</p></div>
+        <span id="tool-count" class="count">${escapeHtml(home.counts.tools.replace('{count}', '0'))}</span>
       </header>
       <div id="tool-grid" class="tool-grid"></div>
     </section>
 
-    <footer class="footer"><span>Bronom keeps running when its window is closed.</span><span id="server-version">Bronom ${escapeHtml(options.initialState.version)}</span></footer>
+    <footer class="footer"><span>${escapeHtml(home.footer)}</span><span id="server-version">Bronom ${escapeHtml(options.initialState.version)}</span></footer>
   </main>
   <script>
     const guides = ${serialized(guides)};
+    const messages = ${serialized(home)};
+    const locale = ${serialized(options.locale)};
     let dashboard = ${serialized(options.initialState)};
     let selectedGuide = guides[0].id;
 
@@ -335,18 +347,26 @@ export function renderHomePage(options: HomePageOptions): string {
       return node.innerHTML;
     }
 
+    function interpolate(message, values = {}) {
+      return message.replace(/\{([A-Za-z][\w]*)\}/g, (_, name) => String(values[name] ?? '{' + name + '}'));
+    }
+
+    function countMessage(one, other, count) {
+      return interpolate(count === 1 ? one : other, { count: new Intl.NumberFormat(locale).format(count) });
+    }
+
     function relativeTime(value) {
       const elapsed = Date.now() - new Date(value).getTime();
-      if (elapsed < 5000) return 'just now';
-      if (elapsed < 60000) return Math.floor(elapsed / 1000) + 's ago';
-      if (elapsed < 3600000) return Math.floor(elapsed / 60000) + 'm ago';
-      return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      if (elapsed < 5000) return messages.relativeTime.now;
+      if (elapsed < 60000) return interpolate(messages.relativeTime.seconds, { count: new Intl.NumberFormat(locale).format(Math.floor(elapsed / 1000)) });
+      if (elapsed < 3600000) return interpolate(messages.relativeTime.minutes, { count: new Intl.NumberFormat(locale).format(Math.floor(elapsed / 60000)) });
+      return new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' }).format(new Date(value));
     }
 
     function duration(value) {
-      if (value < 1000) return value + ' ms';
-      if (value < 60000) return (value / 1000).toFixed(value < 10000 ? 1 : 0) + ' s';
-      return Math.round(value / 60000) + ' min';
+      if (value < 1000) return new Intl.NumberFormat(locale).format(value) + ' ms';
+      if (value < 60000) return new Intl.NumberFormat(locale, { maximumFractionDigits: value < 10000 ? 1 : 0 }).format(value / 1000) + ' s';
+      return new Intl.NumberFormat(locale).format(Math.round(value / 60000)) + ' min';
     }
 
     function renderGuide() {
@@ -368,48 +388,48 @@ export function renderHomePage(options: HomePageOptions): string {
       const active = dashboard.activeRequests;
       const serverState = document.getElementById('server-state');
       const status = dashboard.status || (dashboard.paused ? 'paused' : 'ready');
-      const statusLabels = { starting: 'MCP server starting', ready: 'MCP server online', paused: 'Agents paused', error: 'MCP server error' };
+      const statusLabels = { starting: messages.status.starting, ready: messages.status.online, paused: messages.status.paused, error: messages.status.error };
       serverState.innerHTML = '<span class="dot ' + status + '"></span> ' + statusLabels[status];
-      serverState.title = status === 'error' ? (dashboard.error || 'Unknown startup error') : '';
-      document.getElementById('active-count').textContent = status === 'paused' ? 'Paused' : status === 'error' ? 'Unavailable' : status === 'starting' ? 'Starting' : active + ' active';
+      serverState.title = status === 'error' ? (dashboard.error || messages.status.unknownError) : '';
+      document.getElementById('active-count').textContent = status === 'paused' ? messages.status.pausedValue : status === 'error' ? messages.status.unavailable : status === 'starting' ? messages.status.startingValue : countMessage(messages.status.activeOne, messages.status.activeOther, active);
       document.getElementById('request-count').textContent = dashboard.totalRequests
-        ? dashboard.totalRequests + ' MCP request' + (dashboard.totalRequests === 1 ? '' : 's') + ' handled'
-        : 'Waiting for the first tool call';
-      document.getElementById('client-count').textContent = dashboard.clients.length + ' client' + (dashboard.clients.length === 1 ? '' : 's');
-      document.getElementById('tool-count').textContent = dashboard.tools.length + ' tools';
+        ? countMessage(messages.counts.requestsOne, messages.counts.requestsOther, dashboard.totalRequests)
+        : messages.status.waiting;
+      document.getElementById('client-count').textContent = countMessage(messages.counts.clientsOne, messages.counts.clientsOther, dashboard.clients.length);
+      document.getElementById('tool-count').textContent = interpolate(messages.counts.tools, { count: new Intl.NumberFormat(locale).format(dashboard.tools.length) });
       document.getElementById('server-version').textContent = 'Bronom ' + dashboard.version;
 
       const completed = dashboard.completedToolCalls || 0;
       const failures = (dashboard.toolMetrics || []).reduce((total, metric) => total + metric.failures, 0);
-      const successRate = completed ? Math.round(((completed - failures) / completed) * 100) + '%' : '—';
-      document.getElementById('activity-count').textContent = completed + ' action' + (completed === 1 ? '' : 's');
-      document.getElementById('completed-count').textContent = completed;
-      document.getElementById('tool-types-count').textContent = (dashboard.toolMetrics || []).length;
+      const successRate = completed ? new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 0 }).format((completed - failures) / completed) : '—';
+      document.getElementById('activity-count').textContent = countMessage(messages.counts.actionsOne, messages.counts.actionsOther, completed);
+      document.getElementById('completed-count').textContent = new Intl.NumberFormat(locale).format(completed);
+      document.getElementById('tool-types-count').textContent = new Intl.NumberFormat(locale).format((dashboard.toolMetrics || []).length);
       document.getElementById('success-rate').textContent = successRate;
       document.getElementById('support-heading').textContent = completed
-        ? 'Bronom handled ' + completed + ' tab action' + (completed === 1 ? '' : 's') + ' this launch.'
-        : 'Use Bronom anywhere. Help improve it.';
+        ? countMessage(messages.support.activeHeadingOne, messages.support.activeHeadingOther, completed)
+        : messages.support.heading;
       document.getElementById('support-message').textContent = completed
-        ? 'If Bronom is useful, consider contributing a fix, documentation, or project support.'
-        : 'Apache 2.0 permits personal and commercial use, modification, and redistribution under its terms.';
+        ? messages.support.activeMessage
+        : messages.support.message;
 
       const activityList = document.getElementById('activity-list');
       if (!dashboard.recentActivity?.length) {
-        activityList.innerHTML = '<div class="empty"><div><strong>No tab actions yet</strong><span>Tool calls will appear here after an agent starts working.</span></div></div>';
+        activityList.innerHTML = '<div class="empty"><div><strong>' + escapeText(messages.activity.emptyHeading) + '</strong><span>' + escapeText(messages.activity.emptyDescription) + '</span></div></div>';
       } else {
         activityList.innerHTML = dashboard.recentActivity.slice(0, 8).map((activity) =>
-          '<div class="activity-item"><div><code>' + escapeText(activity.toolName) + '</code><div class="activity-meta">' + escapeText(relativeTime(activity.completedAt)) + ' · ' + escapeText(duration(activity.durationMs)) + '</div></div><span class="outcome ' + (activity.outcome === 'failed' ? 'failed' : '') + '">' + (activity.outcome === 'failed' ? 'Failed' : 'Done') + '</span></div>'
+          '<div class="activity-item"><div><code>' + escapeText(activity.toolName) + '</code><div class="activity-meta">' + escapeText(relativeTime(activity.completedAt)) + ' · ' + escapeText(duration(activity.durationMs)) + '</div></div><span class="outcome ' + (activity.outcome === 'failed' ? 'failed' : '') + '">' + (activity.outcome === 'failed' ? escapeText(messages.activity.failed) : escapeText(messages.activity.done)) + '</span></div>'
         ).join('');
       }
 
       const connections = document.getElementById('connections');
       if (!dashboard.clients.length) {
-        connections.innerHTML = '<div class="empty"><div><strong>No clients connected yet</strong><span>Copy a setup snippet, refresh your coding agent, and its activity will appear here.</span></div></div>';
+        connections.innerHTML = '<div class="empty"><div><strong>' + escapeText(messages.connections.emptyHeading) + '</strong><span>' + escapeText(messages.connections.emptyDescription) + '</span></div></div>';
       } else {
         connections.innerHTML = dashboard.clients.map((client) => {
           const activeClient = client.activeRequests > 0;
           const initial = (client.name || '?').trim().charAt(0).toUpperCase();
-          return '<div class="connection"><span class="client-icon">' + escapeText(initial) + '</span><div><div class="client-name">' + escapeText(client.name) + '</div><div class="client-meta">' + escapeText(client.version || 'Version not reported') + ' · ' + escapeText(relativeTime(client.lastSeenAt)) + ' · ' + client.requestCount + ' requests</div></div><span class="connection-state ' + (activeClient ? 'active' : '') + '">' + (activeClient ? 'Active' : 'Recent') + '</span></div>';
+          return '<div class="connection"><span class="client-icon">' + escapeText(initial) + '</span><div><div class="client-name">' + escapeText(client.name) + '</div><div class="client-meta">' + escapeText(client.version || messages.connections.versionUnknown) + ' · ' + escapeText(relativeTime(client.lastSeenAt)) + ' · ' + escapeText(interpolate(messages.counts.requests, { count: new Intl.NumberFormat(locale).format(client.requestCount) })) + '</div></div><span class="connection-state ' + (activeClient ? 'active' : '') + '">' + (activeClient ? escapeText(messages.connections.active) : escapeText(messages.connections.recent)) + '</span></div>';
         }).join('');
       }
 
@@ -424,7 +444,7 @@ export function renderHomePage(options: HomePageOptions): string {
         if (response.ok) dashboard = await response.json();
         renderDashboard();
       } catch {
-        document.getElementById('request-count').textContent = 'Reconnecting to local status';
+        document.getElementById('request-count').textContent = messages.status.reconnecting;
       }
     }
 
@@ -433,12 +453,12 @@ export function renderHomePage(options: HomePageOptions): string {
       const label = button.textContent;
       const title = button.title;
       try {
-        if (!window.bronomHome?.copyText) throw new Error('The native clipboard bridge is unavailable');
+        if (!window.bronomHome?.copyText) throw new Error(messages.copy.unavailable);
         await window.bronomHome.copyText(target.textContent || '');
-        button.textContent = 'Copied';
+        button.textContent = messages.copy.copied;
       } catch (error) {
-        button.textContent = 'Copy failed';
-        button.title = error instanceof Error ? error.message : 'The system clipboard did not accept the text';
+        button.textContent = messages.copy.failed;
+        button.title = error instanceof Error ? error.message : messages.copy.rejected;
       }
       setTimeout(() => { button.textContent = label; button.title = title; }, 1200);
     }));

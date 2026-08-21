@@ -2,11 +2,13 @@ import type { SearchEngineName } from './search-engine.js'
 import type { BrowserTabGroupColor } from './tab-groups.js'
 import type { MemorySaverTimeoutMinutes } from './memory-saver.js'
 import type { InterfaceScale } from './interface-scale.js'
+import type { LanguagePreference, SupportedLocale } from './locale.js'
 
 export type { SearchEngineName } from './search-engine.js'
 export type { BrowserTabGroupColor } from './tab-groups.js'
 export type { MemorySaverTimeoutMinutes } from './memory-saver.js'
 export type { InterfaceScale } from './interface-scale.js'
+export type { LanguagePreference, SupportedLocale } from './locale.js'
 
 export type HelpMenuAction = 'shortcuts' | 'about' | 'support'
 
@@ -245,6 +247,7 @@ export interface BrowserInspectorIssuesReport {
   infoCount: number
   issues: BrowserInspectorIssue[]
   truncated: boolean
+  devToolsOpen: boolean
   clearedCount?: number
   caveats: string[]
 }
@@ -376,6 +379,14 @@ export interface AppSettings {
   memorySaverEnabled: boolean
   memorySaverTimeoutMinutes: MemorySaverTimeoutMinutes
   checkForUpdatesOnStartup: boolean
+  languagePreference: LanguagePreference
+}
+
+export interface RendererSettingsState {
+  settings: AppSettings
+  systemTheme: 'light' | 'dark'
+  systemLocale: SupportedLocale
+  resolvedLocale: SupportedLocale
 }
 
 export interface DownloadDirectorySelection {
@@ -1362,6 +1373,7 @@ export const BROWSER_NETWORK_ABORT_REASONS = [
 ] as const
 
 export type BrowserNetworkAbortReason = (typeof BROWSER_NETWORK_ABORT_REASONS)[number]
+export const DEFAULT_BROWSER_NETWORK_ABORT_REASON: BrowserNetworkAbortReason = 'BlockedByClient'
 export type BrowserNetworkRouteMoveDirection = 'up' | 'down'
 export type BrowserNetworkThrottlePreset = 'fast-4g' | 'slow-4g' | 'slow-3g'
 
@@ -2273,6 +2285,7 @@ export interface BronomBrowsingDataApi {
 
 export interface BronomSettingsApi {
   get(): Promise<AppSettings>
+  getRendererState(): Promise<RendererSettingsState>
   getSystemTheme(): Promise<'light' | 'dark'>
   setTheme(theme: ThemeName): Promise<AppSettings>
   setInterfaceScale(scale: InterfaceScale): Promise<AppSettings>
@@ -2290,8 +2303,10 @@ export interface BronomSettingsApi {
   setMemorySaverEnabled(enabled: boolean): Promise<AppSettings>
   setMemorySaverTimeoutMinutes(timeoutMinutes: MemorySaverTimeoutMinutes): Promise<AppSettings>
   setCheckForUpdatesOnStartup(enabled: boolean): Promise<AppSettings>
+  setLanguagePreference(preference: LanguagePreference): Promise<RendererSettingsState>
   onChanged(listener: (settings: AppSettings) => void): () => void
   onSystemThemeChanged(listener: (theme: 'light' | 'dark') => void): () => void
+  onRendererStateChanged(listener: (state: RendererSettingsState) => void): () => void
 }
 
 export interface BronomMcpApi {

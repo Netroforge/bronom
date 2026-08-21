@@ -1525,7 +1525,6 @@ test('reorders pinned and regular tabs by dragging and saves the new order', asy
   ])
 
   const alphaTab = appWindow.getByRole('tab', { name: /^Drag alpha/ })
-  const betaTab = appWindow.getByRole('tab', { name: /^Drag beta/ })
   const gammaTab = appWindow.getByRole('tab', { name: /^Drag gamma/ })
   await gammaTab.dragTo(alphaTab, { targetPosition: { x: 3, y: 18 } })
   await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => state.tabs.filter((tab) => !tab.url.startsWith('bronom://')).map((tab) => tab.title))`)).toEqual([

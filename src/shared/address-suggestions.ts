@@ -42,6 +42,7 @@ export interface AddressSuggestionOverlayState {
   suggestions: AddressSuggestion[]
   selectedIndex: number
   theme: AddressSuggestionOverlayTheme
+  locale: import('./locale.js').SupportedLocale
 }
 
 export interface AddressSuggestionOverlayRequest extends AddressSuggestionOverlayState {

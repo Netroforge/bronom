@@ -3184,7 +3184,7 @@ button { color: inherit; }
 .panel-close svg { width: 20px; height: 20px; }
 
 .settings-layout { display: grid; min-height: 330px; overflow: hidden; flex: 1; grid-template-columns: 220px minmax(0, 1fr); }
-.settings-sidebar { padding: 12px; overflow-y: auto; border-right: 1px solid var(--border); background: var(--surface-muted); }
+.settings-sidebar { padding: 12px; overflow-x: hidden; overflow-y: auto; border-right: 1px solid var(--border); background: var(--surface-muted); }
 .settings-nav-item {
   position: relative;
   display: flex;
@@ -3202,8 +3202,9 @@ button { color: inherit; }
 .settings-nav-item + .settings-nav-item { margin-top: 5px; }
 .settings-nav-item.active { border-color: var(--border-soft); color: var(--text); background: var(--surface); box-shadow: 0 1px 3px var(--shadow); }
 .settings-nav-item.active::before { position: absolute; inset: 9px auto 9px -1px; width: 3px; border-radius: 2px; background: var(--accent); content: ""; }
+.settings-nav-item > span:last-child { min-width: 0; }
 .settings-nav-item strong, .settings-nav-item small { display: block; }
-.settings-nav-item strong { font-size: 14px; }
+.settings-nav-item strong { overflow-wrap: anywhere; font-size: 14px; }
 .settings-nav-item small { margin-top: 3px; color: var(--muted); font-size: 12px; line-height: 1.35; }
 .settings-nav-icon { display: grid; width: 22px; height: 22px; flex: 0 0 22px; place-items: center; border-radius: 6px; color: var(--accent-text); background: var(--accent-soft); }
 .settings-nav-icon svg { width: 15px; height: 15px; }

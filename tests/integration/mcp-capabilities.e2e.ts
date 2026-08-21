@@ -1,17 +1,13 @@
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
-import { execFile } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { promisify } from 'node:util'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { BROWSER_TOOL_CATALOG } from '../../src/main/mcp/server.js'
 import { expect, test } from './fixtures.js'
 import { useMcpWorkspace } from '../../scripts/mcp-workspace.js'
-
-const execFileAsync = promisify(execFile)
 
 function webSocketServerFrame(payload: string | Buffer, opcode = 1): Buffer {
   const data = Buffer.isBuffer(payload) ? payload : Buffer.from(payload, 'utf8')
@@ -787,13 +783,15 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     expect(JSON.stringify(designReport)).not.toContain('contrast-probe')
 
     await openPageTool(/Design overview:/)
-    const designPanel = appWindow.getByRole('dialog', { name: 'Design overview' })
+    await appWindow.evaluate("window.bronomSettings.setLanguagePreference('uk-UA')")
+    const designPanel = appWindow.getByRole('dialog', { name: 'Огляд дизайну' })
     await expect(designPanel).toBeVisible()
-    await expect(designPanel).toContainText('Computed colors')
-    await expect(designPanel).toContainText('Typography')
-    await expect(designPanel).toContainText('Likely text contrast issues')
-    await designPanel.getByRole('button', { name: 'Close design overview' }).click()
+    await expect(designPanel).toContainText('Обчислені кольори')
+    await expect(designPanel).toContainText('Типографіка')
+    await expect(designPanel).toContainText('Ймовірні проблеми контрасту тексту')
+    await designPanel.getByRole('button', { name: 'Закрити огляд дизайну' }).click()
     await expect(designPanel).toBeHidden()
+    await appWindow.evaluate("window.bronomSettings.setLanguagePreference('en-US')")
 
     const metadataResult = await client.callTool({
       name: 'browser_page_metadata',
@@ -836,13 +834,15 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     expect(serializedMetadata).not.toContain('design-overview-secret-body-copy')
 
     await openPageTool(/Page metadata:/)
-    const metadataPanel = appWindow.getByRole('dialog', { name: 'Page metadata' })
+    await appWindow.evaluate("window.bronomSettings.setLanguagePreference('uk-UA')")
+    const metadataPanel = appWindow.getByRole('dialog', { name: 'Метадані сторінки' })
     await expect(metadataPanel).toBeVisible()
-    await expect(metadataPanel).toContainText('Search result inputs')
-    await expect(metadataPanel).toContainText('Social cards')
+    await expect(metadataPanel).toContainText('Дані для результату пошуку')
+    await expect(metadataPanel).toContainText('Соціальні картки')
     await expect(metadataPanel).toContainText('WebPage')
-    await metadataPanel.getByRole('button', { name: 'Close page metadata' }).click()
+    await metadataPanel.getByRole('button', { name: 'Закрити метадані сторінки' }).click()
     await expect(metadataPanel).toBeHidden()
+    await appWindow.evaluate("window.bronomSettings.setLanguagePreference('en-US')")
 
     const securityResult = await client.callTool({
       name: 'browser_security',
@@ -860,12 +860,14 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     expect(JSON.stringify(securityReport)).not.toContain('response-secret')
 
     await openPageTool(/Security:/)
-    const securityPanel = appWindow.getByRole('dialog', { name: 'Connection security' })
+    await appWindow.evaluate("window.bronomSettings.setLanguagePreference('uk-UA')")
+    const securityPanel = appWindow.getByRole('dialog', { name: 'Безпека з’єднання' })
     await expect(securityPanel).toBeVisible()
-    await expect(securityPanel).toContainText('Encrypted transport')
-    await expect(securityPanel).toContainText('No TLS certificate details available')
-    await securityPanel.getByRole('button', { name: 'Close security report' }).click()
+    await expect(securityPanel).toContainText('Зашифрований транспорт')
+    await expect(securityPanel).toContainText('Відомості сертифіката TLS недоступні')
+    await securityPanel.getByRole('button', { name: 'Закрити звіт безпеки' }).click()
     await expect(securityPanel).toBeHidden()
+    await appWindow.evaluate("window.bronomSettings.setLanguagePreference('en-US')")
 
     const coverageStarted = await client.callTool({
       name: 'browser_code_coverage',
@@ -900,12 +902,14 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     expect(JSON.stringify(coverageReport)).not.toContain('bronom-console-marker')
 
     await openPageTool(/Code coverage:/)
-    const coveragePanel = appWindow.getByRole('dialog', { name: 'Code coverage' })
+    await appWindow.evaluate("window.bronomSettings.setLanguagePreference('uk-UA')")
+    const coveragePanel = appWindow.getByRole('dialog', { name: 'Покриття коду' })
     await expect(coveragePanel).toBeVisible()
-    await expect(coveragePanel).toContainText('Unused')
-    await expect(coveragePanel).toContainText('Resources')
-    await coveragePanel.getByRole('button', { name: 'Close code coverage' }).click()
+    await expect(coveragePanel).toContainText('Не використано')
+    await expect(coveragePanel).toContainText('Ресурси')
+    await coveragePanel.getByRole('button', { name: 'Закрити покриття коду' }).click()
     await expect(coveragePanel).toBeHidden()
+    await appWindow.evaluate("window.bronomSettings.setLanguagePreference('en-US')")
 
     const cpuProfileStarted = await client.callTool({
       name: 'browser_cpu_profile',
@@ -946,14 +950,15 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     expect(JSON.stringify(cpuProfile)).not.toContain('cpu-profile-secret')
 
     await openPageTool(/JavaScript CPU profile:/)
-    const cpuProfilePanel = appWindow.getByRole('dialog', { name: 'JavaScript CPU profile' })
+    await appWindow.evaluate("window.bronomSettings.setLanguagePreference('uk-UA')")
+    const cpuProfilePanel = appWindow.getByRole('dialog', { name: 'Профіль CPU JavaScript' })
     await expect(cpuProfilePanel).toBeVisible()
     await expect(cpuProfilePanel).toContainText('cpuProfileBusyLoop')
-    await expect(cpuProfilePanel).toContainText('Sampled time')
-    await cpuProfilePanel.getByRole('button', { name: 'Record again' }).click()
-    await expect(cpuProfilePanel).toContainText('CPU activity is recording')
+    await expect(cpuProfilePanel).toContainText('Вибраний час')
+    await cpuProfilePanel.getByRole('button', { name: 'Записати знову' }).click()
+    await expect(cpuProfilePanel).toContainText('Запис активності CPU триває')
     expect(await appWindow.evaluate(`window.bronom.toggleDevTools(${JSON.stringify(tabId)})`)).toBe(true)
-    await expect(cpuProfilePanel).toContainText('Find hot JavaScript functions')
+    await expect(cpuProfilePanel).toContainText('Знайдіть гарячі функції JavaScript')
     await expect.poll(() => electronApp.evaluate(({ webContents }, requestedOrigin) => {
       return webContents.getAllWebContents().some((contents) => (
         contents.getURL().startsWith(requestedOrigin) && contents.isDevToolsOpened()
@@ -974,8 +979,9 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       tabId,
       status: 'idle'
     })
-    await cpuProfilePanel.getByRole('button', { name: 'Close JavaScript CPU profile' }).click()
+    await cpuProfilePanel.getByRole('button', { name: 'Закрити профіль CPU JavaScript' }).click()
     await expect(cpuProfilePanel).toBeHidden()
+    await appWindow.evaluate("window.bronomSettings.setLanguagePreference('en-US')")
 
     const memoryBaselineResult = await client.callTool({
       name: 'browser_memory',
@@ -1091,20 +1097,22 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     expect(JSON.stringify(memoryMeasurement)).not.toContain('retained-memory-fixture')
 
     await openPageTool(/Page memory:/)
-    const memoryPanel = appWindow.getByRole('dialog', { name: 'Page memory' })
+    await appWindow.evaluate("window.bronomSettings.setLanguagePreference('uk-UA')")
+    const memoryPanel = appWindow.getByRole('dialog', { name: 'Памʼять сторінки' })
     await expect(memoryPanel).toBeVisible()
-    await expect(memoryPanel).toContainText('Runtime baseline active')
-    await expect(memoryPanel).toContainText('Growth is a clue, not proof of a leak')
-    await expect(memoryPanel).toContainText('Find retained allocations by function')
-    await expect(memoryPanel).toContainText('Sampled live bytes')
+    await expect(memoryPanel).toContainText('Базовий рівень виконання активний')
+    await expect(memoryPanel).toContainText('Зростання є підказкою, а не доказом витоку')
+    await expect(memoryPanel).toContainText('Знайдіть утримані розподіли за функцією')
+    await expect(memoryPanel).toContainText('Вибрані активні байти')
     await expect(memoryPanel).toContainText('retainMemoryForProfile')
-    await expect(memoryPanel.getByRole('button', { name: 'GC & measure' })).toBeVisible()
-    await memoryPanel.getByRole('button', { name: 'Clear', exact: true }).click()
-    await expect(memoryPanel).toContainText('No baseline')
+    await expect(memoryPanel.getByRole('button', { name: 'GC і вимірювання' })).toBeVisible()
+    await memoryPanel.getByRole('button', { name: 'Очистити', exact: true }).click()
+    await expect(memoryPanel).toContainText('Базового рівня немає')
     await expect(memoryPanel).toContainText('retainMemoryForProfile')
-    await expect(memoryPanel).not.toContainText('Baseline cleared')
-    await memoryPanel.getByRole('button', { name: 'Close memory report' }).click()
+    await expect(memoryPanel).not.toContainText('Базовий рівень очищено')
+    await memoryPanel.getByRole('button', { name: 'Закрити звіт памʼяті' }).click()
     await expect(memoryPanel).toBeHidden()
+    await appWindow.evaluate("window.bronomSettings.setLanguagePreference('en-US')")
 
     const sameUrlTabResult = await client.callTool({
       name: 'browser_new_tab',
@@ -2255,7 +2263,14 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       _bronom: { tabId, sanitized: true, includesBodies: false }
     })
     expect(savedHarText).not.toContain('request-secret')
-    await networkPanel.getByRole('button', { name: 'Close network monitor' }).click()
+    await appWindow.evaluate("window.bronomSettings.setLanguagePreference('uk-UA')")
+    const ukrainianNetworkPanel = appWindow.getByRole('dialog', { name: 'Мережа' })
+    await expect(ukrainianNetworkPanel.getByRole('searchbox', { name: 'Фільтрувати мережеві запити' }))
+      .toHaveValue('method:POST status-code:200 domain:127.0.0.1 larger-than:1 url:api-details')
+    await expect(ukrainianNetworkPanel).toContainText('Часові показники сервера')
+    await expect(ukrainianNetworkPanel).toContainText('request-kept')
+    await ukrainianNetworkPanel.getByRole('button', { name: 'Закрити монітор мережі' }).click()
+    await appWindow.evaluate("window.bronomSettings.setLanguagePreference('en-US')")
 
     await client.callTool({
       name: 'browser_evaluate',
@@ -2503,9 +2518,14 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     expect(copiedConsole).toContain('human-console-warning')
     expect(copiedConsole).not.toContain('human-console-secret')
     expect(copiedConsole).not.toContain('console-url-secret')
-    await consolePanel.getByRole('button', { name: 'Clear' }).click()
-    await expect(consolePanel).toContainText('No Console messages captured yet')
-    await consolePanel.getByRole('button', { name: 'Close Console' }).click()
+    await appWindow.evaluate("window.bronomSettings.setLanguagePreference('uk-UA')")
+    const ukrainianConsolePanel = appWindow.getByRole('dialog', { name: 'Консоль' })
+    await expect(ukrainianConsolePanel).toContainText('Попередження')
+    await expect(ukrainianConsolePanel.getByRole('searchbox', { name: 'Фільтрувати повідомлення консолі' })).toHaveValue('human-console')
+    await ukrainianConsolePanel.getByRole('button', { name: 'Очистити' }).click()
+    await expect(ukrainianConsolePanel).toContainText('Повідомлень консолі ще немає')
+    await ukrainianConsolePanel.getByRole('button', { name: 'Закрити консоль' }).click()
+    await appWindow.evaluate("window.bronomSettings.setLanguagePreference('en-US')")
 
     await client.callTool({ name: 'browser_select_tab', arguments: { tabId } })
     await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')).toBe(tabId)
@@ -2515,45 +2535,25 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     }) as CallToolResult
     expect(startedRepro.isError, text(startedRepro)).not.toBe(true)
     expect(JSON.parse(text(startedRepro))).toMatchObject({ tabId, active: true, stepCount: 1 })
-    const reproInputPoint = await electronApp.evaluate(async ({ BrowserWindow, WebContentsView }) => {
-      const main = BrowserWindow.getAllWindows().find((window) => window.contentView.children.some((candidate) => (
-        candidate instanceof WebContentsView && candidate.webContents.getTitle() === 'Capability fixture'
-      )))
-      const view = main?.contentView.children.find((candidate): candidate is InstanceType<typeof WebContentsView> => (
-        candidate instanceof WebContentsView && candidate.webContents.getTitle() === 'Capability fixture'
-      ))
-      if (!main || !view) throw new Error('Repro recorder fixture view was not found')
-      const page = view.webContents
-      const point = await page.executeJavaScript(`(() => {
-        const target = document.querySelector('#hover');
-        const bounds = target.getBoundingClientRect();
-        document.querySelector('#name').focus();
-        return { x: Math.round(bounds.left + bounds.width / 2), y: Math.round(bounds.top + bounds.height / 2) };
-      })()`) as { x: number; y: number }
-      page.focus()
-      const contentBounds = main.getContentBounds()
-      const viewBounds = view.getBounds()
-      return { x: contentBounds.x + viewBounds.x + point.x, y: contentBounds.y + viewBounds.y + point.y }
-    })
-    await execFileAsync('python3', [
-      join(process.cwd(), 'tests/integration/x11-input.py'),
-      String(reproInputPoint.x),
-      String(reproInputPoint.y),
-      'S'
-    ], { env: process.env })
     await electronApp.evaluate(async ({ BrowserWindow, WebContentsView }) => {
       const view = BrowserWindow.getAllWindows()
         .flatMap((window) => window.contentView.children)
         .find((candidate): candidate is InstanceType<typeof WebContentsView> => (
           candidate instanceof WebContentsView && candidate.webContents.getTitle() === 'Capability fixture'
-        ))
+      ))
       if (!view) throw new Error('Active repro recorder fixture view disappeared')
+      view.webContents.focus()
+      await view.webContents.executeJavaScript("document.querySelector('#name').focus()")
+      view.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'S' })
+      view.webContents.sendInputEvent({ type: 'char', keyCode: 'S' })
+      view.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'S' })
       const point = await view.webContents.executeJavaScript(`(() => {
         const bounds = document.querySelector('#hover').getBoundingClientRect();
         return { x: Math.round(bounds.left + bounds.width / 2), y: Math.round(bounds.top + bounds.height / 2) };
       })()`) as { x: number; y: number }
       view.webContents.sendInputEvent({ type: 'mouseDown', x: point.x, y: point.y, button: 'left', clickCount: 1 })
       view.webContents.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button: 'left', clickCount: 1 })
+      view.webContents.sendInputEvent({ type: 'mouseWheel', x: point.x, y: point.y, deltaY: -120, canScroll: true })
     })
     await expect.poll(async () => {
       const current = await client.callTool({ name: 'browser_repro', arguments: { tabId, action: 'get' } }) as CallToolResult
@@ -2759,9 +2759,13 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
     const copiedInspectorIssues = await electronApp.evaluate(({ clipboard }) => clipboard.readText())
     expect(JSON.parse(copiedInspectorIssues)).toMatchObject({ tabId: issueTabId, issueCount: expect.any(Number) })
     expect(copiedInspectorIssues).not.toContain('server-secret')
-    await inspectorIssuesPanel.getByRole('button', { name: 'Clear' }).click()
-    await expect(inspectorIssuesPanel).toContainText('No browser issues captured')
-    await inspectorIssuesPanel.getByRole('button', { name: 'Close browser issues' }).click()
+    await appWindow.evaluate("window.bronomSettings.setLanguagePreference('uk-UA')")
+    const ukrainianIssuesPanel = appWindow.getByRole('dialog', { name: 'Проблеми' })
+    await expect(ukrainianIssuesPanel).toContainText('Задіяні ресурси')
+    await ukrainianIssuesPanel.getByRole('button', { name: 'Очистити' }).click()
+    await expect(ukrainianIssuesPanel).toContainText('Проблем браузера не зібрано')
+    await ukrainianIssuesPanel.getByRole('button', { name: 'Закрити проблеми браузера' }).click()
+    await appWindow.evaluate("window.bronomSettings.setLanguagePreference('en-US')")
     await client.callTool({ name: 'browser_close_tab', arguments: { tabId: issueTabId } })
     await client.callTool({ name: 'browser_select_tab', arguments: { tabId } })
 

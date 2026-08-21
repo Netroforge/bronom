@@ -126,10 +126,11 @@ function commandScore(command: CommandPaletteCommand, query: string): number {
 
 export function filterCommandPaletteCommands(
   query: string,
-  websiteAvailable: boolean
+  websiteAvailable: boolean,
+  commands: readonly CommandPaletteCommand[] = COMMAND_PALETTE_COMMANDS
 ): CommandPaletteCommand[] {
   const words = normalizedWords(query)
-  return COMMAND_PALETTE_COMMANDS
+  return commands
     .filter((command) => websiteAvailable || !command.websiteOnly)
     .filter((command) => {
       if (!words.length) return true

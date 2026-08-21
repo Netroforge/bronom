@@ -8,6 +8,7 @@ import {
   DEFAULT_MEMORY_SAVER_TIMEOUT_MINUTES,
   isMemorySaverTimeoutMinutes
 } from '../shared/memory-saver.js'
+import { isLanguagePreference } from '../shared/locale.js'
 
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: 'system',
@@ -22,7 +23,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   askWhereToSaveDownloads: false,
   memorySaverEnabled: true,
   memorySaverTimeoutMinutes: DEFAULT_MEMORY_SAVER_TIMEOUT_MINUTES,
-  checkForUpdatesOnStartup: true
+  checkForUpdatesOnStartup: true,
+  languagePreference: 'system'
 }
 
 export function isThemeName(value: unknown): value is ThemeName {
@@ -77,7 +79,10 @@ export class SettingsStore {
         memorySaverTimeoutMinutes: isMemorySaverTimeoutMinutes(value.memorySaverTimeoutMinutes)
           ? value.memorySaverTimeoutMinutes
           : DEFAULT_SETTINGS.memorySaverTimeoutMinutes,
-        checkForUpdatesOnStartup
+        checkForUpdatesOnStartup,
+        languagePreference: isLanguagePreference(value.languagePreference)
+          ? value.languagePreference
+          : DEFAULT_SETTINGS.languagePreference
       }
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code

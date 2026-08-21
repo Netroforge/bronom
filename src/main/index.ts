@@ -106,9 +106,16 @@ import {
   type McpControlState,
   type McpServerStatus,
   type PanelDock,
+  type RendererSettingsState,
   type SitePermissionDecision,
-  type ThemeName
+  type ThemeName,
+  type SupportedLocale
 } from '../shared/types.js'
+import {
+  isLanguagePreference,
+  resolveLocalePreference,
+  resolveSupportedLocale
+} from '../shared/locale.js'
 import { isBrowserTabGroupColor } from '../shared/tab-groups.js'
 import { isBrowserViewportEmulation } from '../shared/viewport-presets.js'
 import { isBrowserEnvironmentSettings } from '../shared/browser-environment.js'
@@ -120,6 +127,7 @@ import type {
   AddressSuggestionOverlayRequest,
   AddressSuggestionOverlayState
 } from '../shared/address-suggestions.js'
+import { translate, type MessageKey, type MessageParameters } from '../shared/i18n.js'
 
 const MCP_HOST = process.env.BRONOM_MCP_HOST || '127.0.0.1'
 const MCP_AUTH_DISABLED = process.env.BRONOM_DISABLE_MCP_AUTH === '1'
@@ -153,6 +161,7 @@ let addressSuggestionOverlayBounds: { x: number; y: number; width: number; maxHe
 let addressSuggestionOverlayVisible = false
 let addressSuggestionOverlayDismissalPending = false
 let panelWindowUrl: string | null = null
+let panelWindowPanel: DetachablePanelId | null = null
 let panelWindowRedocking = false
 let tabsManager: BrowserTabsManager | null = null
 let mcpServer: McpHttpServer | null = null
@@ -181,6 +190,8 @@ let bookmarkStore: BookmarkStore | null = null
 let historyStore: HistoryStore | null = null
 let credentialStorageStatus: CredentialStorageStatus = { available: false, reason: 'Secure storage is initializing.' }
 let settings: AppSettings = { ...DEFAULT_SETTINGS }
+let systemLocale: SupportedLocale = 'en-US'
+let resolvedLocale: SupportedLocale = 'en-US'
 let settingsMutationQueue: Promise<void> = Promise.resolve()
 let updateState: AppUpdateState = { status: 'idle', currentVersion: app.getVersion() }
 let updaterConfigured = false
@@ -197,9 +208,13 @@ let trayAttentionIcon: NativeImage | null = null
 // Keep the current clipboard image alive while Bronom owns the X11 clipboard.
 // This is harmless on Windows/macOS and avoids relying on a temporary NativeImage
 // wrapper being retained by the Linux clipboard backend.
-let lastScreenshotClipboardImage: NativeImage | null = null
-let lastCopiedText = ''
+let _lastScreenshotClipboardImage: NativeImage | null = null
+let _lastCopiedText = ''
 let clipboardOperationQueue: Promise<void> = Promise.resolve()
+
+function text(key: MessageKey, parameters?: MessageParameters): string {
+  return translate(resolvedLocale, key, parameters)
+}
 
 function queueClipboardOperation<T>(operation: () => Promise<T>): Promise<T> {
   const result = clipboardOperationQueue.then(operation)
@@ -210,12 +225,12 @@ function queueClipboardOperation<T>(operation: () => Promise<T>): Promise<T> {
 async function copyTextToClipboard(text: string): Promise<void> {
   await queueClipboardOperation(async () => {
     await writeVerifiedClipboardText(text, clipboard)
-    lastCopiedText = text
+    _lastCopiedText = text
   })
 }
 
 function reportClipboardFailure(error: unknown): void {
-  const message = error instanceof Error ? error.message : 'The system clipboard did not accept the text.'
+  const message = error instanceof Error ? error.message : text('native.errors.clipboard')
   if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
     mainWindow.webContents.send('clipboard:failed', message)
   }
@@ -226,8 +241,8 @@ function reportBrowserActionFailure(action: string, error: unknown): void {
   const failure: BrowserActionFailure = {
     action,
     message: /^Tab not found:/i.test(rawMessage)
-      ? 'The tab is no longer available.'
-      : rawMessage || 'The requested browser action could not be completed.'
+      ? text('native.errors.tabUnavailable')
+      : rawMessage || text('native.errors.actionFailed')
   }
   if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
     mainWindow.webContents.send('browser:action-failed', failure)
@@ -236,9 +251,9 @@ function reportBrowserActionFailure(action: string, error: unknown): void {
 
 async function writePngToClipboard(data: Buffer): Promise<{ width: number; height: number }> {
   const image = nativeImage.createFromBuffer(data)
-  if (image.isEmpty()) throw new Error('Could not create the selected screenshot')
+  if (image.isEmpty()) throw new Error(text('native.errors.screenshotCreate'))
   const expectedSize = image.getSize()
-  lastScreenshotClipboardImage = image
+  _lastScreenshotClipboardImage = image
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     // Do not let a previous image with the same dimensions masquerade as a
@@ -305,6 +320,15 @@ function updateSettings(updates: Partial<AppSettings>): Promise<AppSettings> {
   return operation.then(() => committed!)
 }
 
+function currentRendererSettingsState(): RendererSettingsState {
+  return {
+    settings: { ...settings },
+    systemTheme: nativeTheme.shouldUseDarkColors ? 'dark' : 'light',
+    systemLocale,
+    resolvedLocale
+  }
+}
+
 async function applyDownloadSettings(updates: Partial<AppSettings>): Promise<AppSettings> {
   const directory = effectiveDownloadDirectory({ ...settings, ...updates })
   await mkdir(directory, { recursive: true })
@@ -359,6 +383,7 @@ function sendToPanelWindow(channel: string, ...args: unknown[]): void {
 
 function publishSettings(): void {
   sendToShellWindows('settings:changed', settings)
+  sendToShellWindows('settings:renderer-state-changed', currentRendererSettingsState())
 }
 
 function publishUpdateState(next: Partial<AppUpdateState>): AppUpdateState {
@@ -567,13 +592,13 @@ async function handleCredentialCandidate(candidate: BrowserCredentialCandidate):
     return
   }
   const updating = credentialStore.has(candidate.origin, candidate.username)
-  const account = candidate.username || 'an unnamed account'
+  const account = candidate.username || text('native.dialog.unnamedAccount')
   const { response } = await showMessageBox({
     type: 'question',
-    title: updating ? 'Update saved password?' : 'Save password?',
-    message: `${updating ? 'Update' : 'Save'} the password for ${account}?`,
-    detail: `${candidate.origin}\n\nPasswords are encrypted with the operating system's secure storage. The vault itself is never exposed through MCP.`,
-    buttons: ['Not now', updating ? 'Update password' : 'Save password'],
+    title: text(updating ? 'native.dialog.updatePasswordTitle' : 'native.dialog.savePasswordTitle'),
+    message: text(updating ? 'native.dialog.updatePasswordMessage' : 'native.dialog.savePasswordMessage', { account }),
+    detail: text('native.dialog.passwordDetail', { origin: candidate.origin }),
+    buttons: [text('native.dialog.notNow'), text(updating ? 'native.dialog.updatePassword' : 'native.dialog.savePassword')],
     defaultId: 1,
     cancelId: 0,
     noLink: true
@@ -591,8 +616,8 @@ async function configureCredentialStore(): Promise<void> {
       available: false,
       backend,
       reason: backend === 'basic_text'
-        ? 'No protected Linux secret store is available. Bronom will not save passwords with basic-text encryption.'
-        : 'The operating system secure storage is unavailable.'
+        ? text('native.errors.linuxSecrets')
+        : text('native.errors.secureStorage')
     }
     return
   }
@@ -620,7 +645,7 @@ function currentCommercialLicenseState(): CommercialLicenseState {
       status: 'not-activated',
       active: false,
       secureStorageAvailable: false,
-      message: credentialStorageStatus.reason || 'Operating system secure storage is unavailable.'
+      message: credentialStorageStatus.reason || text('native.errors.secureStorage')
     }
   }
   return commercialLicenseStore.summary(true, commercialLicenseMessage)
@@ -634,20 +659,20 @@ function publishCommercialLicenseState(): CommercialLicenseState {
 
 function commercialLicenseFriendlyMessage(reason: string): string {
   const messages: Record<string, string> = {
-    activation_limit_reached: 'This supporter key has reached its device activation limit.',
-    commercial_inactive: 'The supporter subscription for this key is not active.',
-    entitlement_pending: 'This purchase is still being synchronized. Try again in a moment.',
-    instance_conflict: 'This device activation is no longer available.',
-    license_inactive: 'This supporter key is no longer active.',
-    license_not_found: 'The supporter key was not found.',
-    invalid_license: 'The supporter key could not be validated.',
-    invalid_license_key: 'Enter the complete supporter key from your Creem receipt.',
-    provider_unavailable: 'The supporter service is temporarily unavailable.',
-    provider_invalid_response: 'The supporter service returned an invalid response.',
-    service_unavailable: 'The supporter service is temporarily unavailable.',
-    wrong_product: 'This supporter key is not for Bronom.'
+    activation_limit_reached: text('native.errors.activationLimit'),
+    commercial_inactive: text('native.errors.subscriptionInactive'),
+    entitlement_pending: text('native.errors.entitlementPending'),
+    instance_conflict: text('native.errors.instanceConflict'),
+    license_inactive: text('native.errors.licenseInactive'),
+    license_not_found: text('native.errors.licenseNotFound'),
+    invalid_license: text('native.errors.invalidLicense'),
+    invalid_license_key: text('native.errors.invalidLicenseKey'),
+    provider_unavailable: text('native.errors.providerUnavailable'),
+    provider_invalid_response: text('native.errors.providerInvalid'),
+    service_unavailable: text('native.errors.providerUnavailable'),
+    wrong_product: text('native.errors.wrongProduct')
   }
-  return messages[reason] ?? 'The supporter key could not be validated.'
+  return messages[reason] ?? text('native.errors.invalidLicense')
 }
 
 async function activateCommercialLicense(value: unknown): Promise<CommercialLicenseState> {
@@ -849,7 +874,7 @@ async function restartAfterPackageReplacement(): Promise<boolean> {
       status: 'installing',
       availableVersion: replacementVersion,
       percent: undefined,
-      message: 'The new package is installed. Restarting Bronom to finish the update.'
+      message: text('native.dialog.restartingUpdate')
     })
     scheduleLinuxUpdateRelaunch(process.pid, linuxUpdateExecutable(process.env, process.execPath))
     mainWindow?.hide()
@@ -926,7 +951,8 @@ function registerHomeProtocol(): void {
         endpoint: mcpUrl,
         tokenPath: mcpTokenConfiguration?.tokenPath,
         authenticationDisabled: !settings.mcpAuthentication,
-        initialState: homeDashboardState()
+        initialState: homeDashboardState(),
+        locale: resolvedLocale
       }),
       {
         headers: {
@@ -1022,22 +1048,22 @@ function setTrayContextMenu(): void {
   const contextMenu = Menu.buildFromTemplate([
     ...(userAttention
       ? [
-          { label: `Attention needed: ${compactAttentionReason(userAttention.reason)}`, enabled: false },
+          { label: text('native.tray.attention', { reason: compactAttentionReason(userAttention.reason) }), enabled: false },
           {
-            label: 'Show requested browser tab',
+            label: text('native.tray.showRequested'),
             click: () => {
               if (userAttention?.tabId) tabsManager?.selectTab(userAttention.tabId)
               showWindow()
               clearUserAttention()
             }
           },
-          { label: 'Dismiss attention', click: clearUserAttention },
+          { label: text('native.tray.dismissAttention'), click: clearUserAttention },
           { type: 'separator' as const }
         ]
       : []),
-    { label: 'Show Bronom', click: showWindow },
+    { label: text('native.tray.show'), click: showWindow },
     {
-      label: 'Check for Updates…',
+      label: text('native.menu.checkUpdates'),
       click: () => {
         showWindow()
         mainWindow?.webContents.send('updates:open')
@@ -1046,7 +1072,7 @@ function setTrayContextMenu(): void {
     },
     { type: 'separator' },
     {
-      label: 'Quit',
+      label: text('native.tray.quit'),
       click: () => {
         quitting = true
         app.quit()
@@ -1096,7 +1122,7 @@ function requestUserAttention(input: UserAttentionInput): UserAttentionRequest {
   renderAttentionPulse()
   mainWindow?.flashFrame(true)
   if (tray && !tray.isDestroyed()) {
-    tray.setToolTip(`Bronom — Attention needed: ${compactAttentionReason(request.reason)}`)
+    tray.setToolTip(text('native.tray.tooltipAttention', { reason: compactAttentionReason(request.reason) }))
     setTrayContextMenu()
   }
   if (mainWindow && !mainWindow.webContents.isDestroyed()) {
@@ -1147,9 +1173,9 @@ function installApplicationMenu(): void {
       {
         label: 'Bronom',
         submenu: [
-          { label: 'Show', accelerator: 'CmdOrCtrl+Shift+H', click: showWindow },
+          { label: text('native.menu.show'), accelerator: 'CmdOrCtrl+Shift+H', click: showWindow },
           {
-            label: 'Check for Updates…',
+            label: text('native.menu.checkUpdates'),
             click: () => {
               showWindow()
               mainWindow?.webContents.send('updates:open')
@@ -1158,7 +1184,7 @@ function installApplicationMenu(): void {
           },
           { type: 'separator' },
           {
-            label: 'Quit',
+            label: text('native.menu.quit'),
             accelerator: 'CmdOrCtrl+Q',
             click: () => {
               quitting = true
@@ -1168,7 +1194,7 @@ function installApplicationMenu(): void {
         ]
       },
       {
-        label: 'Edit',
+        label: text('native.menu.edit'),
         submenu: [
           { role: 'undo' },
           { role: 'redo' },
@@ -1180,10 +1206,10 @@ function installApplicationMenu(): void {
         ]
       },
       {
-        label: 'View',
+        label: text('native.menu.view'),
         submenu: [
           {
-            label: 'Command Palette…',
+            label: text('native.menu.commandPalette'),
             accelerator: 'CmdOrCtrl+Shift+P',
             click: () => {
               showWindow()
@@ -1191,7 +1217,7 @@ function installApplicationMenu(): void {
             }
           },
           {
-            label: 'Pick Element for Agent',
+            label: text('native.menu.pickElement'),
             accelerator: process.platform === 'darwin' ? 'Cmd+Alt+C' : 'Ctrl+Shift+C',
             click: () => {
               showWindow()
@@ -1200,40 +1226,40 @@ function installApplicationMenu(): void {
           },
           { type: 'separator' },
           {
-            label: 'Reload Tab',
+            label: text('native.menu.reload'),
             accelerator: 'CmdOrCtrl+R',
             click: () => { void tabsManager?.reload() }
           },
           {
-            label: 'Reload Tab Without Cache',
+            label: text('native.menu.reloadWithoutCache'),
             accelerator: 'CmdOrCtrl+Shift+R',
             click: () => { void tabsManager?.reloadIgnoringCache() }
           },
           {
-            label: 'Developer Tools',
+            label: text('native.menu.developerTools'),
             click: () => { void tabsManager?.toggleDevTools() }
           },
           { type: 'separator' },
-          { label: 'Actual Size', accelerator: 'CmdOrCtrl+0', click: () => tabsManager?.setZoom({ action: 'reset' }) },
-          { label: 'Zoom In', accelerator: 'CmdOrCtrl+Plus', click: () => tabsManager?.setZoom({ action: 'in' }) },
-          { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: () => tabsManager?.setZoom({ action: 'out' }) },
+          { label: text('native.menu.actualSize'), accelerator: 'CmdOrCtrl+0', click: () => tabsManager?.setZoom({ action: 'reset' }) },
+          { label: text('native.menu.zoomIn'), accelerator: 'CmdOrCtrl+Plus', click: () => tabsManager?.setZoom({ action: 'in' }) },
+          { label: text('native.menu.zoomOut'), accelerator: 'CmdOrCtrl+-', click: () => tabsManager?.setZoom({ action: 'out' }) },
           { role: 'togglefullscreen' }
         ]
       },
       {
-        label: 'Help',
+        label: text('native.menu.help'),
         submenu: [
           {
-            label: 'Keyboard Shortcuts',
+            label: text('native.menu.shortcuts'),
             accelerator: 'CmdOrCtrl+Shift+/',
             click: () => requestHelp('shortcuts')
           },
-          { label: 'About Bronom', click: () => requestHelp('about') },
-          { label: 'Support Bronom', click: () => requestHelp('support') },
+          { label: text('native.menu.about'), click: () => requestHelp('about') },
+          { label: text('native.menu.support'), click: () => requestHelp('support') },
           { type: 'separator' },
-          { label: 'GitHub Repository', click: openRepository },
+          { label: text('native.menu.repository'), click: openRepository },
           {
-            label: 'Check for Updates',
+            label: text('native.menu.checkUpdatesPlain'),
             click: () => {
               showWindow()
               mainWindow?.webContents.send('updates:open')
@@ -1413,31 +1439,31 @@ function isPanelDock(value: unknown): value is PanelDock {
 }
 
 function detachedPanelTitle(panel: DetachablePanelId): string {
-  const labels: Record<DetachablePanelId, string> = {
-    'site-controls': 'Site controls',
-    'site-storage': 'Site storage',
-    'page-tools': 'Page tools',
-    'responsive-preview': 'Responsive preview',
-    environment: 'Environment',
-    accessibility: 'Accessibility',
-    'quality-audit': 'Quality audit',
-    performance: 'Performance',
-    'design-overview': 'Design overview',
-    'page-metadata': 'Page metadata',
-    security: 'Security',
-    coverage: 'Code coverage',
-    'cpu-profile': 'JavaScript CPU profile',
-    memory: 'Memory',
-    console: 'Console',
-    network: 'Network monitor',
-    'debug-report': 'Debug report',
-    'repro-recorder': 'Repro recorder',
-    'dom-changes': 'DOM changes',
-    'visual-compare': 'Visual compare',
-    issues: 'Issues',
-    bookmarks: 'Bookmarks'
+  const keys: Record<DetachablePanelId, MessageKey> = {
+    'site-controls': 'panels.siteControls',
+    'site-storage': 'panels.siteStorage',
+    'page-tools': 'panels.pageTools',
+    'responsive-preview': 'panels.responsivePreview',
+    environment: 'panels.environment',
+    accessibility: 'panels.accessibility',
+    'quality-audit': 'panels.qualityAudit',
+    performance: 'panels.performance',
+    'design-overview': 'panels.designOverview',
+    'page-metadata': 'panels.pageMetadata',
+    security: 'panels.security',
+    coverage: 'panels.coverage',
+    'cpu-profile': 'panels.cpuProfile',
+    memory: 'panels.memory',
+    console: 'panels.console',
+    network: 'panels.network',
+    'debug-report': 'panels.debugReport',
+    'repro-recorder': 'panels.reproRecorder',
+    'dom-changes': 'panels.domChanges',
+    'visual-compare': 'panels.visualCompare',
+    issues: 'panels.issues',
+    bookmarks: 'panels.bookmarks'
   }
-  return `${labels[panel]} — Bronom`
+  return text('panels.title', { panel: text(keys[panel]) })
 }
 
 function trustedPanelShellUrl(panel: DetachablePanelId): string {
@@ -1490,6 +1516,7 @@ function sendPanelWindowSnapshot(target: BrowserWindow): void {
   target.webContents.send('browser:state-changed', tabsManager?.getState())
   target.webContents.send('browser:downloads-changed', tabsManager?.listDownloads() ?? [])
   target.webContents.send('settings:changed', settings)
+  target.webContents.send('settings:renderer-state-changed', currentRendererSettingsState())
   target.webContents.send('updates:changed', updateState)
   target.webContents.send('mcp:changed', currentMcpControlState())
   target.webContents.send('credentials:changed', credentialStore?.list() ?? [])
@@ -1501,6 +1528,7 @@ function sendPanelWindowSnapshot(target: BrowserWindow): void {
 async function openPanelWindow(panel: DetachablePanelId): Promise<void> {
   if (!mainWindow || mainWindow.isDestroyed()) throw new Error('The Bronom window is not available')
   if (panelWindow && !panelWindow.isDestroyed()) {
+    panelWindowPanel = panel
     panelWindow.setTitle(detachedPanelTitle(panel))
     sendToPanelWindow('panel-window:show-panel', panel)
     if (panelWindow.isMinimized()) panelWindow.restore()
@@ -1543,6 +1571,7 @@ async function openPanelWindow(panel: DetachablePanelId): Promise<void> {
   created.webContents.setZoomFactor(settings.interfaceScale)
   panelWindow = created
   panelWindowUrl = expectedUrl
+  panelWindowPanel = panel
   panelWindowRedocking = false
   created.setMenuBarVisibility(false)
   created.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -1571,6 +1600,7 @@ async function openPanelWindow(panel: DetachablePanelId): Promise<void> {
     const redocking = panelWindowRedocking
     panelWindow = null
     panelWindowUrl = null
+    panelWindowPanel = null
     panelWindowRedocking = false
     void flushPanelWindowState().catch((error) => console.error('[panel-window] Failed to flush state:', error))
     if (!redocking && mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
@@ -1601,7 +1631,8 @@ function registerIpc(): void {
     const state: AddressSuggestionOverlayState = {
       suggestions: request.suggestions,
       selectedIndex: request.selectedIndex,
-      theme: request.theme
+      theme: request.theme,
+      locale: resolvedLocale
     }
     void ensureAddressSuggestionView().then(({ view, webContents }) => {
       if (
@@ -1674,6 +1705,7 @@ function registerIpc(): void {
   ipcMain.handle('panel-window:set-active', (event, panel: unknown) => {
     assertPanelShellSender(event)
     if (!isDetachablePanelId(panel)) throw new TypeError('Invalid detachable panel')
+    panelWindowPanel = panel
     panelWindow?.setTitle(detachedPanelTitle(panel))
     if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
       mainWindow.webContents.send('panel-window:active-panel', panel)
@@ -2497,6 +2529,10 @@ function registerIpc(): void {
     app.quit()
   })
   ipcMain.handle('settings:get', (event) => { assertTrustedShellSender(event); return { ...settings } })
+  ipcMain.handle('settings:get-renderer-state', (event) => {
+    assertTrustedShellSender(event)
+    return currentRendererSettingsState()
+  })
   ipcMain.handle('settings:get-system-theme', (event) => {
     assertTrustedShellSender(event)
     return nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
@@ -2532,9 +2568,9 @@ function registerIpc(): void {
     assertTrustedShellSender(event)
     if (!mainWindow) throw new Error('The Bronom window is not available')
     const result = await dialog.showOpenDialog(mainWindow, {
-      title: 'Choose download folder',
+      title: text('native.dialog.chooseDownloadFolder'),
       defaultPath: effectiveDownloadDirectory(),
-      buttonLabel: 'Use this folder',
+      buttonLabel: text('native.dialog.useFolder'),
       properties: ['openDirectory', 'createDirectory', 'promptToCreate']
     })
     const directory = result.filePaths[0]
@@ -2619,6 +2655,22 @@ function registerIpc(): void {
     await updateSettings({ checkForUpdatesOnStartup: enabled })
     publishSettings()
     return { ...settings }
+  })
+  ipcMain.handle('settings:set-language-preference', async (event, preference: unknown) => {
+    assertTrustedShellSender(event)
+    if (!isLanguagePreference(preference)) throw new TypeError('Invalid language preference')
+    await updateSettings({ languagePreference: preference })
+    if (preference === 'system') systemLocale = resolveSupportedLocale(app.getLocale())
+    resolvedLocale = resolveLocalePreference(preference, systemLocale)
+    publishSettings()
+    installApplicationMenu()
+    setTrayContextMenu()
+    mainWindow?.setTitle('Bronom')
+    if (panelWindow && !panelWindow.isDestroyed()) {
+      if (panelWindowPanel) panelWindow.setTitle(detachedPanelTitle(panelWindowPanel))
+    }
+    await tabsManager?.reloadHome()
+    return currentRendererSettingsState()
   })
   ipcMain.handle('permissions:list', (event) => { assertTrustedShellSender(event); return sitePermissionStore!.list() })
   ipcMain.handle(
@@ -2725,24 +2777,29 @@ function registerIpc(): void {
   })
 }
 
-async function createWindow(): Promise<void> {
-  bookmarkStore = new BookmarkStore(join(app.getPath('userData'), 'bookmarks.json'))
-  await bookmarkStore.load()
-  historyStore = new HistoryStore(join(app.getPath('userData'), 'history.json'))
-  await historyStore.load()
+async function loadAuthoritativeSettings(): Promise<void> {
   settingsStore = new SettingsStore(join(app.getPath('userData'), 'settings.json'))
   settings = await settingsStore.load()
+  systemLocale = resolveSupportedLocale(app.getLocale())
+  resolvedLocale = resolveLocalePreference(settings.languagePreference, systemLocale)
   if (process.env.BRONOM_MCP_PORT !== undefined) {
     const overriddenPort = Number(process.env.BRONOM_MCP_PORT)
     if (!isValidMcpPort(overriddenPort)) throw new Error('BRONOM_MCP_PORT must be an integer from 1024 through 65535')
     settings = { ...settings, mcpPort: overriddenPort }
   }
   mcpPort = settings.mcpPort
-  persistentSession?.setDownloadPath(effectiveDownloadDirectory())
   mcpUrl = `http://${MCP_HOST}:${mcpPort}/mcp`
+  if (MCP_AUTH_DISABLED) settings = { ...settings, mcpAuthentication: false }
+}
+
+async function createWindow(): Promise<void> {
+  bookmarkStore = new BookmarkStore(join(app.getPath('userData'), 'bookmarks.json'))
+  await bookmarkStore.load()
+  historyStore = new HistoryStore(join(app.getPath('userData'), 'history.json'))
+  await historyStore.load()
+  persistentSession?.setDownloadPath(effectiveDownloadDirectory())
   await configureCredentialStore()
   await configureCommercialLicenseStore()
-  if (MCP_AUTH_DISABLED) settings = { ...settings, mcpAuthentication: false }
   applyTheme(settings.theme)
   windowStateStore = new WindowStateStore(join(app.getPath('userData'), 'window-state.json'))
   panelWindowStateStore = new WindowStateStore(join(app.getPath('userData'), 'panel-window-state.json'))
@@ -2777,6 +2834,7 @@ async function createWindow(): Promise<void> {
     memorySaverEnabled: settings.memorySaverEnabled,
     memorySaverTimeoutMinutes: settings.memorySaverTimeoutMinutes,
     getSearchEngine: () => settings.searchEngine,
+    getLocale: () => resolvedLocale,
     configureSession: configureBrowserSession,
     onUserInteraction: acknowledgeUserAttention,
     onShortcutRequested: (action) => {
@@ -2866,6 +2924,7 @@ async function createWindow(): Promise<void> {
   if (!mainWindow.webContents.isDestroyed()) {
     mainWindow.webContents.send('browser:state-changed', tabsManager.getState())
     mainWindow.webContents.send('settings:changed', settings)
+    mainWindow.webContents.send('settings:renderer-state-changed', currentRendererSettingsState())
     mainWindow.webContents.send('updates:changed', updateState)
     mainWindow.webContents.send('mcp:changed', currentMcpControlState())
     mainWindow.webContents.send('credentials:changed', credentialStore?.list() ?? [])
@@ -2909,23 +2968,25 @@ function configureBrowserSession(browserSession: Session): void {
     }
     const permissionDetail = (() => {
       if (permission === 'media' && 'mediaTypes' in details) {
-        const types = details.mediaTypes?.map((type) => (type === 'video' ? 'camera' : 'microphone')) ?? []
-        return types.length ? `Requested devices: ${types.join(' and ')}.` : 'Requested media devices were not specified.'
+        const types = details.mediaTypes?.map((type) => text(type === 'video' ? 'native.dialog.camera' : 'native.dialog.microphone')) ?? []
+        return types.length
+          ? text('native.dialog.requestedDevices', { devices: types.join(text('native.dialog.and')) })
+          : text('native.dialog.devicesUnknown')
       }
       if (permission === 'fileSystem' && 'filePath' in details) {
-        const access = details.fileAccessType ?? 'unspecified access'
-        return `Requested ${access}: ${details.filePath || 'unspecified path'}. This decision will apply only once.`
+        const access = details.fileAccessType ?? text('native.dialog.unspecifiedAccess')
+        return text('native.dialog.requestedFile', { access, path: details.filePath || text('native.dialog.unspecifiedPath') })
       }
-      return 'Bronom can remember this choice for the exact website origin.'
+      return text('native.dialog.permissionRemember')
     })()
     void showMessageBox({
       type: 'question',
-      title: 'Site permission',
-      message: `${origin} requests “${permission}” permission.`,
+      title: text('native.dialog.sitePermission'),
+      message: text('native.dialog.permissionRequest', { origin, permission }),
       detail: requiresFreshConsent
-        ? `${permissionDetail} Bronom will ask again next time.`
-        : `${permissionDetail} You can change it later in Settings → Site permissions.`,
-      buttons: ['Deny', 'Allow'],
+        ? text('native.dialog.permissionAskAgain', { detail: permissionDetail })
+        : text('native.dialog.permissionSettings', { detail: permissionDetail }),
+      buttons: [text('native.dialog.deny'), text('native.dialog.allow')],
       defaultId: 0,
       cancelId: 0
     })
@@ -2939,8 +3000,11 @@ function configureBrowserSession(browserSession: Session): void {
         } catch (error) {
           console.error('[permissions] Failed to persist site permission:', error)
         }
+        // The Electron permission API is callback-based; this callback completes its contract.
+        // eslint-disable-next-line promise/no-callback-in-promise
         callback(decision === 'allow')
       })
+      // eslint-disable-next-line promise/no-callback-in-promise
       .catch(() => callback(false))
   })
 }
@@ -2987,7 +3051,7 @@ async function installDownloadedUpdate(): Promise<boolean> {
   publishUpdateState({
     status: 'installing',
     percent: undefined,
-    message: 'Installing the update. Bronom will restart automatically.'
+    message: text('native.dialog.installingUpdate')
   })
   try {
     // electron-updater only asks Electron to quit after the installer has
@@ -3092,9 +3156,8 @@ async function setMcpPort(port: number): Promise<AppSettings> {
     throw new Error(`Could not listen on ${MCP_HOST}:${port}: ${error instanceof Error ? error.message : String(error)}`)
   }
 
-  let nextSettings: AppSettings
   try {
-    nextSettings = await updateSettings({ mcpPort: port })
+    await updateSettings({ mcpPort: port })
   } catch (error) {
     await candidate.stop().catch(() => undefined)
     throw error
@@ -3135,16 +3198,20 @@ app.on('before-quit', () => {
 app.whenReady().then(async () => {
   if (!gotLock) return
   nativeTheme.on('updated', () => {
-    if (settings.theme !== 'system') return
     const systemTheme = nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
-    mainWindow?.setBackgroundColor(THEME_BACKGROUND[systemTheme])
-    mainWindow?.webContents.send('settings:system-theme-changed', systemTheme)
+    if (settings.theme === 'system') {
+      mainWindow?.setBackgroundColor(THEME_BACKGROUND[systemTheme])
+      panelWindow?.setBackgroundColor(THEME_BACKGROUND[systemTheme])
+    }
+    sendToShellWindows('settings:system-theme-changed', systemTheme)
+    sendToShellWindows('settings:renderer-state-changed', currentRendererSettingsState())
   })
   mcpTokenConfiguration = await loadMcpToken(
     join(app.getPath('userData'), 'mcp-token'),
     process.env.BRONOM_MCP_TOKEN
   )
   configureAutoUpdater()
+  await loadAuthoritativeSettings()
   installApplicationMenu()
   await configurePersistentSession()
   registerHomeProtocol()
@@ -3168,8 +3235,8 @@ app.whenReady().then(async () => {
     console.error('[mcp] Failed to start:', error)
     await showMessageBox({
       type: 'error',
-      title: 'MCP server failed to start',
-      message: `Could not listen on ${MCP_HOST}:${mcpPort}`,
+      title: text('native.dialog.mcpFailedTitle'),
+      message: text('native.dialog.mcpFailedMessage', { host: MCP_HOST, port: mcpPort }),
       detail: mcpStartupError
     })
   }

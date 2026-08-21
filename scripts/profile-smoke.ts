@@ -10,15 +10,6 @@ interface ProfileResult {
   cookie: string
 }
 
-interface BrowserTabResult {
-  id: string
-}
-
-interface BrowserStateResult {
-  activeTabId: string | null
-  tabs: BrowserTabResult[]
-}
-
 const phase = process.argv[2]
 if (phase !== 'write' && phase !== 'read' && phase !== 'cleanup') {
   throw new Error('Use phase "write", "read", or "cleanup".')

@@ -1,0 +1,204 @@
+import { nextTick, ref } from 'vue'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { useDiagnosticsController } from '../../src/renderer/src/composables/useDiagnosticsController.js'
+import type {
+  BrowserDomChangesReport,
+  BrowserPerformanceReport,
+  BrowserState,
+  BrowserTabState
+} from '../../src/shared/types.js'
+
+function tab(id = 'tab-1'): BrowserTabState {
+  return {
+    id,
+    title: 'Example',
+    url: 'https://example.test/app',
+    loading: false,
+    canGoBack: false,
+    canGoForward: false,
+    active: true,
+    pinned: false,
+    sleeping: false,
+    humanInteractionLocked: false,
+    preserveDiagnosticLogs: false,
+    zoomPercent: 100,
+    audible: false,
+    muted: false,
+    devToolsOpen: false
+  }
+}
+
+function state(activeTab: BrowserTabState): BrowserState {
+  return {
+    tabs: [activeTab],
+    closedTabs: [],
+    activeTabId: activeTab.id,
+    allHumanInteractionLocked: false,
+    mcpUrl: '',
+    profilePath: '/profile',
+    mcpTabGroups: [],
+    savedTabGroups: []
+  }
+}
+
+function deferred<Value>() {
+  let resolve!: (value: Value) => void
+  const promise = new Promise<Value>((next) => (resolve = next))
+  return { promise, resolve }
+}
+
+function performanceReport(tabId = 'tab-1'): BrowserPerformanceReport {
+  return {
+    tabId,
+    url: 'https://example.test/app',
+    title: 'Example',
+    measuredAt: '2026-08-21T12:00:00.000Z',
+    observedAt: '2026-08-21T12:00:00.000Z',
+    scope: 'current-visit',
+    engine: { name: 'web-vitals', version: '6.1.0' },
+    action: 'measure',
+    metrics: { LCP: null, INP: null, CLS: null, FCP: null, TTFB: null },
+    navigation: null,
+    resources: {
+      count: 0,
+      transferBytes: 0,
+      encodedBodyBytes: 0,
+      decodedBodyBytes: 0,
+      byType: []
+    },
+    longTasks: { supported: true, count: 0, totalDurationMs: 0, blockingTimeMs: 0, longestDurationMs: 0 },
+    longAnimationFrames: {
+      supported: true,
+      count: 0,
+      totalDurationMs: 0,
+      blockingDurationMs: 0,
+      longestDurationMs: 0,
+      renderDurationMs: 0,
+      styleAndLayoutDurationMs: 0,
+      frames: [],
+      contributors: [],
+      truncated: false
+    },
+    userTimings: { count: 0, entries: [], truncated: false },
+    layoutShifts: { supported: true, count: 0, scoreSum: 0, recentInputCount: 0, entries: [], truncated: false },
+    caveats: []
+  }
+}
+
+function domReport(active = true): BrowserDomChangesReport {
+  return {
+    tabId: 'tab-1',
+    title: 'Example',
+    url: 'https://example.test/app',
+    active,
+    startedAt: '2026-08-21T11:59:00.000Z',
+    changeCount: 0,
+    entries: [],
+    truncated: false,
+    droppedChanges: 0,
+    summary: { childList: 0, attributes: 0, text: 0, addedNodes: 0, removedNodes: 0 },
+    caveats: []
+  }
+}
+
+function createController() {
+  const activeTab = ref<BrowserTabState | undefined>(tab())
+  const accepted: BrowserState[] = []
+  const browser = {
+    measurePerformance: vi.fn(async () => performanceReport()),
+    inspectDesign: vi.fn(),
+    inspectPageMetadata: vi.fn(),
+    inspectSecurity: vi.fn(),
+    manageCodeCoverage: vi.fn(),
+    manageCpuProfile: vi.fn(),
+    measureMemory: vi.fn(),
+    createDebugReport: vi.fn(),
+    setDiagnosticLogPreservation: vi.fn(async () => state(tab())),
+    manageRepro: vi.fn(),
+    manageDomChanges: vi.fn(async () => domReport()),
+    visualCompare: vi.fn(),
+    copyVisualDiff: vi.fn(),
+    listInspectorIssues: vi.fn(),
+    runAccessibilityAudit: vi.fn(),
+    runQualityAudit: vi.fn()
+  }
+  const controller = useDiagnosticsController({
+    activeTab,
+    browser,
+    translate: (key) => key,
+    copyText: async () => true,
+    acceptBrowserState: (next) => accepted.push(next),
+    closeTransientPanels: vi.fn(),
+    keepsSeparatePanelOpen: () => false
+  })
+  return { activeTab, accepted, browser, controller }
+}
+
+afterEach(() => {
+  vi.useRealTimers()
+})
+
+describe('diagnostics controller', () => {
+  it('invalidates an in-flight report after a same-tab reset', async () => {
+    const pending = deferred<BrowserPerformanceReport>()
+    const { browser, controller } = createController()
+    browser.measurePerformance.mockImplementationOnce(() => pending.promise)
+
+    const loading = controller.runPerformanceReport()
+    controller.resetForTab('tab-1')
+    pending.resolve(performanceReport())
+    await loading
+
+    expect(controller.performanceReport.value).toBeNull()
+    expect(controller.performanceState.value).toBe('idle')
+    controller.dispose()
+  })
+
+  it('closes mismatched diagnostics and ignores old-tab responses', async () => {
+    const pending = deferred<BrowserPerformanceReport>()
+    const { activeTab, browser, controller } = createController()
+    browser.measurePerformance.mockImplementationOnce(() => pending.promise)
+
+    const loading = controller.runPerformanceReport()
+    expect(controller.performancePanelOpen.value).toBe(true)
+    activeTab.value = tab('tab-2')
+    await nextTick()
+    pending.resolve(performanceReport('tab-1'))
+    await loading
+
+    expect(controller.performancePanelOpen.value).toBe(false)
+    expect(controller.performanceReport.value).toBeNull()
+    expect(controller.performanceState.value).toBe('idle')
+    controller.dispose()
+  })
+
+  it('publishes authoritative state after changing diagnostic preservation', async () => {
+    const { accepted, browser, controller } = createController()
+    const next = state({ ...tab(), preserveDiagnosticLogs: true })
+    browser.setDiagnosticLogPreservation.mockResolvedValue(next)
+    const input = document.createElement('input')
+    input.checked = true
+
+    await controller.updatePreservation({ currentTarget: input } as unknown as Event)
+
+    expect(browser.setDiagnosticLogPreservation).toHaveBeenCalledWith('tab-1', true)
+    expect(accepted).toEqual([next])
+    controller.dispose()
+  })
+
+  it('polls active DOM recordings only while the panel is open', async () => {
+    vi.useFakeTimers()
+    const { browser, controller } = createController()
+
+    controller.domChangesPanelOpen.value = true
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(browser.manageDomChanges).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(browser.manageDomChanges).toHaveBeenCalledTimes(2)
+    controller.dispose()
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(browser.manageDomChanges).toHaveBeenCalledTimes(2)
+  })
+})

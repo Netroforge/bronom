@@ -25,6 +25,8 @@ import {
   type WebContents
 } from 'electron'
 import { browserShortcutAction, type BrowserShortcutAction } from '../../shared/browser-shortcuts.js'
+import { translate, type MessageKey, type MessageParameters } from '../../shared/i18n.js'
+import type { SupportedLocale } from '../../shared/locale.js'
 import { safeNavigationHistorySnapshot } from './navigation-history.js'
 import { accessibilityAuditPageScript, normalizeAccessibilityAuditOptions } from '../../shared/accessibility-audit.js'
 import { buildBrowserDebugReport, redactDiagnosticText, sanitizeConsoleMessage } from '../../shared/debug-report.js'
@@ -129,11 +131,7 @@ import {
 } from '../../shared/storage-usage.js'
 import { networkRoutePatternMatches, validateNetworkRoutePattern } from '../../shared/network-routes.js'
 import { boundedScreenshotSize } from '../../shared/screenshot.js'
-import {
-  DEFAULT_VISUAL_COMPARE_THRESHOLD,
-  compareBgraBitmaps,
-  normalizeVisualCompareThreshold
-} from '../../shared/visual-compare.js'
+import { compareBgraBitmaps, normalizeVisualCompareThreshold } from '../../shared/visual-compare.js'
 import { normalizeInspectorIssue } from '../../shared/browser-issues.js'
 import {
   isBrowserSplitOrientation,
@@ -224,7 +222,6 @@ import type {
   BrowserNetworkHarExport,
   BrowserNetworkHarOptions,
   BrowserNetworkHarSaveOptions,
-  BrowserNetworkAbortReason,
   BrowserNetworkRouteInput,
   BrowserNetworkRouteMoveDirection,
   BrowserNetworkRouteSummary,
@@ -388,42 +385,42 @@ const NETWORK_EMULATION = {
   }
 } as const
 
-const LOAD_FAILURE_MESSAGES: Record<string, string> = {
-  ERR_ADDRESS_UNREACHABLE: 'The address could not be reached.',
-  ERR_CONNECTION_CLOSED: 'The connection closed before the page was received.',
-  ERR_CONNECTION_REFUSED: 'The website refused the connection.',
-  ERR_CONNECTION_RESET: 'The connection was reset while loading the page.',
-  ERR_INTERNET_DISCONNECTED: 'The device appears to be offline.',
-  ERR_NAME_NOT_RESOLVED: 'The website address could not be found.',
-  ERR_NETWORK_CHANGED: 'The network changed while the page was loading.',
-  ERR_TIMED_OUT: 'The website took too long to respond.'
+const LOAD_FAILURE_MESSAGES: Record<string, MessageKey> = {
+  ERR_ADDRESS_UNREACHABLE: 'native.pageProblem.addressUnreachable',
+  ERR_CONNECTION_CLOSED: 'native.pageProblem.connectionClosed',
+  ERR_CONNECTION_REFUSED: 'native.pageProblem.connectionRefused',
+  ERR_CONNECTION_RESET: 'native.pageProblem.connectionReset',
+  ERR_INTERNET_DISCONNECTED: 'native.pageProblem.offline',
+  ERR_NAME_NOT_RESOLVED: 'native.pageProblem.nameNotResolved',
+  ERR_NETWORK_CHANGED: 'native.pageProblem.networkChanged',
+  ERR_TIMED_OUT: 'native.pageProblem.timedOut'
 }
 
-const RENDERER_FAILURE_MESSAGES: Record<string, string> = {
-  'abnormal-exit': 'The page process exited unexpectedly.',
-  crashed: 'The page process crashed.',
-  'integrity-failure': 'The page process failed an integrity check.',
-  killed: 'The page process was terminated.',
-  'launch-failed': 'A new page process could not be started.',
-  oom: 'The page ran out of memory.'
+const RENDERER_FAILURE_MESSAGES: Record<string, MessageKey> = {
+  'abnormal-exit': 'native.pageProblem.abnormalExit',
+  crashed: 'native.pageProblem.crashed',
+  'integrity-failure': 'native.pageProblem.integrityFailure',
+  killed: 'native.pageProblem.killed',
+  'launch-failed': 'native.pageProblem.launchFailed',
+  oom: 'native.pageProblem.outOfMemory'
 }
 
-function loadFailureProblem(url: string, errorCode: number, errorDescription: string): BrowserPageProblem {
+function loadFailureProblem(locale: SupportedLocale, url: string, errorCode: number, errorDescription: string): BrowserPageProblem {
   return {
     kind: 'load-error',
-    title: 'This site could not be reached',
-    message: LOAD_FAILURE_MESSAGES[errorDescription] ?? 'Bronom could not load this address.',
+    title: translate(locale, 'native.pageProblem.loadTitle'),
+    message: translate(locale, LOAD_FAILURE_MESSAGES[errorDescription] ?? 'native.pageProblem.loadDefault'),
     url,
     errorCode,
     errorDescription
   }
 }
 
-function rendererFailureProblem(url: string, reason: string, exitCode: number): BrowserPageProblem {
+function rendererFailureProblem(locale: SupportedLocale, url: string, reason: string, exitCode: number): BrowserPageProblem {
   return {
     kind: 'renderer-gone',
-    title: 'This page stopped working',
-    message: RENDERER_FAILURE_MESSAGES[reason] ?? 'The page process unexpectedly disappeared.',
+    title: translate(locale, 'native.pageProblem.rendererTitle'),
+    message: translate(locale, RENDERER_FAILURE_MESSAGES[reason] ?? 'native.pageProblem.rendererDefault'),
     url,
     reason,
     exitCode
@@ -788,6 +785,7 @@ export interface TabsManagerOptions {
   memorySaverEnabled?: boolean
   memorySaverTimeoutMinutes?: MemorySaverTimeoutMinutes
   getSearchEngine?: () => SearchEngineName
+  getLocale: () => SupportedLocale
   toolbarHeight?: number
   onUserInteraction?: () => void
   onCredentialSubmitted?: (candidate: BrowserCredentialCandidate) => void
@@ -855,6 +853,10 @@ export class BrowserTabsManager {
     this.memorySaverTimeoutMinutes = isMemorySaverTimeoutMinutes(options.memorySaverTimeoutMinutes)
       ? options.memorySaverTimeoutMinutes
       : DEFAULT_MEMORY_SAVER_TIMEOUT_MINUTES
+  }
+
+  private text(key: MessageKey, parameters?: MessageParameters): string {
+    return translate(this.options.getLocale(), key, parameters)
   }
 
   async initialize(): Promise<void> {
@@ -2234,11 +2236,11 @@ export class BrowserTabsManager {
     const groupMenu: MenuItemConstructorOptions = currentGroup
       ? {
           id: 'workspace',
-          label: `Workspace: ${currentGroup.name}`,
+          label: this.text('native.context.workspace', { name: currentGroup.name }),
           submenu: [
             {
               id: 'new-tab-in-workspace',
-              label: 'New Tab in Workspace',
+              label: this.text('native.context.newTabWorkspace'),
               click: () => {
                 void this.createTab({ url: 'about:blank', active: true, mcpGroupId: currentGroup.id })
                   .catch(reportError('open a new tab in the workspace'))
@@ -2247,13 +2249,13 @@ export class BrowserTabsManager {
             { type: 'separator' },
             {
               id: 'edit-workspace',
-              label: 'Edit Workspace…',
+              label: this.text('native.context.editWorkspace'),
               click: () => this.window.webContents.send('browser:edit-tab-group', currentGroup.id)
             },
             { type: 'separator' },
             {
               id: 'archive-workspace',
-              label: 'Archive Workspace',
+              label: this.text('native.context.archiveWorkspace'),
               enabled: currentGroup.id !== this.defaultHumanGroupId && !this.allHumanInteractionLocked,
               click: () => { void this.saveAndCloseTabGroup(currentGroup.id).catch(reportError('archive the workspace')) }
             }
@@ -2261,7 +2263,7 @@ export class BrowserTabsManager {
         }
       : {
           id: 'workspace',
-          label: 'Workspace unavailable',
+          label: this.text('native.context.workspaceUnavailable'),
           enabled: false
         }
     const openSplitWith = (firstTabId: string, secondTabId: string): void => {
@@ -2272,36 +2274,36 @@ export class BrowserTabsManager {
     const splitMenu: MenuItemConstructorOptions = this.splitViewContains(tab.id)
       ? {
           id: 'split-view',
-          label: 'Split View',
+          label: this.text('native.context.splitView'),
           submenu: [
             {
               id: 'split-side-by-side',
-              label: 'Side by Side',
+              label: this.text('native.context.sideBySide'),
               type: 'radio',
               checked: this.splitView?.orientation === 'vertical',
               click: () => this.updateSplitView({ orientation: 'vertical' })
             },
             {
               id: 'split-stacked',
-              label: 'Stacked',
+              label: this.text('native.context.stacked'),
               type: 'radio',
               checked: this.splitView?.orientation === 'horizontal',
               click: () => this.updateSplitView({ orientation: 'horizontal' })
             },
             { type: 'separator' },
-            { id: 'swap-split-tabs', label: 'Swap Tabs', click: () => this.updateSplitView({ swap: true }) },
-            { id: 'close-split-view', label: 'Exit Split View', click: () => this.closeSplitView() }
+            { id: 'swap-split-tabs', label: this.text('native.context.swapTabs'), click: () => this.updateSplitView({ swap: true }) },
+            { id: 'close-split-view', label: this.text('native.context.exitSplit'), click: () => this.closeSplitView() }
           ]
         }
       : activeWebsiteTab && !isBronomHomeUrl(activeWebsiteTab.url) && activeWebsiteTab.id !== tab.id
         ? {
             id: 'open-in-split-view',
-            label: 'Open in Split View',
+            label: this.text('native.context.openSplit'),
             click: () => openSplitWith(activeWebsiteTab.id, tab.id)
           }
         : {
             id: 'open-in-split-view',
-            label: 'Open Tab Beside',
+            label: this.text('native.context.openBeside'),
             enabled: splitCandidates.length > 0,
             submenu: splitCandidates.map((candidate) => ({
               id: `split-with-${candidate.id}`,
@@ -2312,39 +2314,39 @@ export class BrowserTabsManager {
     const menu = Menu.buildFromTemplate([
       {
         id: 'new-tab',
-        label: 'New Tab',
+        label: this.text('native.context.newTab'),
         click: () => { void this.newTab().catch(reportError('open a new tab')) }
       },
       {
         id: 'reload-tab',
-        label: 'Reload Tab',
+        label: this.text('native.context.reloadTab'),
         click: () => { void this.reload(tab.id).catch(reportError('reload the tab')) }
       },
       {
         id: 'reload-tab-ignoring-cache',
-        label: 'Reload Tab Without Cache',
+        label: this.text('native.context.reloadNoCache'),
         click: () => { void this.reloadIgnoringCache(tab.id).catch(reportError('reload the tab without cache')) }
       },
       {
         id: 'duplicate-tab',
-        label: 'Duplicate Tab',
+        label: this.text('native.context.duplicateTab'),
         click: () => { void this.duplicateTab(tab.id).catch(reportError('duplicate the tab')) }
       },
       splitMenu,
       {
         id: tab.muted ? 'unmute-tab' : 'mute-tab',
-        label: tab.muted ? 'Unmute Tab' : 'Mute Tab',
+        label: this.text(tab.muted ? 'native.context.unmuteTab' : 'native.context.muteTab'),
         click: () => this.setTabMuted(tab.id, !tab.muted)
       },
       { type: 'separator' },
       {
         id: tab.pinned ? 'unpin-tab' : 'pin-tab',
-        label: tab.pinned ? 'Unpin Tab' : 'Pin Tab',
+        label: this.text(tab.pinned ? 'native.context.unpinTab' : 'native.context.pinTab'),
         click: () => this.setTabPinned(tab.id, !tab.pinned)
       },
       {
         id: tab.sleeping ? 'wake-tab' : 'sleep-tab',
-        label: tab.sleeping ? 'Wake Tab' : 'Put Tab to Sleep',
+        label: this.text(tab.sleeping ? 'native.context.wakeTab' : 'native.context.sleepTab'),
         enabled: tab.sleeping || this.sleepBlockReason(tab) === undefined,
         click: () => {
           void this.setTabSleeping(tab.id, !tab.sleeping).catch(reportError(tab.sleeping ? 'wake the tab' : 'put the tab to sleep'))
@@ -2354,45 +2356,45 @@ export class BrowserTabsManager {
       { type: 'separator' },
       {
         id: 'move-tab-left',
-        label: 'Move Tab Left',
+        label: this.text('native.context.moveLeft'),
         enabled: peerIndex > 0,
         click: () => this.reorderTab(tab.id, peers[peerIndex - 1]!.id, 'before')
       },
       {
         id: 'move-tab-right',
-        label: 'Move Tab Right',
+        label: this.text('native.context.moveRight'),
         enabled: peerIndex >= 0 && peerIndex < peers.length - 1,
         click: () => this.reorderTab(tab.id, peers[peerIndex + 1]!.id, 'after')
       },
       { type: 'separator' },
       {
         id: 'close-tab',
-        label: 'Close Tab',
+        label: this.text('native.context.closeTab'),
         enabled: !this.allHumanInteractionLocked,
         click: () => { void this.closeTab(tab.id).catch(reportError('close the tab')) }
       },
       {
         id: 'close-other-tabs',
-        label: 'Close Other Tabs',
+        label: this.text('native.context.closeOthers'),
         enabled: !this.allHumanInteractionLocked && otherTabs.length > 0,
         click: () => { void this.closeTabs(otherTabs.map((candidate) => candidate.id)).catch(reportError('close other tabs')) }
       },
       {
         id: 'close-tabs-to-right',
-        label: 'Close Tabs to the Right',
+        label: this.text('native.context.closeRight'),
         enabled: !this.allHumanInteractionLocked && tabsToRight.length > 0,
         click: () => { void this.closeTabs(tabsToRight.map((candidate) => candidate.id)).catch(reportError('close tabs to the right')) }
       },
       {
         id: 'close-duplicate-tabs',
-        label: 'Close Duplicate Tabs',
+        label: this.text('native.context.closeDuplicates'),
         enabled: !this.allHumanInteractionLocked && duplicateTabs.length > 0,
         click: () => { void this.closeTabs(duplicateTabs.map((candidate) => candidate.id)).catch(reportError('close duplicate tabs')) }
       },
       { type: 'separator' },
       {
         id: 'reopen-closed-tab',
-        label: 'Reopen Closed Tab',
+        label: this.text('native.context.reopenClosed'),
         enabled: this.closedTabs.length > 0,
         click: () => { void this.reopenClosedTab().catch(reportError('reopen a closed tab')) }
       }
@@ -4350,6 +4352,7 @@ export class BrowserTabsManager {
       infoCount: issues.filter((issue) => issue.severity === 'info').length,
       issues,
       truncated: tab.inspectorIssuesTruncated,
+      devToolsOpen: tab.webContents.isDevToolsOpened(),
       ...(clearedCount !== undefined ? { clearedCount } : {}),
       caveats: [
         'Issues are browser-generated diagnostics for the current document, not a complete quality audit.',
@@ -5030,7 +5033,6 @@ export class BrowserTabsManager {
       throw new Error('The tab closed while waiting for the page.')
     }
     await new Promise<void>((resolve, reject) => {
-      let timer: NodeJS.Timeout | undefined
       const cleanup = (): void => {
         if (timer) clearTimeout(timer)
         webContents.removeListener('did-stop-loading', done)
@@ -5049,7 +5051,7 @@ export class BrowserTabsManager {
         cleanup()
         reject(new Error('Timed out waiting for the page to finish loading.'))
       }
-      timer = setTimeout(onTimeout, Math.min(Math.max(timeoutMs, 1), 60_000))
+      const timer = setTimeout(onTimeout, Math.min(Math.max(timeoutMs, 1), 60_000))
       webContents.once('did-stop-loading', done)
       webContents.once('did-fail-load', done)
       webContents.once('destroyed', onDestroyed)
@@ -5318,7 +5320,7 @@ export class BrowserTabsManager {
       tab.loading = false
       if (!tab.pageProblem) {
         tab.title = 'Site unavailable'
-        tab.pageProblem = loadFailureProblem(url, 0, 'ERR_FAILED')
+        tab.pageProblem = loadFailureProblem(this.options.getLocale(), url, 0, 'ERR_FAILED')
       }
       this.changed()
       console.error(`[browser] Failed to load ${url}:`, error)
@@ -5455,8 +5457,8 @@ export class BrowserTabsManager {
       tab.loading = false
       tab.pageProblem = {
         kind: 'renderer-gone',
-        title: 'This page is no longer available',
-        message: 'Close this tab and reopen it from Recently closed.',
+        title: this.text('native.dialog.pageDestroyedTitle'),
+        message: this.text('native.dialog.pageDestroyedMessage'),
         url: tab.url,
         reason: 'renderer-destroyed'
       }
@@ -5836,7 +5838,7 @@ export class BrowserTabsManager {
       tab.loading = false
       tab.url = failedUrl
       tab.title = 'Site unavailable'
-      tab.pageProblem = loadFailureProblem(failedUrl, errorCode, errorDescription)
+      tab.pageProblem = loadFailureProblem(this.options.getLocale(), failedUrl, errorCode, errorDescription)
       this.appendConsoleMessage(tab, {
         timestamp: new Date().toISOString(),
         level: 'error',
@@ -5876,8 +5878,8 @@ export class BrowserTabsManager {
     webContents.on('render-process-gone', (_event, details) => {
       if (this.recoveringRenderers.delete(webContents.id)) return
       tab.loading = false
-      tab.title = 'Page unavailable'
-      tab.pageProblem = rendererFailureProblem(tab.url, details.reason, details.exitCode)
+      tab.title = this.text('native.dialog.pageUnavailable')
+      tab.pageProblem = rendererFailureProblem(this.options.getLocale(), tab.url, details.reason, details.exitCode)
       this.appendConsoleMessage(tab, {
         timestamp: new Date().toISOString(),
         level: 'error',
@@ -5891,8 +5893,8 @@ export class BrowserTabsManager {
     webContents.on('unresponsive', () => {
       tab.pageProblem = {
         kind: 'unresponsive',
-        title: "This page isn't responding",
-        message: 'You can wait for it to recover or reload it now.',
+        title: this.text('native.dialog.unresponsiveTitle'),
+        message: this.text('native.dialog.unresponsiveMessage'),
         url: tab.url
       }
       this.changed(false)
@@ -5982,18 +5984,18 @@ export class BrowserTabsManager {
       groups.push([
         {
           id: 'open-link-new-tab',
-          label: 'Open Link in New Tab',
+          label: this.text('native.context.openLink'),
           enabled: webLink,
           click: () => openBackgroundTab(params.linkURL)
         },
         {
           id: 'copy-link-address',
-          label: 'Copy Link Address',
+          label: this.text('native.context.copyLink'),
           click: () => copyText(params.linkURL)
         },
         {
           id: 'save-link',
-          label: 'Save Link',
+          label: this.text('native.context.saveLink'),
           enabled: webLink,
           click: withLiveContents('save link', () => webContents.downloadURL(params.linkURL))
         }
@@ -6004,24 +6006,24 @@ export class BrowserTabsManager {
       groups.push([
         {
           id: 'open-image-new-tab',
-          label: 'Open Image in New Tab',
+          label: this.text('native.context.openImage'),
           enabled: isWebUrl(params.srcURL),
           click: () => openBackgroundTab(params.srcURL)
         },
         {
           id: 'copy-image',
-          label: 'Copy Image',
+          label: this.text('native.context.copyImage'),
           enabled: params.hasImageContents,
           click: copyImage
         },
         {
           id: 'copy-image-address',
-          label: 'Copy Image Address',
+          label: this.text('native.context.copyImageAddress'),
           click: () => copyText(params.srcURL)
         },
         {
           id: 'save-image',
-          label: 'Save Image',
+          label: this.text('native.context.saveImage'),
           enabled: isWebUrl(params.srcURL),
           click: withLiveContents('save image', () => webContents.downloadURL(params.srcURL))
         }
@@ -6037,32 +6039,32 @@ export class BrowserTabsManager {
         }))
         spellingItems.push({
           id: 'add-to-dictionary',
-          label: `Add “${params.misspelledWord}” to Dictionary`,
+          label: this.text('native.context.addDictionary', { word: params.misspelledWord }),
           click: withLiveContents('add word to dictionary', () => { webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord) })
         })
         groups.push(spellingItems)
       }
       groups.push([
-        { id: 'undo', label: 'Undo', enabled: params.editFlags.canUndo, click: withLiveContents('undo', () => webContents.undo()) },
-        { id: 'redo', label: 'Redo', enabled: params.editFlags.canRedo, click: withLiveContents('redo', () => webContents.redo()) },
+        { id: 'undo', label: this.text('native.context.undo'), enabled: params.editFlags.canUndo, click: withLiveContents('undo', () => webContents.undo()) },
+        { id: 'redo', label: this.text('native.context.redo'), enabled: params.editFlags.canRedo, click: withLiveContents('redo', () => webContents.redo()) },
         { type: 'separator' },
-        { id: 'cut', label: 'Cut', enabled: params.editFlags.canCut, click: withLiveContents('cut', () => webContents.cut()) },
-        { id: 'copy', label: 'Copy', enabled: params.editFlags.canCopy, click: withLiveContents('copy', () => webContents.copy()) },
-        { id: 'paste', label: 'Paste', enabled: params.editFlags.canPaste, click: withLiveContents('paste', () => webContents.paste()) },
-        { id: 'paste-and-match-style', label: 'Paste and Match Style', enabled: params.editFlags.canPaste, click: withLiveContents('paste and match style', () => webContents.pasteAndMatchStyle()) },
-        { id: 'delete', label: 'Delete', enabled: params.editFlags.canDelete, click: withLiveContents('delete', () => webContents.delete()) },
+        { id: 'cut', label: this.text('native.context.cut'), enabled: params.editFlags.canCut, click: withLiveContents('cut', () => webContents.cut()) },
+        { id: 'copy', label: this.text('native.context.copy'), enabled: params.editFlags.canCopy, click: withLiveContents('copy', () => webContents.copy()) },
+        { id: 'paste', label: this.text('native.context.paste'), enabled: params.editFlags.canPaste, click: withLiveContents('paste', () => webContents.paste()) },
+        { id: 'paste-and-match-style', label: this.text('native.context.pasteMatchStyle'), enabled: params.editFlags.canPaste, click: withLiveContents('paste and match style', () => webContents.pasteAndMatchStyle()) },
+        { id: 'delete', label: this.text('native.context.delete'), enabled: params.editFlags.canDelete, click: withLiveContents('delete', () => webContents.delete()) },
         { type: 'separator' },
-        { id: 'select-all', label: 'Select All', enabled: params.editFlags.canSelectAll, click: withLiveContents('select all', () => webContents.selectAll()) }
+        { id: 'select-all', label: this.text('native.context.selectAll'), enabled: params.editFlags.canSelectAll, click: withLiveContents('select all', () => webContents.selectAll()) }
       ])
     } else if (params.selectionText) {
-      groups.push([{ id: 'copy-selection', label: 'Copy', click: withLiveContents('copy selection', () => webContents.copy()) }])
+      groups.push([{ id: 'copy-selection', label: this.text('native.context.copy'), click: withLiveContents('copy selection', () => webContents.copy()) }])
     }
 
     const navigation = webContents.navigationHistory
     groups.push([
       {
         id: 'back',
-        label: 'Back',
+        label: this.text('native.context.back'),
         enabled: navigation.canGoBack(),
         click: () => {
           void this.back(tab.id).catch((error) => this.options.onActionFailed?.('go back', error))
@@ -6070,7 +6072,7 @@ export class BrowserTabsManager {
       },
       {
         id: 'forward',
-        label: 'Forward',
+        label: this.text('native.context.forward'),
         enabled: navigation.canGoForward(),
         click: () => {
           void this.forward(tab.id).catch((error) => this.options.onActionFailed?.('go forward', error))
@@ -6078,14 +6080,14 @@ export class BrowserTabsManager {
       },
       {
         id: 'reload',
-        label: 'Reload',
+        label: this.text('native.context.reload'),
         click: () => {
           void this.reload(tab.id).catch((error) => this.options.onActionFailed?.('reload', error))
         }
       },
       {
         id: 'reload-ignoring-cache',
-        label: 'Reload Without Cache',
+        label: this.text('native.context.reloadWithoutCache'),
         click: () => {
           void this.reloadIgnoringCache(tab.id)
             .catch((error) => this.options.onActionFailed?.('reload without cache', error))
@@ -6093,12 +6095,12 @@ export class BrowserTabsManager {
       },
       {
         id: 'copy-page-address',
-        label: 'Copy Page Address',
+        label: this.text('native.context.copyPageAddress'),
         click: () => copyText(tab.url)
       },
       {
         id: 'inspect-element',
-        label: 'Inspect',
+        label: this.text('native.context.inspect'),
         click: () => {
           void this.inspectElement(tab, params.x, params.y)
             .catch((error) => {
@@ -7929,7 +7931,7 @@ export class BrowserTabsManager {
         const suggestedPath = this.availableDownloadPath(item.getFilename())
         if (this.options.askWhereToSaveDownloads) {
           item.setSaveDialogOptions({
-            title: 'Save download',
+            title: this.text('native.dialog.saveDownload'),
             defaultPath: suggestedPath
           })
         } else {

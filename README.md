@@ -29,6 +29,10 @@ Open **Settings** from the gear button in the top strip. Bronom includes four ap
 
 The selected theme is applied immediately and survives application restarts. System mode keeps Bronom's renderer, native menus, and window background aligned with Electron's current operating-system theme. A fixed theme changes Bronom's controls and native color preference without injecting styles into websites.
 
+### Interface language
+
+Choose **System default**, English, Ukrainian, Russian, German, French, Spanish, or Polish in **Settings → Appearance**. The preference is stored in Bronom's profile and applies immediately to the main window, detached panels, Bronom Home, and native menus. System mode keeps the `system` preference and resolves Electron's operating-system locale centrally; unsupported system languages use English. Electron does not provide a reliable cross-platform live notification when the operating-system language changes, so an OS-language change is picked up on the next Bronom launch. Choosing an explicit language, or switching back to System default, applies immediately without restarting.
+
 **Interface size** scales Bronom's tabs, toolbar, Settings, and diagnostic panels independently from website page zoom. New profiles use Comfortable 110%; choose Compact 100% or Large 125% at any time. Detached Bronom panels follow the same setting, while every website retains its own zoom and viewport. The same dialog includes separate **Search engine**, **Downloads**, **Performance**, **MCP security**, **Privacy & data**, **Site permissions**, **Passwords**, and **Updates** sections.
 
 ## Choose the default search engine

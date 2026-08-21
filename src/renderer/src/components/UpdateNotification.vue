@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import IconCheck from '~icons/material-symbols/check-rounded'
 import IconChevronRight from '~icons/material-symbols/chevron-right-rounded'
 import IconDownload from '~icons/material-symbols/download-rounded'
@@ -18,34 +19,35 @@ const emit = defineEmits<{
   download: []
   install: []
 }>()
+const { t } = useI18n({ useScope: 'global' })
 
 const title = computed(() => {
   switch (props.state.status) {
-    case 'checking': return 'Checking for updates'
-    case 'available': return `Bronom ${props.state.availableVersion ?? ''} is available`
-    case 'downloading': return 'Downloading update'
-    case 'downloaded': return 'Update ready to install'
-    case 'installing': return 'Installing update'
-    case 'up-to-date': return 'Bronom is up to date'
+    case 'checking': return t('updates.status.checking')
+    case 'available': return t('updates.status.available', { version: props.state.availableVersion ?? '' })
+    case 'downloading': return t('updates.status.downloading')
+    case 'downloaded': return t('updates.status.downloaded')
+    case 'installing': return t('updates.status.installing')
+    case 'up-to-date': return t('updates.status.current')
     case 'error':
-    case 'install-error': return 'Update needs attention'
-    case 'disabled': return 'Updates unavailable'
-    default: return 'Software updates'
+    case 'install-error': return t('updates.status.attention')
+    case 'disabled': return t('updates.status.unavailable')
+    default: return t('updates.status.default')
   }
 })
 
 const description = computed(() => {
   switch (props.state.status) {
-    case 'checking': return 'Looking for a newer Bronom release…'
-    case 'available': return `Bronom ${props.state.availableVersion ?? ''} is ready to download.`
-    case 'downloading': return `Downloading Bronom ${props.state.availableVersion ?? ''}…`
-    case 'downloaded': return `Bronom ${props.state.availableVersion ?? ''} will restart after installation.`
-    case 'installing': return props.state.message || 'Bronom will restart automatically when installation finishes.'
-    case 'up-to-date': return `You are using the latest version (${props.state.currentVersion}).`
+    case 'checking': return t('updates.description.checking')
+    case 'available': return t('updates.description.available', { version: props.state.availableVersion ?? '' })
+    case 'downloading': return t('updates.description.downloading', { version: props.state.availableVersion ?? '' })
+    case 'downloaded': return t('updates.description.downloaded', { version: props.state.availableVersion ?? '' })
+    case 'installing': return props.state.message || t('updates.description.installing')
+    case 'up-to-date': return t('updates.description.current', { version: props.state.currentVersion })
     case 'error':
-    case 'install-error': return props.state.message || 'The update could not be completed.'
-    case 'disabled': return props.state.message || 'Updates are unavailable for this build.'
-    default: return `Current version: ${props.state.currentVersion}`
+    case 'install-error': return props.state.message || t('updates.description.failed')
+    case 'disabled': return props.state.message || t('updates.description.unavailable')
+    default: return t('updates.description.version', { version: props.state.currentVersion })
   }
 })
 
@@ -54,15 +56,15 @@ const formattedReleaseNotes = computed(() => props.state.releaseNotes ? formatRe
 
 const pillLabel = computed(() => {
   switch (props.state.status) {
-    case 'available': return `Version ${props.state.availableVersion ?? ''} available`
-    case 'downloading': return `Downloading ${Math.round(props.state.percent ?? 0)}%`
-    case 'downloaded': return 'Restart to update'
-    case 'installing': return 'Installing update'
-    case 'up-to-date': return 'Bronom is up to date'
+    case 'available': return t('updates.pill.available', { version: props.state.availableVersion ?? '' })
+    case 'downloading': return t('updates.pill.downloading', { percent: Math.round(props.state.percent ?? 0) })
+    case 'downloaded': return t('updates.pill.downloaded')
+    case 'installing': return t('updates.pill.installing')
+    case 'up-to-date': return t('updates.pill.current')
     case 'error':
-    case 'install-error': return 'Update needs attention'
-    case 'disabled': return 'Updates unavailable'
-    default: return 'Checking for updates'
+    case 'install-error': return t('updates.pill.attention')
+    case 'disabled': return t('updates.pill.unavailable')
+    default: return t('updates.pill.checking')
   }
 })
 </script>
@@ -74,8 +76,8 @@ const pillLabel = computed(() => {
     :class="state.status"
     type="button"
     aria-live="polite"
-    :aria-label="`Open software updates: ${pillLabel}`"
-    title="Open Software updates"
+    :aria-label="t('updates.open', { status: pillLabel })"
+    :title="t('updates.openTitle')"
     @click="emit('open')"
   >
     <span class="update-status-icon" :class="{ busy, error: state.status === 'error' || state.status === 'install-error' }" aria-hidden="true">
@@ -89,7 +91,7 @@ const pillLabel = computed(() => {
     <IconChevronRight class="update-status-chevron" aria-hidden="true" />
   </button>
 
-  <section v-else class="update-status-card" :class="state.status" aria-live="polite" aria-label="Software update status">
+  <section v-else class="update-status-card" :class="state.status" aria-live="polite" :aria-label="t('updates.cardLabel')">
     <div class="update-status-card-heading">
       <span class="update-status-card-icon" :class="{ busy, error: state.status === 'error' || state.status === 'install-error' }" aria-hidden="true">
         <IconCheck v-if="state.status === 'up-to-date'" />
@@ -103,13 +105,13 @@ const pillLabel = computed(() => {
         <p>{{ description }}</p>
       </div>
     </div>
-    <div v-if="state.status === 'downloading'" class="update-progress" aria-label="Download progress">
+    <div v-if="state.status === 'downloading'" class="update-progress" :aria-label="t('updates.progress')">
       <span :style="{ width: `${Math.min(100, Math.max(0, state.percent ?? 0))}%` }" />
     </div>
     <div
       v-if="formattedReleaseNotes && (state.status === 'available' || state.status === 'downloaded')"
       class="release-notes"
-      aria-label="Release notes"
+      :aria-label="t('updates.releaseNotes')"
       v-html="formattedReleaseNotes"
     />
     <div class="update-status-card-actions">
@@ -119,16 +121,16 @@ const pillLabel = computed(() => {
         type="button"
         @click="emit('check')"
       >
-        {{ state.status === 'error' ? 'Try again' : 'Check again' }}
+        {{ state.status === 'error' ? t('common.tryAgain') : t('common.checkAgain') }}
       </button>
       <button v-if="state.status === 'available'" class="primary-button" type="button" @click="emit('download')">
-        Download update
+        {{ t('updates.download') }}
       </button>
       <button v-if="state.status === 'downloaded'" class="primary-button" type="button" @click="emit('install')">
-        Install and restart
+        {{ t('updates.install') }}
       </button>
       <button v-if="state.status === 'install-error'" class="primary-button" type="button" @click="emit('install')">
-        Try installation again
+        {{ t('updates.retryInstall') }}
       </button>
     </div>
   </section>

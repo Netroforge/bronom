@@ -12,5 +12,6 @@
     "skipLibCheck": true,
     "allowSyntheticDefaultImports": true
   },
-  "include": ["electron.vite.config.ts", "vite.website.config.ts", "src/main/**/*.ts", "src/preload/**/*.ts", "src/shared/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"]
+  "include": ["electron.vite.config.ts", "vite.website.config.ts", "vitest.config.ts", "playwright.config.ts", "src/main/**/*.ts", "src/preload/**/*.ts", "src/shared/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"],
+  "exclude": ["tests/renderer/**"]
 }

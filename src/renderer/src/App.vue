@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { bind as bindFoley, play as playFoley, set as setFoley } from '@foleyjs/core'
-import { computed, defineComponent, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { formatReproAsPlaywright } from '../../shared/repro-export'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useI18n } from 'vue-i18n'
+import {
+  formatBytes as formatLocalizedBytes,
+  formatDateTime,
+  formatNumber,
+  formatPercent,
+  formatTime
+} from '../../shared/format'
 import IconAdd from '~icons/material-symbols/add-rounded'
 import IconAddBox from '~icons/material-symbols/add-box-rounded'
 import IconAdsClick from '~icons/material-symbols/ads-click-rounded'
@@ -14,8 +22,6 @@ import IconBedtime from '~icons/material-symbols/bedtime-rounded'
 import IconCheck from '~icons/material-symbols/check-rounded'
 import IconClose from '~icons/material-symbols/close-rounded'
 import IconContrast from '~icons/material-symbols/contrast-rounded'
-import IconCopy from '~icons/material-symbols/content-copy-rounded'
-import IconCookie from '~icons/material-symbols/cookie-rounded'
 import IconDatabase from '~icons/material-symbols/database-rounded'
 import IconDelete from '~icons/material-symbols/delete-outline-rounded'
 import IconDashboard from '~icons/material-symbols/space-dashboard-rounded'
@@ -43,14 +49,12 @@ import IconLanguage from '~icons/material-symbols/language-rounded'
 import IconMonitoring from '~icons/material-symbols/monitoring-rounded'
 import IconMemory from '~icons/material-symbols/memory-rounded'
 import IconNetworkCheck from '~icons/material-symbols/network-check-rounded'
-import IconOffline from '~icons/material-symbols/offline-bolt-rounded'
 import IconKey from '~icons/material-symbols/key-rounded'
 import IconLock from '~icons/material-symbols/lock-rounded'
 import IconLockOpen from '~icons/material-symbols/lock-open-rounded'
 import IconRemove from '~icons/material-symbols/remove-rounded'
 import IconPassword from '~icons/material-symbols/password-rounded'
 import IconPalette from '~icons/material-symbols/palette-rounded'
-import IconPieChart from '~icons/material-symbols/pie-chart-rounded'
 import IconPause from '~icons/material-symbols/pause-rounded'
 import IconPdf from '~icons/material-symbols/picture-as-pdf-rounded'
 import IconPlay from '~icons/material-symbols/play-arrow-rounded'
@@ -59,7 +63,6 @@ import IconPrivacy from '~icons/material-symbols/privacy-tip-rounded'
 import IconRefresh from '~icons/material-symbols/refresh-rounded'
 import IconRestore from '~icons/material-symbols/restore-page-rounded'
 import IconRecord from '~icons/material-symbols/fiber-manual-record-rounded'
-import IconReplay from '~icons/material-symbols/replay-rounded'
 import IconRoute from '~icons/material-symbols/route-rounded'
 import IconSearch from '~icons/material-symbols/search-rounded'
 import IconScreenshotRegion from '~icons/material-symbols/screenshot-region-rounded'
@@ -81,49 +84,11 @@ import IconVolumeOff from '~icons/material-symbols/volume-off-rounded'
 import IconVolumeUp from '~icons/material-symbols/volume-up-rounded'
 import IconZoomIn from '~icons/material-symbols/zoom-in-rounded'
 import {
-  ATTENTION_SOUND_CUES,
-  BROWSER_NETWORK_ABORT_REASONS,
   DETACHABLE_PANEL_IDS,
   PANEL_DOCKS,
-  type AttentionSoundCue,
   AppSettings,
   AppUpdateState,
-  BrowserAccessibilityAudit,
-  BrowserAccessibilityImpact,
-  BrowserQualityAudit,
-  BrowserPerformanceMetric,
-  BrowserPerformanceMetricName,
-  BrowserPerformanceAction,
-  BrowserPerformanceComparisonMetric,
-  BrowserPerformanceComparisonMetricName,
-  BrowserPerformanceReport,
-  BrowserPerformanceScriptContributor,
-  BrowserDesignOverviewReport,
-  BrowserPageMetadataReport,
-  BrowserSecurityReport,
-  BrowserCodeCoverageMode,
-  BrowserCodeCoverageResult,
-  BrowserCpuProfileResult,
-  BrowserMemoryReport,
-  BrowserReproRecording,
-  BrowserDomChangeEntry,
-  BrowserDomChangesReport,
-  BrowserVisualCompareView,
-  BrowserDebugReport,
-  BrowserConsoleMessage,
   BrowserEnvironmentSettings,
-  BrowserInspectorIssuesReport,
-  BrowserNetworkHar,
-  BrowserNetworkHarExport,
-  BrowserNetworkSearchMatch,
-  BrowserNetworkSearchResult,
-  BrowserNetworkAbortReason,
-  BrowserNetworkRouteInput,
-  BrowserNetworkRouteSummary,
-  BrowserNetworkRequest,
-  BrowserNetworkRequestDetails,
-  BrowserNetworkRequestSortBy,
-  BrowserNetworkRequestSortDirection,
   BrowserState,
   BrowserEmulationState,
   BrowserViewportEmulation,
@@ -138,15 +103,6 @@ import {
   BrowserDownloadState,
   BrowserBookmark,
   BrowserHistoryEntry,
-  BrowserStorageItem,
-  BrowserStorageKind,
-  BrowserStorageResult,
-  BrowserStorageUsageReport,
-  BrowserIndexedDbReport,
-  BrowserPwaReport,
-  BrowserStorageChange,
-  BrowserStorageChangesAction,
-  BrowserStorageChangesReport,
   BrowsingDataClearOptions,
   BrowsingDataSiteSummary,
   BrowsingDataSummary,
@@ -170,22 +126,17 @@ import {
   defaultTabGroupColor,
   tabGroupColorLabel
 } from '../../shared/tab-groups'
-import {
-  canFormatNetworkRequestCopy,
-  formatNetworkRequestCopy,
-  type BrowserNetworkRequestCopyFormat
-} from '../../shared/network-request-copy'
-import { sortNetworkRequests } from '../../shared/network-request-sort'
-import { networkReplayRequiresConfirmation } from '../../shared/network-replay'
-import {
-  networkResponseSourceLabel,
-  serviceWorkerResponseSourceLabel
-} from '../../shared/network-response-source'
-import {
-  buildNetworkWaterfallRange,
-  networkWaterfallPosition
-} from '../../shared/network-waterfall'
 import UpdateNotification from './components/UpdateNotification.vue'
+import AppearanceSettings from './components/AppearanceSettings.vue'
+import ConsolePanelContainer from './components/ConsolePanelContainer.vue'
+import DiagnosticsPanels from './components/DiagnosticsPanels.vue'
+import NetworkPanel from './components/NetworkPanel.vue'
+import PanelDockPicker from './components/PanelDockPicker.vue'
+import SiteStoragePanel from './components/SiteStoragePanel.vue'
+import { useBrowserStore } from './stores/browser'
+import { useSettingsStore } from './stores/settings'
+import { useShellWindowLifecycle } from './composables/useShellWindowLifecycle'
+import { useDiagnosticsController } from './composables/useDiagnosticsController'
 import {
   shellHeightForBrowserContent,
   shouldShowUpdateStatusPill,
@@ -194,6 +145,7 @@ import {
 } from '../../shared/update-presentation'
 import { browserShortcutAction, type BrowserShortcutAction } from '../../shared/browser-shortcuts'
 import {
+  COMMAND_PALETTE_COMMANDS,
   filterCommandPaletteCommands,
   type CommandPaletteCommand,
   type CommandPaletteCommandId
@@ -211,30 +163,13 @@ import {
 } from '../../shared/address-suggestions'
 import { DEFAULT_MCP_PORT, MAX_MCP_PORT, MIN_MCP_PORT, isValidMcpPort } from '../../shared/mcp-port'
 import { SEARCH_ENGINE_OPTIONS } from '../../shared/search-engine'
-import {
-  DEFAULT_INTERFACE_SCALE,
-  INTERFACE_SCALE_OPTIONS,
-  type InterfaceScale
-} from '../../shared/interface-scale'
+import { DEFAULT_INTERFACE_SCALE } from '../../shared/interface-scale'
 import type { BrowserSplitOrientation } from '../../shared/split-view'
 import {
   BROWSER_VIEWPORT_PRESETS,
   matchingViewportPreset,
   resolveViewportPreset
 } from '../../shared/viewport-presets'
-import {
-  filterNetworkRequests,
-  isNetworkRequestFailure,
-  networkResourceCategory,
-  normalizeNetworkHarOptions
-} from '../../shared/network-har'
-import {
-  browserConsoleLevel,
-  countConsoleEvents,
-  countConsoleMessages,
-  filterConsoleMessages,
-  type BrowserConsoleLevelFilter
-} from '../../shared/console-messages'
 import {
   browserEnvironmentFromEmulation,
   browserEnvironmentOverrideCount,
@@ -250,72 +185,44 @@ function isDetachablePanelId(value: string | null): value is DetachablePanelId {
 }
 
 function detachedPanelLabel(panel: DetachablePanelId): string {
-  const labels: Record<DetachablePanelId, string> = {
-    'site-controls': 'Site controls',
-    'site-storage': 'Site storage',
-    'page-tools': 'Page tools',
-    'responsive-preview': 'Responsive preview',
-    environment: 'Environment',
-    accessibility: 'Accessibility',
-    'quality-audit': 'Quality audit',
-    performance: 'Performance',
-    'design-overview': 'Design overview',
-    'page-metadata': 'Page metadata',
-    security: 'Security',
-    coverage: 'Code coverage',
-    'cpu-profile': 'JavaScript CPU profile',
-    memory: 'Memory',
-    console: 'Console',
-    network: 'Network monitor',
-    'debug-report': 'Debug report',
-    'repro-recorder': 'Repro recorder',
-    'dom-changes': 'DOM changes',
-    'visual-compare': 'Visual compare',
-    issues: 'Issues',
-    bookmarks: 'Bookmarks'
+  const keys: Record<DetachablePanelId, string> = {
+    'site-controls': 'panels.siteControls',
+    'site-storage': 'panels.siteStorage',
+    'page-tools': 'panels.pageTools',
+    'responsive-preview': 'panels.responsivePreview',
+    environment: 'panels.environment',
+    accessibility: 'panels.accessibility',
+    'quality-audit': 'panels.qualityAudit',
+    performance: 'panels.performance',
+    'design-overview': 'panels.designOverview',
+    'page-metadata': 'panels.pageMetadata',
+    security: 'panels.security',
+    coverage: 'panels.coverage',
+    'cpu-profile': 'panels.cpuProfile',
+    memory: 'panels.memory',
+    console: 'panels.console',
+    network: 'panels.network',
+    'debug-report': 'panels.debugReport',
+    'repro-recorder': 'panels.reproRecorder',
+    'dom-changes': 'panels.domChanges',
+    'visual-compare': 'panels.visualCompare',
+    issues: 'panels.issues',
+    bookmarks: 'panels.bookmarks'
   }
-  return labels[panel]
+  return t(keys[panel])
 }
 
 function detachedPanelTitle(panel: DetachablePanelId): string {
-  return `${detachedPanelLabel(panel)} — Bronom`
+  return t('panels.title', { panel: detachedPanelLabel(panel) })
 }
 
-const PanelDockPicker = defineComponent({
-  props: {
-    modelValue: { type: String, required: true },
-    label: { type: String, required: true }
-  },
-  emits: ['update:modelValue'],
-  setup(props, { emit }) {
-    return () => h('label', { class: 'panel-dock-picker' }, [
-      h('span', 'Dock'),
-      h('select', {
-        value: props.modelValue,
-        'aria-label': props.label,
-        onChange: (event: Event) => emit('update:modelValue', (event.target as HTMLSelectElement).value)
-      }, [
-        h('option', { value: 'right' }, 'Right'),
-        h('option', { value: 'left' }, 'Left'),
-        h('option', { value: 'bottom' }, 'Bottom'),
-        h('option', { value: 'top' }, 'Top'),
-        h('option', { value: 'window' }, 'Separate window')
-      ])
-    ])
-  }
-})
-
-const emptyState: BrowserState = {
-  tabs: [],
-  closedTabs: [],
-  activeTabId: null,
-  allHumanInteractionLocked: false,
-  mcpUrl: '',
-  profilePath: '',
-  mcpTabGroups: [],
-  savedTabGroups: []
-}
+const { t } = useI18n({ useScope: 'global' })
+const browserStore = useBrowserStore()
+const settingsStore = useSettingsStore()
+const { state } = storeToRefs(browserStore)
+const { settings, systemTheme, resolvedLocale } = storeToRefs(settingsStore)
 const browser = window.bronom
+const activeTab = computed(() => state.value.tabs.find((tab) => tab.id === state.value.activeTabId))
 const detachedPanelParameter = new URLSearchParams(window.location.search).get('bronomPanel')
 const detachedPanelId = isDetachablePanelId(detachedPanelParameter) ? detachedPanelParameter : null
 const isDetachedPanelWindow = detachedPanelId !== null
@@ -337,26 +244,9 @@ function keepsSeparatePanelOpen(): boolean {
 }
 const collapsedTabGroupIds = ref(new Set<string>(loadCollapsedTabGroupIds()))
 const shellContentTop = ref(105)
-const state = ref<BrowserState>(emptyState)
-const settings = ref<AppSettings>({
-  theme: 'system',
-  interfaceScale: DEFAULT_INTERFACE_SCALE,
-  searchEngine: 'google',
-  hideInTray: true,
-  attentionSound: true,
-  attentionSoundCue: 'warning',
-  mcpAuthentication: false,
-  mcpPort: DEFAULT_MCP_PORT,
-  downloadDirectory: null,
-  askWhereToSaveDownloads: false,
-  memorySaverEnabled: true,
-  memorySaverTimeoutMinutes: DEFAULT_MEMORY_SAVER_TIMEOUT_MINUTES,
-  checkForUpdatesOnStartup: true
-})
-const systemTheme = ref<'light' | 'dark'>('light')
 const sitePermissions = ref<SitePermissionEntry[]>([])
 const credentials = ref<CredentialSummary[]>([])
-const credentialStorage = ref<CredentialStorageStatus>({ available: false, reason: 'Secure storage is initializing.' })
+const credentialStorage = ref<CredentialStorageStatus>({ available: false, reason: t('runtime.initializingStorage') })
 const credentialPickerOpen = ref(false)
 const credentialPickerQuery = ref('')
 const credentialPickerSelection = ref(0)
@@ -403,40 +293,7 @@ const historyOpen = ref(false)
 const historySearch = ref('')
 const historyError = ref('')
 const siteStorageOpen = ref(false)
-const siteStorageKind = ref<BrowserStorageKind>('local-storage')
-const siteStorageResult = ref<BrowserStorageResult | null>(null)
-const siteStorageState = ref<'idle' | 'loading' | 'saving' | 'error'>('idle')
-const siteStorageError = ref('')
-const siteStorageSearch = ref('')
-const siteStorageKey = ref('')
-const siteStorageValue = ref('')
-const siteStorageChangesOpen = ref(false)
-const siteStorageChangesReport = ref<BrowserStorageChangesReport | null>(null)
-const siteStorageChangesState = ref<'idle' | 'loading' | 'error'>('idle')
-const siteStorageChangesError = ref('')
-const siteStorageChangesCopied = ref(false)
-const siteStorageUsageOpen = ref(false)
-const siteStorageUsageReport = ref<BrowserStorageUsageReport | null>(null)
-const siteStorageUsageState = ref<'idle' | 'loading' | 'error'>('idle')
-const siteStorageUsageError = ref('')
-const siteStorageUsageCopied = ref(false)
-const siteStorageIndexedDbOpen = ref(false)
-const siteStorageIndexedDbReport = ref<BrowserIndexedDbReport | null>(null)
-const siteStorageIndexedDbState = ref<'idle' | 'loading' | 'error'>('idle')
-const siteStorageIndexedDbError = ref('')
-const siteStorageIndexedDbDatabase = ref('')
-const siteStorageIndexedDbStore = ref('')
-const siteStorageIndexedDbOffset = ref(0)
-const siteStorageIndexedDbSearch = ref('')
-const siteStorageIndexedDbCopied = ref(false)
-const siteStoragePwaOpen = ref(false)
-const siteStoragePwaReport = ref<BrowserPwaReport | null>(null)
-const siteStoragePwaState = ref<'idle' | 'loading' | 'error'>('idle')
-const siteStoragePwaError = ref('')
-const siteStoragePwaCache = ref('')
-const siteStoragePwaQuery = ref('')
-const siteStoragePwaOffset = ref(0)
-const siteStoragePwaCopied = ref(false)
+const siteStoragePanel = ref<InstanceType<typeof SiteStoragePanel> | null>(null)
 const pageToolsOpen = ref(false)
 const responsivePanelOpen = ref(false)
 const responsivePresetId = ref<BrowserViewportPresetId | 'custom'>('phone')
@@ -528,121 +385,107 @@ const areaCaptureState = ref<'idle' | 'picking' | 'capturing' | 'copied' | 'erro
 const screenshotCaptureMode = ref<ScreenshotCaptureMode>('area')
 const areaCaptureError = ref('')
 const appToasts = ref<AppToast[]>([])
-const accessibilityAuditState = ref<'idle' | 'running' | 'complete' | 'error'>('idle')
-const accessibilityAudit = ref<BrowserAccessibilityAudit | null>(null)
-const accessibilityAuditError = ref('')
-const accessibilityPanelOpen = ref(false)
-const qualityAuditState = ref<'idle' | 'running' | 'complete' | 'error'>('idle')
-const qualityAuditReport = ref<BrowserQualityAudit | null>(null)
-const qualityAuditError = ref('')
-const qualityAuditPanelOpen = ref(false)
-const qualityAuditCopied = ref(false)
-const performanceState = ref<'idle' | 'running' | 'complete' | 'error'>('idle')
-const performanceReport = ref<BrowserPerformanceReport | null>(null)
-const performanceError = ref('')
-const performancePanelOpen = ref(false)
-const designOverviewPanelOpen = ref(false)
-const designOverviewReport = ref<BrowserDesignOverviewReport | null>(null)
-const designOverviewState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
-const designOverviewError = ref('')
-const pageMetadataPanelOpen = ref(false)
-const pageMetadataReport = ref<BrowserPageMetadataReport | null>(null)
-const pageMetadataState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
-const pageMetadataError = ref('')
-const securityPanelOpen = ref(false)
-const securityReport = ref<BrowserSecurityReport | null>(null)
-const securityReportState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
-const securityReportError = ref('')
-const coveragePanelOpen = ref(false)
-const coverageResult = ref<BrowserCodeCoverageResult | null>(null)
-const coverageState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
-const coverageError = ref('')
-const coverageMode = ref<BrowserCodeCoverageMode>('function')
-const cpuProfilePanelOpen = ref(false)
-const cpuProfileResult = ref<BrowserCpuProfileResult | null>(null)
-const cpuProfileState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
-const cpuProfileError = ref('')
-const memoryState = ref<'idle' | 'running' | 'complete' | 'error'>('idle')
-const memoryReport = ref<BrowserMemoryReport | null>(null)
-const memoryError = ref('')
-const memoryPanelOpen = ref(false)
-const debugReportState = ref<'idle' | 'running' | 'complete' | 'error'>('idle')
-const debugReport = ref<BrowserDebugReport | null>(null)
-const debugReportError = ref('')
-const debugReportPanelOpen = ref(false)
-const debugReportCopied = ref(false)
-const reproPanelOpen = ref(false)
-const reproRecording = ref<BrowserReproRecording | null>(null)
-const reproState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
-const reproError = ref('')
-const reproCopied = ref(false)
-const reproPlaywrightCopied = ref(false)
-const domChangesPanelOpen = ref(false)
-const domChangesReport = ref<BrowserDomChangesReport | null>(null)
-const domChangesState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
-const domChangesError = ref('')
-const domChangesCopied = ref(false)
-const visualComparePanelOpen = ref(false)
-const visualCompareReport = ref<BrowserVisualCompareView | null>(null)
-const visualCompareState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
-const visualCompareError = ref('')
-const visualCompareCopied = ref(false)
-const inspectorIssuesOpen = ref(false)
-const inspectorIssuesState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
-const inspectorIssuesReport = ref<BrowserInspectorIssuesReport | null>(null)
-const inspectorIssuesError = ref('')
-const inspectorIssuesCopied = ref(false)
+const diagnosticsController = useDiagnosticsController({
+  activeTab,
+  browser,
+  translate: (message, parameters) => t(message, parameters ?? {}),
+  copyText: copyAppText,
+  acceptBrowserState: browserStore.acceptAuthoritativeState,
+  closeTransientPanels,
+  keepsSeparatePanelOpen
+})
+const {
+  accessibilityAuditState,
+  accessibilityAudit,
+  accessibilityAuditError,
+  accessibilityPanelOpen,
+  qualityAuditState,
+  qualityAuditReport,
+  qualityAuditError,
+  qualityAuditPanelOpen,
+  qualityAuditCopied,
+  performanceState,
+  performanceReport,
+  performanceError,
+  performancePanelOpen,
+  designOverviewPanelOpen,
+  designOverviewReport,
+  designOverviewState,
+  designOverviewError,
+  pageMetadataPanelOpen,
+  pageMetadataReport,
+  pageMetadataState,
+  pageMetadataError,
+  securityPanelOpen,
+  securityReport,
+  securityReportState,
+  securityReportError,
+  coveragePanelOpen,
+  coverageResult,
+  coverageState,
+  coverageError,
+  cpuProfilePanelOpen,
+  cpuProfileResult,
+  cpuProfileState,
+  cpuProfileError,
+  memoryState,
+  memoryReport,
+  memoryError,
+  memoryPanelOpen,
+  debugReportState,
+  debugReport,
+  debugReportError,
+  debugReportPanelOpen,
+  reproPanelOpen,
+  reproRecording,
+  reproState,
+  reproError,
+  domChangesPanelOpen,
+  domChangesReport,
+  domChangesState,
+  domChangesError,
+  visualComparePanelOpen,
+  visualCompareReport,
+  visualCompareState,
+  visualCompareError,
+  inspectorIssuesOpen,
+  inspectorIssuesState,
+  inspectorIssuesReport,
+  inspectorIssuesError,
+  runPerformanceReport,
+  togglePerformanceReport,
+  runDesignOverview,
+  toggleDesignOverview,
+  runPageMetadata,
+  togglePageMetadata,
+  runSecurityReport,
+  toggleSecurityReport,
+  manageCodeCoverage,
+  toggleCodeCoverage,
+  manageCpuProfile,
+  toggleCpuProfile,
+  runMemoryReport,
+  toggleMemoryReport,
+  runDebugReport,
+  toggleDebugReport,
+  manageRepro,
+  toggleReproRecorder,
+  manageDomChanges,
+  toggleDomChanges,
+  manageVisualCompare,
+  toggleVisualCompare,
+  refreshInspectorIssues,
+  toggleInspectorIssues,
+  runAccessibilityAudit,
+  toggleAccessibilityAudit,
+  runQualityAudit,
+  toggleQualityAudit,
+  dispose: disposeDiagnosticsController
+} = diagnosticsController
 const consolePanelOpen = ref(false)
-const consoleState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
-const consoleMessages = ref<BrowserConsoleMessage[]>([])
-const consoleError = ref('')
-const consoleSearch = ref('')
-const consoleLevel = ref<BrowserConsoleLevelFilter>('all')
-const consoleCopied = ref<'filtered' | 'all' | null>(null)
-const consoleCopiedEntryKey = ref<string | null>(null)
+const consolePanel = ref<InstanceType<typeof ConsolePanelContainer> | null>(null)
 const networkMonitorOpen = ref(false)
-const networkMonitorState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
-const networkRequests = ref<BrowserNetworkRequest[]>([])
-const networkRequestDetails = ref<BrowserNetworkRequestDetails | null>(null)
-const networkSelectedRequestId = ref<string | null>(null)
-const networkRequestDetailsLoading = ref(false)
-const networkMonitorError = ref('')
-const networkDetailsCopied = ref<'json' | BrowserNetworkRequestCopyFormat | null>(null)
-const networkReplayState = ref<'idle' | 'confirming' | 'replaying' | 'replayed' | 'error'>('idle')
-const networkReplayMessage = ref('')
-const networkSearch = ref('')
-const networkContentSearchOpen = ref(false)
-const networkContentSearchQuery = ref('')
-const networkContentSearchCaseSensitive = ref(false)
-const networkContentSearchState = ref<'idle' | 'searching' | 'complete' | 'error'>('idle')
-const networkContentSearchResult = ref<BrowserNetworkSearchResult | null>(null)
-const networkContentSearchError = ref('')
-const networkContentSearchInput = ref<HTMLInputElement | null>(null)
-const networkResourceFilter = ref('')
-const networkFailuresOnly = ref(false)
-const networkSortBy = ref<BrowserNetworkRequestSortBy>('start-time')
-const networkSortDirection = ref<BrowserNetworkRequestSortDirection>('asc')
-const networkHarCopied = ref(false)
-const networkHarSaveState = ref<'idle' | 'saving' | 'saved'>('idle')
-const networkHarExport = ref<BrowserNetworkHarExport | null>(null)
-const requestConditionsExpanded = ref(false)
-const networkRoutes = ref<BrowserNetworkRouteSummary[]>([])
-const networkRouteState = ref<'idle' | 'loading' | 'ready' | 'saving' | 'error'>('idle')
-const networkRouteError = ref('')
-const networkRouteMode = ref<'abort' | 'fulfill' | 'throttle'>('abort')
-const networkRoutePattern = ref('')
-const networkRouteMethod = ref('')
-const networkRouteTimes = ref(1)
-const networkRouteAbort = ref<BrowserNetworkAbortReason>('BlockedByClient')
-const networkRouteThrottle = ref<'fast-4g' | 'slow-4g' | 'slow-3g'>('slow-4g')
-const networkRouteStatus = ref(200)
-const networkRouteHeaders = ref('')
-const networkRouteBody = ref('')
-let networkContentSearchSequence = 0
-let networkMonitorRequestSequence = 0
-let networkRouteRequestSequence = 0
-let networkRouteMutationSequence = 0
-let networkRequestDetailsSequence = 0
+const networkPanel = ref<InstanceType<typeof NetworkPanel> | null>(null)
 if (detachedPanelId === 'site-controls') siteControlsOpen.value = true
 else if (detachedPanelId === 'site-storage') siteStorageOpen.value = true
 else if (detachedPanelId === 'page-tools') pageToolsOpen.value = true
@@ -667,7 +510,6 @@ else if (detachedPanelId === 'issues') inspectorIssuesOpen.value = true
 else if (detachedPanelId === 'bookmarks') bookmarksOpen.value = true
 const mcpActivityByTab = ref<Record<string, McpTabActivity>>({})
 const activeMcpRequestsByTab = new Map<string, Map<string, McpTabActivity>>()
-let unsubscribe: (() => void) | undefined
 let unsubscribeMcpActivity: (() => void) | undefined
 let unsubscribeDownloads: (() => void) | undefined
 let unsubscribeBookmarks: (() => void) | undefined
@@ -675,8 +517,6 @@ let unsubscribeHistory: (() => void) | undefined
 let unsubscribeMcpControl: (() => void) | undefined
 let unsubscribeUserAttention: (() => void) | undefined
 let unsubscribeShortcutRequested: (() => void) | undefined
-let unsubscribeSettings: (() => void) | undefined
-let unsubscribeSystemTheme: (() => void) | undefined
 let unsubscribePermissions: (() => void) | undefined
 let unsubscribeCredentials: (() => void) | undefined
 let unsubscribeLicense: (() => void) | undefined
@@ -693,7 +533,6 @@ let unsubscribeActionFailed: (() => void) | undefined
 let unsubscribeTabGroupEdit: (() => void) | undefined
 let unsubscribeAddressOverlay: (() => void) | undefined
 let unsubscribeAddressOverlayDismissed: (() => void) | undefined
-let resizeObserver: ResizeObserver | undefined
 let updateNoticeDismissTimer: number | undefined
 let elementPickerResetTimer: number | undefined
 let pageSnapshotResetTimer: number | undefined
@@ -703,11 +542,6 @@ const appToastTimers = new Map<number, number>()
 let pdfExportResetTimer: number | undefined
 let pdfExportRequestSequence = 0
 let emulationMutationSequence = 0
-let consoleRefreshTimer: number | undefined
-let domChangesRefreshTimer: number | undefined
-let networkReplayConfirmTimer: number | undefined
-let domChangesRequestSequence = 0
-let consoleRequestSequence = 0
 let elementPickerTabId: string | undefined
 let areaCaptureTabId: string | undefined
 let findTabId: string | undefined
@@ -715,66 +549,25 @@ let findRequestSequence = 0
 const mcpActivityTimers = new Map<string, number>()
 const MCP_TAB_ACTIVITY_LINGER_MS = 900
 const knownDownloadIds = new Set<string>()
-const themes: Array<{ name: ThemeName; label: string; description: string }> = [
-  { name: 'system', label: 'System', description: 'Match this device' },
-  { name: 'light', label: 'Light', description: 'Bright and focused' },
-  { name: 'dark', label: 'Dark', description: 'Easy on the eyes' },
-  { name: 'cyberpunk', label: 'Cyberpunk', description: 'Neon after midnight' }
-]
-const attentionSoundLabels: Record<AttentionSoundCue, string> = {
-  warning: 'Warning',
-  bell: 'Bell',
-  chime: 'Chime',
-  ping: 'Ping',
-  bubble: 'Bubble',
-  pop: 'Pop',
-  ready: 'Ready',
-  complete: 'Complete',
-  sparkle: 'Sparkle',
-  success: 'Success',
-  error: 'Error'
-}
-const attentionSoundOptions = ATTENTION_SOUND_CUES.map((cue) => ({ cue, label: attentionSoundLabels[cue] }))
-const keyboardShortcuts = [
-  { label: 'Focus the address bar', keys: ['Ctrl/Cmd', 'L'] },
-  { label: 'Reload the current website', keys: ['Ctrl/Cmd', 'R'] },
-  { label: 'Reload without cached files', keys: ['Ctrl/Cmd', 'Shift', 'R'] },
-  { label: 'Open a new tab', keys: ['Ctrl/Cmd', 'T'] },
-  { label: 'Close the current tab', keys: ['Ctrl/Cmd', 'W'] },
-  { label: 'Reopen the last closed tab', keys: ['Ctrl/Cmd', 'Shift', 'T'] },
-  { label: 'Search open tabs', keys: ['Ctrl/Cmd', 'Shift', 'A'] },
-  { label: 'Open the command palette', keys: ['Ctrl/Cmd', 'Shift', 'P'] },
-  { label: 'Pick an element for agent context', keys: ['Ctrl+Shift+C', 'Cmd+Option+C'] },
-  { label: 'Find on the current page', keys: ['Ctrl/Cmd', 'F'] },
-  { label: 'Bookmark the current page', keys: ['Ctrl/Cmd', 'D'] },
-  { label: 'Open browsing history', keys: ['Ctrl+H', 'Cmd+Y'] },
-  { label: 'Clear browsing data', keys: ['Ctrl/Cmd', 'Shift', 'Delete'] },
-  { label: 'Toggle developer tools', keys: ['F12', 'Ctrl+Shift+I', 'Cmd+Option+I'] },
-  { label: 'Move to the next tab', keys: ['Ctrl', 'Tab'] },
-  { label: 'Move to the previous tab', keys: ['Ctrl', 'Shift', 'Tab'] },
-  { label: 'Reset page zoom', keys: ['Ctrl/Cmd', '0'] }
-]
-const networkResourceFilters = [
-  { value: '', label: 'All' },
-  { value: 'fetch/xhr', label: 'Fetch/XHR' },
-  { value: 'document', label: 'Doc' },
-  { value: 'script', label: 'JS' },
-  { value: 'stylesheet', label: 'CSS' },
-  { value: 'image', label: 'Img' },
-  { value: 'eventsource', label: 'SSE' },
-  { value: 'websocket', label: 'WS' },
-  { value: 'other', label: 'Other' }
-]
-const networkSortOptions: Array<{ value: BrowserNetworkRequestSortBy; label: string }> = [
-  { value: 'start-time', label: 'Start time' },
-  { value: 'end-time', label: 'End time' },
-  { value: 'duration', label: 'Duration' },
-  { value: 'waiting', label: 'Waiting (TTFB)' },
-  { value: 'size', label: 'Size' },
-  { value: 'status', label: 'Status' }
-]
-
-const activeTab = computed(() => state.value.tabs.find((tab) => tab.id === state.value.activeTabId))
+const keyboardShortcuts = computed(() => [
+  { label: t('runtime.shortcuts.address'), keys: ['Ctrl/Cmd', 'L'] },
+  { label: t('runtime.shortcuts.reload'), keys: ['Ctrl/Cmd', 'R'] },
+  { label: t('runtime.shortcuts.reloadFresh'), keys: ['Ctrl/Cmd', 'Shift', 'R'] },
+  { label: t('runtime.shortcuts.newTab'), keys: ['Ctrl/Cmd', 'T'] },
+  { label: t('runtime.shortcuts.closeTab'), keys: ['Ctrl/Cmd', 'W'] },
+  { label: t('runtime.shortcuts.reopenTab'), keys: ['Ctrl/Cmd', 'Shift', 'T'] },
+  { label: t('runtime.shortcuts.searchTabs'), keys: ['Ctrl/Cmd', 'Shift', 'A'] },
+  { label: t('runtime.shortcuts.commands'), keys: ['Ctrl/Cmd', 'Shift', 'P'] },
+  { label: t('runtime.shortcuts.pick'), keys: ['Ctrl+Shift+C', 'Cmd+Option+C'] },
+  { label: t('runtime.shortcuts.find'), keys: ['Ctrl/Cmd', 'F'] },
+  { label: t('runtime.shortcuts.bookmark'), keys: ['Ctrl/Cmd', 'D'] },
+  { label: t('runtime.shortcuts.history'), keys: ['Ctrl+H', 'Cmd+Y'] },
+  { label: t('runtime.shortcuts.clearData'), keys: ['Ctrl/Cmd', 'Shift', 'Delete'] },
+  { label: t('runtime.shortcuts.devtools'), keys: ['F12', 'Ctrl+Shift+I', 'Cmd+Option+I'] },
+  { label: t('runtime.shortcuts.nextTab'), keys: ['Ctrl', 'Tab'] },
+  { label: t('runtime.shortcuts.previousTab'), keys: ['Ctrl', 'Shift', 'Tab'] },
+  { label: t('runtime.shortcuts.resetZoom'), keys: ['Ctrl/Cmd', '0'] }
+])
 const splitViewTabs = computed(() => state.value.splitView
   ? [
       state.value.tabs.find((tab) => tab.id === state.value.splitView!.firstTabId),
@@ -855,12 +648,12 @@ const responsiveViewport = computed<BrowserViewportEmulation | null>(() => {
 })
 const responsivePreviewLabel = computed(() => {
   const viewport = activeEmulation.value?.viewport
-  return viewport ? `${viewport.width}×${viewport.height} at ${viewport.deviceScaleFactor}×` : 'Test phones, tablets, and desktops'
+  return viewport ? t('runtime.responsive.at', { size: `${viewport.width}×${viewport.height}`, scale: localNumber(viewport.deviceScaleFactor) }) : t('runtime.responsive.preview')
 })
 const responsiveSummary = computed(() => {
   const viewport = responsiveViewport.value
-  if (!viewport) return 'Enter a width and height from 200 to 3840, with DPR from 0.5 to 5.'
-  return `${viewport.width}×${viewport.height} CSS px · ${viewport.deviceScaleFactor}× DPR · ${viewport.mobile ? 'mobile' : 'desktop'} rendering · ${viewport.touch ? 'touch' : 'pointer'}`
+  if (!viewport) return t('runtime.responsive.invalid')
+  return t('runtime.responsive.summary', { size: `${localNumber(viewport.width)}×${localNumber(viewport.height)}`, scale: localNumber(viewport.deviceScaleFactor), rendering: t(viewport.mobile ? 'runtime.responsive.mobile' : 'runtime.responsive.desktop'), input: t(viewport.touch ? 'runtime.responsive.touch' : 'runtime.responsive.pointer') })
 })
 const environmentSettingsDraft = computed<BrowserEnvironmentSettings | null>(() => {
   const candidate: BrowserEnvironmentSettings = {
@@ -878,103 +671,109 @@ const activeEnvironmentOverrideCount = computed(() => browserEnvironmentOverride
   browserEnvironmentFromEmulation(activeEmulation.value)
 ))
 const environmentLabel = computed(() => {
-  if (environmentState.value === 'applying') return 'Applying browser conditions'
-  if (environmentState.value === 'error') return 'Environment needs attention'
+  if (environmentState.value === 'applying') return t('runtime.tool.environmentApplying')
+  if (environmentState.value === 'error') return t('runtime.tool.environmentAttention')
   if (activeEnvironmentOverrideCount.value) {
-    return `${activeEnvironmentOverrideCount.value} active ${activeEnvironmentOverrideCount.value === 1 ? 'condition' : 'conditions'}`
+    return t(activeEnvironmentOverrideCount.value === 1 ? 'environment.activeCondition' : 'environment.activeConditions', { count: localNumber(activeEnvironmentOverrideCount.value) })
   }
-  return 'Network, cache, service workers, CPU, animations, rendering, runtime, region, identity, and location'
+  return t('runtime.tool.environmentDescription')
 })
 const activeNetworkRouteCount = computed(() => activeTab.value?.networkRouteCount ?? 0)
 const accessibilityAuditLabel = computed(() => {
-  if (accessibilityAuditState.value === 'running') return 'Running accessibility audit'
-  if (accessibilityAuditState.value === 'error') return 'Accessibility audit needs attention'
+  if (accessibilityAuditState.value === 'running') return t('runtime.tool.accessibilityRunning')
+  if (accessibilityAuditState.value === 'error') return t('runtime.tool.accessibilityAttention')
   if (accessibilityAuditState.value === 'complete' && accessibilityAudit.value) {
     const count = accessibilityAudit.value.violationCount
-    return `Accessibility audit: ${count} ${count === 1 ? 'violation' : 'violations'}`
+    return t('runtime.tool.accessibilityResult', { count: localNumber(count) }, count)
   }
-  return 'Run accessibility audit'
+  return t('runtime.tool.accessibilityRun')
 })
 const qualityAuditLabel = computed(() => {
-  if (qualityAuditState.value === 'running') return 'Checking six evidence categories'
-  if (qualityAuditState.value === 'error') return 'Quality audit needs attention'
+  if (qualityAuditState.value === 'running') return t('runtime.tool.qualityRunning')
+  if (qualityAuditState.value === 'error') return t('runtime.tool.qualityAttention')
   if (qualityAuditReport.value) {
-    if (qualityAuditReport.value.status === 'pass') return 'All applicable categories clear'
+    if (qualityAuditReport.value.status === 'pass') return t('runtime.tool.qualityClear')
     const { errors, warnings } = qualityAuditReport.value.totals
-    return `${errors} ${errors === 1 ? 'error' : 'errors'} · ${warnings} ${warnings === 1 ? 'warning' : 'warnings'}`
+    return t('runtime.tool.qualityResult', { errors: localNumber(errors), warnings: localNumber(warnings) }, Math.max(errors, warnings))
   }
-  return 'Accessibility, speed, SEO, security, PWA, and browser issues'
+  return t('runtime.tool.qualityDescription')
 })
 const performanceLabel = computed(() => {
-  if (performanceState.value === 'running') return 'Measuring page performance'
-  if (performanceState.value === 'error') return 'Performance report needs attention'
-  if (performanceState.value === 'complete') return 'View page performance'
-  return 'Measure page performance'
+  if (performanceState.value === 'running') return t('runtime.tool.performanceRunning')
+  if (performanceState.value === 'error') return t('runtime.tool.performanceAttention')
+  if (performanceState.value === 'complete') return t('runtime.tool.performanceView')
+  return t('runtime.tool.performanceRun')
 })
 const designOverviewLabel = computed(() => {
-  if (designOverviewState.value === 'loading') return 'Capturing computed page styles'
-  if (designOverviewState.value === 'error') return 'Design overview needs attention'
+  if (designOverviewState.value === 'loading') return t('designOverview.toolCapturing')
+  if (designOverviewState.value === 'error') return t('designOverview.toolAttention')
   if (designOverviewReport.value) {
     const issues = designOverviewReport.value.summary.contrastIssueCount
-    return issues ? `${issues} likely contrast ${issues === 1 ? 'issue' : 'issues'}` : 'View colors and typography'
+    return issues
+      ? t('designOverview.toolIssueCount', { count: localNumber(issues) }, issues)
+      : t('designOverview.toolReady')
   }
-  return 'Colors, typography, and contrast'
+  return t('designOverview.toolDescription')
 })
 const pageMetadataLabel = computed(() => {
-  if (pageMetadataState.value === 'loading') return 'Inspecting page metadata'
-  if (pageMetadataState.value === 'error') return 'Page metadata needs attention'
+  if (pageMetadataState.value === 'loading') return t('pageMetadata.toolInspecting')
+  if (pageMetadataState.value === 'error') return t('pageMetadata.toolAttention')
   if (pageMetadataReport.value) {
     const actionable = pageMetadataReport.value.issues.filter((issue) => issue.severity !== 'info').length
-    return actionable ? `${actionable} metadata ${actionable === 1 ? 'warning' : 'warnings'}` : 'Search and social metadata ready'
+    return actionable
+      ? t('pageMetadata.toolWarningCount', { count: localNumber(actionable) }, actionable)
+      : t('pageMetadata.toolReady')
   }
-  return 'Search, social, and structured data'
+  return t('pageMetadata.toolDescription')
 })
 const securityLabel = computed(() => {
-  if (securityReportState.value === 'loading') return 'Inspecting connection security'
-  if (securityReportState.value === 'error') return 'Security report needs attention'
-  if (securityReport.value?.state === 'secure') return 'Secure connection'
-  if (securityReport.value?.state === 'insecure' || securityReport.value?.state === 'insecure-broken') return 'Connection is not secure'
-  if (securityReport.value) return `Connection state: ${securityReport.value.state}`
-  return 'TLS, certificate, and connection details'
+  if (securityReportState.value === 'loading') return t('securityReport.toolInspecting')
+  if (securityReportState.value === 'error') return t('securityReport.toolAttention')
+  if (securityReport.value?.state === 'secure') return t('securityReport.toolSecure')
+  if (securityReport.value?.state === 'insecure' || securityReport.value?.state === 'insecure-broken') return t('securityReport.toolInsecure')
+  if (securityReport.value) return t('securityReport.toolState', { state: securityReport.value.state })
+  return t('securityReport.toolDescription')
 })
 const coverageLabel = computed(() => {
-  if (coverageState.value === 'loading') return 'Updating code coverage'
-  if (coverageState.value === 'error') return 'Code coverage needs attention'
-  if (activeTab.value?.codeCoverageRecording) return `Recording ${activeTab.value.codeCoverageRecording.mode} coverage`
-  if (coverageResult.value?.status === 'complete') return `${coverageResult.value.report?.usedPercent ?? 0}% code used`
-  return 'Find unused JavaScript and CSS'
+  if (coverageState.value === 'loading') return t('coverage.toolLoading')
+  if (coverageState.value === 'error') return t('coverage.toolAttention')
+  if (activeTab.value?.codeCoverageRecording) return t('coverage.toolRecording', { mode: activeTab.value.codeCoverageRecording.mode })
+  if (coverageResult.value?.status === 'complete') return t('coverage.toolComplete', { percent: localPercent(coverageResult.value.report?.usedPercent ?? 0) })
+  return t('coverage.toolDescription')
 })
 const cpuProfileLabel = computed(() => {
-  if (cpuProfileState.value === 'loading') return 'Updating JavaScript CPU profile'
-  if (cpuProfileState.value === 'error') return 'JavaScript CPU profile needs attention'
-  if (activeTab.value?.cpuProfileRecording) return 'Recording JavaScript CPU activity'
+  if (cpuProfileState.value === 'loading') return t('cpuProfile.toolLoading')
+  if (cpuProfileState.value === 'error') return t('cpuProfile.toolAttention')
+  if (activeTab.value?.cpuProfileRecording) return t('cpuProfile.toolRecording')
   if (cpuProfileResult.value?.status === 'complete') {
     const hotspot = cpuProfileResult.value.report?.hotspots[0]
-    return hotspot ? `${hotspot.functionName}: ${hotspot.selfPercent}% self time` : 'CPU profile complete'
+    return hotspot ? t('cpuProfile.toolHotspot', { function: hotspot.functionName, percent: localPercent(hotspot.selfPercent) }) : t('cpuProfile.toolComplete')
   }
-  return 'Find hot JavaScript functions'
+  return t('cpuProfile.toolDescription')
 })
 const memoryLabel = computed(() => {
-  if (memoryState.value === 'running') return 'Measuring page memory'
-  if (memoryState.value === 'error') return 'Memory report needs attention'
-  if (activeTab.value?.memoryAllocationRecording) return 'Sampling live JavaScript allocations'
+  if (memoryState.value === 'running') return t('memory.toolMeasuring')
+  if (memoryState.value === 'error') return t('memory.toolAttention')
+  if (activeTab.value?.memoryAllocationRecording) return t('memory.toolSampling')
   if (memoryReport.value?.allocationProfile) {
     const hotspot = memoryReport.value.allocationProfile.hotspots[0]
-    return hotspot ? `${hotspot.functionName}: ${formatBytes(hotspot.selfBytes)} retained` : 'Allocation profile complete'
+    return hotspot
+      ? t('memory.toolHotspot', { function: hotspot.functionName || t('memory.allocation.anonymous'), bytes: formatBytes(hotspot.selfBytes) })
+      : t('memory.toolAllocationComplete')
   }
-  if (memoryPanelOpen.value) return 'Close page memory report'
-  return 'Heap, DOM, and allocation diagnostics'
+  if (memoryPanelOpen.value) return t('memory.toolClose')
+  return t('memory.toolDescription')
 })
 const debugReportLabel = computed(() => {
-  if (debugReportState.value === 'running') return 'Collecting debug evidence'
-  if (debugReportState.value === 'error') return 'Debug report needs attention'
+  if (debugReportState.value === 'running') return t('debugReport.toolCollecting')
+  if (debugReportState.value === 'error') return t('debugReport.toolAttention')
   if (debugReportState.value === 'complete' && debugReport.value) {
     const issues = debugReport.value.summary.consoleErrors
       + debugReport.value.summary.consoleWarnings
       + debugReport.value.summary.failedRequests
-    return issues ? `Debug report: ${issues} ${issues === 1 ? 'signal' : 'signals'}` : 'Debug report: no obvious issues'
+    return issues ? t('debugReport.toolSignals', { count: localNumber(issues) }, issues) : t('debugReport.toolClear')
   }
-  return 'Create debug report'
+  return t('debugReport.toolDescription')
 })
 const debugReportSignalCount = computed(() => debugReport.value
   ? debugReport.value.summary.consoleErrors
@@ -983,61 +782,34 @@ const debugReportSignalCount = computed(() => debugReport.value
   : 0)
 const reproLabel = computed(() => {
   const recording = activeTab.value?.reproRecording
-  if (recording?.active) return `Recording · ${recording.stepCount} ${recording.stepCount === 1 ? 'step' : 'steps'}`
-  if (reproRecording.value?.stepCount) return `${reproRecording.value.stepCount} ${reproRecording.value.stepCount === 1 ? 'step' : 'steps'} ready to share`
-  return 'Record safe steps for an agent'
+  if (recording?.active) return t('repro.toolRecording', { steps: t('repro.stepCount', { count: localNumber(recording.stepCount) }, recording.stepCount) })
+  if (reproRecording.value?.stepCount) return t('repro.toolReady', { steps: t('repro.stepCount', { count: localNumber(reproRecording.value.stepCount) }, reproRecording.value.stepCount) })
+  return t('repro.toolDescription')
 })
 const domChangesLabel = computed(() => {
   const recording = activeTab.value?.domChangesRecording
-  if (recording?.active) return `Recording · ${recording.changeCount} ${recording.changeCount === 1 ? 'change' : 'changes'}`
+  if (recording?.active) return t('domChanges.toolRecording', { changes: t('domChanges.mutations', { count: localNumber(recording.changeCount) }, recording.changeCount) })
   if (domChangesReport.value?.changeCount) {
-    return `${domChangesReport.value.changeCount} ${domChangesReport.value.changeCount === 1 ? 'change' : 'changes'} ready to share`
+    return t('domChanges.toolReady', { changes: t('domChanges.mutations', { count: localNumber(domChangesReport.value.changeCount) }, domChangesReport.value.changeCount) })
   }
-  return 'See what changed after an action'
+  return t('domChanges.toolDescription')
 })
 const visualCompareLabel = computed(() => {
-  if (visualCompareState.value === 'loading') return 'Capturing visible page'
-  if (visualCompareState.value === 'error') return 'Visual comparison needs attention'
+  if (visualCompareState.value === 'loading') return t('visualCompare.toolCapturing')
+  if (visualCompareState.value === 'error') return t('visualCompare.toolAttention')
   if (visualCompareReport.value?.status === 'compared') {
     return visualCompareReport.value.identical
-      ? 'No changed pixels'
-      : `${visualCompareReport.value.changedPercent ?? 0}% changed`
+      ? t('visualCompare.toolIdentical')
+      : t('visualCompare.toolChanged', { percent: localPercent(visualCompareReport.value.changedPercent ?? 0, 2) })
   }
-  if (visualCompareReport.value?.status === 'baseline') return 'Baseline ready'
-  return 'Compare the page before and after'
+  if (visualCompareReport.value?.status === 'baseline') return t('visualCompare.toolBaseline')
+  return t('visualCompare.toolDescription')
 })
 const activeInspectorIssueCount = computed(() => activeTab.value?.inspectorIssueCount ?? 0)
 const inspectorIssuesLabel = computed(() => {
   const count = activeInspectorIssueCount.value
-  return count ? `${count} browser ${count === 1 ? 'issue' : 'issues'}` : 'CORS, CSP, cookies, and compatibility'
+  return count ? t('issues.toolCount', { count: localNumber(count) }, count) : t('issues.toolDescription')
 })
-const filteredConsoleMessages = computed(() => filterConsoleMessages(
-  consoleMessages.value,
-  consoleSearch.value,
-  consoleLevel.value
-))
-const consoleMessageCounts = computed(() => countConsoleMessages(consoleMessages.value))
-const consoleEventCount = computed(() => countConsoleEvents(consoleMessages.value))
-const filteredConsoleEventCount = computed(() => countConsoleEvents(filteredConsoleMessages.value))
-const filteredNetworkRequests = computed(() => sortNetworkRequests(
-  filterNetworkRequests(
-    networkRequests.value,
-    normalizeNetworkHarOptions({
-      query: networkSearch.value,
-      resourceType: networkResourceFilter.value || undefined,
-      errorsOnly: networkFailuresOnly.value,
-      maxRequests: 200
-    })
-  ),
-  networkSortBy.value,
-  networkSortDirection.value
-))
-const networkWaterfallRange = computed(() => buildNetworkWaterfallRange(filteredNetworkRequests.value))
-const networkFailureCount = computed(() => networkRequests.value.filter(isNetworkRequestFailure).length)
-const networkResponseBytes = computed(() => networkRequests.value.reduce(
-  (total, request) => total + (request.responseSizeBytes ?? 0),
-  0
-))
 const homeTab = computed(() => state.value.tabs.find((tab) => tab.url.startsWith('bronom://home')))
 const regularTabs = computed(() => state.value.tabs.filter((tab) => !tab.url.startsWith('bronom://home')))
 const sleepingTabsCount = computed(() => regularTabs.value.filter((tab) => tab.sleeping).length)
@@ -1103,7 +875,7 @@ const detachedPanelUnavailable = computed(() => (
   && activePanelId.value !== 'bookmarks'
 ))
 const detachedPanelLabelText = computed(() => (
-  activePanelId.value ? detachedPanelLabel(activePanelId.value) : 'Page tools'
+  activePanelId.value ? detachedPanelLabel(activePanelId.value) : t('shell.pageTools.heading')
 ))
 const showUpdateStatusPill = computed(() => (
   updateNoticeOpen.value
@@ -1139,20 +911,20 @@ const activeSitePermissions = computed(() => (
     ? sitePermissions.value.filter((entry) => entry.origin === activeOrigin.value)
     : []
 ))
-const activeAddressKind = computed(() => activeWebUrl.value?.startsWith('https:') ? 'HTTPS address' : 'HTTP address')
+const activeAddressKind = computed(() => activeWebUrl.value?.startsWith('https:') ? t('runtime.address.https') : t('runtime.address.http'))
 const activeCredentials = computed(() => credentials.value.filter((credential) => credential.origin === activeOrigin.value))
 const filteredActiveCredentials = computed(() => {
   const query = credentialPickerQuery.value.trim().toLocaleLowerCase()
   if (!query) return activeCredentials.value
   return activeCredentials.value.filter((credential) => (
-    (credential.username || 'Unnamed account').toLocaleLowerCase().includes(query)
+    (credential.username || t('credentialPicker.unnamed')).toLocaleLowerCase().includes(query)
     || credential.origin.toLocaleLowerCase().includes(query)
   ))
 })
 const selectedActiveCredential = computed(() => filteredActiveCredentials.value[credentialPickerSelection.value])
 const activeDownloads = computed(() => downloads.value.filter((download) => download.state === 'progressing'))
 const finishedDownloads = computed(() => downloads.value.filter((download) => download.state !== 'progressing'))
-const effectiveDownloadDirectory = computed(() => settings.value.downloadDirectory || defaultDownloadDirectory.value || 'System Downloads folder')
+const effectiveDownloadDirectory = computed(() => settings.value.downloadDirectory || defaultDownloadDirectory.value || t('runtime.storage.systemDownloads'))
 const activeWebUrl = computed(() => {
   try {
     const url = new URL(activeTab.value?.url ?? '')
@@ -1176,37 +948,11 @@ const filteredVisitHistory = computed(() => {
     entry.title.toLocaleLowerCase().includes(query) || entry.url.toLocaleLowerCase().includes(query)
   ))
 })
-const filteredSiteStorageItems = computed(() => {
-  const query = siteStorageSearch.value.trim().toLocaleLowerCase()
-  const items = siteStorageResult.value?.items ?? []
-  if (!query) return items
-  return items.filter((item) => (
-    item.key.toLocaleLowerCase().includes(query)
-    || item.value?.toLocaleLowerCase().includes(query)
-    || item.domain?.toLocaleLowerCase().includes(query)
-  ))
-})
-const siteStorageKindLabel = computed(() => ({
-  'local-storage': 'Local storage',
-  'session-storage': 'Session storage',
-  cookies: 'Cookies'
-}[siteStorageKind.value]))
-const filteredSiteStorageIndexedDbEntries = computed(() => {
-  const query = siteStorageIndexedDbSearch.value.trim().toLocaleLowerCase()
-  const entries = siteStorageIndexedDbReport.value?.entries ?? []
-  if (!query) return entries
-  return entries.filter((entry) => (
-    entry.key.toLocaleLowerCase().includes(query)
-    || entry.primaryKey.toLocaleLowerCase().includes(query)
-    || entry.valueType.toLocaleLowerCase().includes(query)
-    || entry.valuePreview?.toLocaleLowerCase().includes(query)
-  ))
-})
 const filteredTabs = computed(() => {
   const query = tabSearchQuery.value.trim().toLocaleLowerCase()
   if (!query) return regularTabs.value
   return regularTabs.value.filter((tab) => (
-    (tab.title || 'New tab').toLocaleLowerCase().includes(query)
+    (tab.title || t('tabSearch.newTabTitle')).toLocaleLowerCase().includes(query)
     || tab.url.toLocaleLowerCase().includes(query)
     || tab.mcpGroupName?.toLocaleLowerCase().includes(query)
   ))
@@ -1236,9 +982,16 @@ const tabSearchResults = computed<TabSearchResult[]>(() => [
   ...filteredClosedTabs.value.map((tab): TabSearchResult => ({ kind: 'closed', tab }))
 ])
 const selectedTabSearchResult = computed(() => tabSearchResults.value[tabSearchSelection.value])
+const localizedCommandPaletteCommands = computed<CommandPaletteCommand[]>(() => COMMAND_PALETTE_COMMANDS.map((command) => ({
+  ...command,
+  label: t(`commandCatalog.commands.${command.id}.label`),
+  description: t(`commandCatalog.commands.${command.id}.description`),
+  category: t(`commandCatalog.categories.${command.category}`) as CommandPaletteCommand['category']
+})))
 const commandPaletteCommands = computed(() => filterCommandPaletteCommands(
   commandPaletteQuery.value,
-  Boolean(activeTab.value && !activeIsHome.value)
+  Boolean(activeTab.value && !activeIsHome.value),
+  localizedCommandPaletteCommands.value
 ))
 const selectedCommandPaletteCommand = computed(() => commandPaletteCommands.value[commandPaletteSelection.value])
 const addressSuggestions = computed(() => buildLocalAddressSuggestions({
@@ -1276,22 +1029,22 @@ const filteredJanitorWebsites = computed(() => {
   ))
 })
 const downloadButtonLabel = computed(() => {
-  if (activeDownloads.value.length) return `${activeDownloads.value.length} download${activeDownloads.value.length === 1 ? '' : 's'} in progress`
-  if (downloads.value[0]?.state === 'completed') return `Download complete: ${downloads.value[0].filename}`
-  if (downloads.value.length) return 'Recent downloads'
-  return 'Downloads'
+  if (activeDownloads.value.length) return t('runtime.downloads.progress', { count: localNumber(activeDownloads.value.length) }, activeDownloads.value.length)
+  if (downloads.value[0]?.state === 'completed') return t('runtime.downloads.complete', { filename: downloads.value[0].filename })
+  if (downloads.value.length) return t('runtime.downloads.recent')
+  return t('runtime.downloads.heading')
 })
 const mcpStatusLabel = computed(() => {
-  if (mcpCopied.value) return 'MCP URL copied'
-  if (mcpControl.value.status === 'starting') return 'MCP starting'
-  if (mcpControl.value.status === 'paused') return 'Agents paused'
-  if (mcpControl.value.status === 'error') return 'MCP error'
-  return 'MCP ready'
+  if (mcpCopied.value) return t('runtime.mcp.copied')
+  if (mcpControl.value.status === 'starting') return t('runtime.mcp.starting')
+  if (mcpControl.value.status === 'paused') return t('runtime.mcp.paused')
+  if (mcpControl.value.status === 'error') return t('runtime.mcp.error')
+  return t('runtime.mcp.ready')
 })
 const mcpStatusTitle = computed(() => {
-  if (mcpControl.value.status === 'error') return `MCP failed: ${mcpControl.value.error ?? 'Unknown startup error'}`
-  if (mcpControl.value.status === 'starting') return `MCP is starting at ${state.value.mcpUrl}`
-  return `MCP: ${state.value.mcpUrl}`
+  if (mcpControl.value.status === 'error') return t('runtime.mcp.failed', { error: mcpControl.value.error ?? t('runtime.mcp.unknown') })
+  if (mcpControl.value.status === 'starting') return t('runtime.mcp.startingAt', { url: state.value.mcpUrl })
+  return t('runtime.mcp.title', { url: state.value.mcpUrl })
 })
 const canToggleMcpPaused = computed(() => mcpControl.value.status === 'ready' || mcpControl.value.status === 'paused')
 const parsedMcpPort = computed(() => Number(mcpPortDraft.value))
@@ -1300,59 +1053,59 @@ const mcpPortChanged = computed(() => mcpPortValid.value && parsedMcpPort.value 
 const canApplyMcpPort = computed(() => mcpPortValid.value && (mcpPortChanged.value || mcpControl.value.status === 'error'))
 const elementPickerLabel = computed(() => {
   if (elementPickerState.value === 'picking') return elementPickerMode.value === 'screenshot'
-    ? 'Cancel element screenshot selection'
-    : 'Cancel element selection'
+    ? t('runtime.capture.cancelElementScreenshot')
+    : t('runtime.capture.cancelElement')
   if (elementPickerState.value === 'copied') return elementPickerMode.value === 'screenshot'
-    ? 'Element screenshot copied — paste it into agent chat'
-    : 'Element copied for agent'
+    ? t('runtime.capture.elementScreenshotCopied')
+    : t('runtime.capture.elementCopied')
   if (elementPickerState.value === 'error') return elementPickerMode.value === 'screenshot'
-    ? 'Could not copy the element screenshot'
-    : 'Could not select an element'
-  return 'Select an element to copy for agent'
+    ? t('runtime.capture.elementScreenshotFailed')
+    : t('runtime.capture.elementFailed')
+  return t('runtime.capture.selectElement')
 })
 const contextPickerLabel = computed(() => elementPickerMode.value === 'context'
   ? elementPickerLabel.value
-  : 'Select an element to copy for agent')
+  : t('runtime.capture.selectElement'))
 const elementScreenshotLabel = computed(() => elementPickerMode.value === 'screenshot'
   ? elementPickerLabel.value
-  : 'Select an element and copy its screenshot')
+  : t('runtime.capture.selectScreenshot'))
 const elementPickerTitle = computed(() => elementPickerState.value === 'idle'
   ? `${elementPickerLabel.value} (Ctrl+Shift+C / Cmd+Option+C)`
   : elementPickerLabel.value)
 const areaCaptureLabel = computed(() => {
-  if (areaCaptureState.value === 'picking') return 'Cancel area screenshot'
+  if (areaCaptureState.value === 'picking') return t('runtime.capture.cancelArea')
   if (areaCaptureState.value === 'capturing') return screenshotCaptureMode.value === 'full-page'
-    ? 'Capturing full-page screenshot'
-    : 'Capturing viewport screenshot'
+    ? t('runtime.capture.capturingFull')
+    : t('runtime.capture.capturingViewport')
   if (areaCaptureState.value === 'copied') {
-    if (screenshotCaptureMode.value === 'viewport') return 'Viewport screenshot copied — paste it into agent chat'
-    if (screenshotCaptureMode.value === 'full-page') return 'Full-page screenshot copied — paste it into agent chat'
-    return 'Area screenshot copied — paste it into agent chat'
+    if (screenshotCaptureMode.value === 'viewport') return t('runtime.capture.viewportCopied')
+    if (screenshotCaptureMode.value === 'full-page') return t('runtime.capture.fullCopied')
+    return t('runtime.capture.areaCopied')
   }
-  if (areaCaptureState.value === 'error') return areaCaptureError.value || 'Could not capture this screenshot'
-  return 'Capture an area to the clipboard'
+  if (areaCaptureState.value === 'error') return areaCaptureError.value || t('runtime.capture.failed')
+  return t('runtime.capture.area')
 })
 const tabHumanInteractionLocked = computed(() => activeTab.value?.humanInteractionLocked === true)
 const effectiveHumanInteractionLocked = computed(() => (
   state.value.allHumanInteractionLocked || tabHumanInteractionLocked.value
 ))
 const tabInteractionLockLabel = computed(() => {
-  if (activeIsHome.value) return 'Tab lock is available on websites'
-  if (state.value.allHumanInteractionLocked) return 'All tabs locked — page input and tab closing are blocked'
+  if (activeIsHome.value) return t('runtime.locks.websiteOnly')
+  if (state.value.allHumanInteractionLocked) return t('runtime.locks.allLocked')
   return tabHumanInteractionLocked.value
-    ? 'Unlock page input in this tab'
-    : 'Lock page input in this tab'
+    ? t('runtime.locks.unlockTab')
+    : t('runtime.locks.lockTab')
 })
 const allInteractionLockLabel = computed(() => (
   state.value.allHumanInteractionLocked
-    ? 'Unlock all tabs'
-    : 'Lock all tabs — blocks page input and tab closing; tab switching and Bronom controls stay available'
+    ? t('runtime.locks.unlockAll')
+    : t('runtime.locks.lockAll')
 ))
 const pdfExportLabel = computed(() => {
-  if (pdfExportState.value === 'saving') return 'Saving page as PDF'
-  if (pdfExportState.value === 'saved') return `PDF saved to ${pdfExport.value?.path ?? 'the download directory'}`
-  if (pdfExportState.value === 'error') return 'Could not save page as PDF'
-  return 'Save page as PDF'
+  if (pdfExportState.value === 'saving') return t('runtime.pdf.saving')
+  if (pdfExportState.value === 'saved') return t('runtime.pdf.saved', { path: pdfExport.value?.path ?? t('runtime.pdf.directory') })
+  if (pdfExportState.value === 'error') return t('runtime.pdf.failed')
+  return t('runtime.pdf.save')
 })
 
 function downloadProgress(download: BrowserDownloadState): number {
@@ -1362,23 +1115,35 @@ function downloadProgress(download: BrowserDownloadState): number {
 }
 
 function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB']
-  const unit = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
-  const value = bytes / 1024 ** unit
-  return `${value >= 10 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`
+  return formatLocalizedBytes(resolvedLocale.value, bytes)
+}
+
+function localNumber(value: number): string {
+  return formatNumber(resolvedLocale.value, value)
+}
+
+function localDateTime(value: Date | number | string): string {
+  return formatDateTime(resolvedLocale.value, value)
+}
+
+function localTime(value: Date | number | string): string {
+  return formatTime(resolvedLocale.value, value)
+}
+
+function localPercent(percent: number, maximumFractionDigits = 0): string {
+  return formatPercent(resolvedLocale.value, percent / 100, { maximumFractionDigits })
 }
 
 function downloadMeta(download: BrowserDownloadState): string {
   if (download.state === 'progressing') {
     const received = formatBytes(download.receivedBytes)
     return download.totalBytes > 0
-      ? `${downloadProgress(download)}% · ${received} of ${formatBytes(download.totalBytes)}`
-      : `${received} downloaded`
+      ? `${localPercent(downloadProgress(download))} · ${t('downloads.received', { received, total: formatBytes(download.totalBytes) })}`
+      : t('downloads.downloaded', { received })
   }
-  if (download.state === 'completed') return `${formatBytes(download.receivedBytes)} · Complete`
-  if (download.state === 'cancelled') return 'Cancelled'
-  return 'Interrupted'
+  if (download.state === 'completed') return t('downloads.complete', { size: formatBytes(download.receivedBytes) })
+  if (download.state === 'cancelled') return t('downloads.cancelled')
+  return t('downloads.interrupted')
 }
 
 function applyDownloads(next: BrowserDownloadState[]): void {
@@ -1485,347 +1250,13 @@ async function toggleVisitHistory(): Promise<void> {
 }
 
 function resetSiteStorageView(closePanel = false): void {
+  siteStoragePanel.value?.reset(closePanel)
   if (closePanel && !keepsSeparatePanelOpen()) siteStorageOpen.value = false
-  siteStorageResult.value = null
-  siteStorageState.value = 'idle'
-  siteStorageError.value = ''
-  siteStorageSearch.value = ''
-  siteStorageKey.value = ''
-  siteStorageValue.value = ''
-  siteStorageChangesOpen.value = false
-  siteStorageChangesReport.value = null
-  siteStorageChangesState.value = 'idle'
-  siteStorageChangesError.value = ''
-  siteStorageChangesCopied.value = false
-  siteStorageUsageOpen.value = false
-  siteStorageUsageReport.value = null
-  siteStorageUsageState.value = 'idle'
-  siteStorageUsageError.value = ''
-  siteStorageUsageCopied.value = false
-  siteStorageIndexedDbOpen.value = false
-  siteStorageIndexedDbReport.value = null
-  siteStorageIndexedDbState.value = 'idle'
-  siteStorageIndexedDbError.value = ''
-  siteStorageIndexedDbDatabase.value = ''
-  siteStorageIndexedDbStore.value = ''
-  siteStorageIndexedDbOffset.value = 0
-  siteStorageIndexedDbSearch.value = ''
-  siteStorageIndexedDbCopied.value = false
-  siteStoragePwaOpen.value = false
-  siteStoragePwaReport.value = null
-  siteStoragePwaState.value = 'idle'
-  siteStoragePwaError.value = ''
-  siteStoragePwaCache.value = ''
-  siteStoragePwaQuery.value = ''
-  siteStoragePwaOffset.value = 0
-  siteStoragePwaCopied.value = false
 }
 
 async function refreshSiteStorage(): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || !activeWebUrl.value) return
-  siteStorageState.value = 'loading'
-  siteStorageError.value = ''
-  try {
-    const result = await browser.manageStorage({
-      tabId: tab.id,
-      kind: siteStorageKind.value,
-      action: 'list',
-      includeValues: true
-    })
-    if (activeTab.value?.id !== tab.id) return
-    siteStorageResult.value = result
-    siteStorageState.value = 'idle'
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    siteStorageResult.value = null
-    siteStorageState.value = 'error'
-    siteStorageError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function manageSiteStorageChanges(action: BrowserStorageChangesAction): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || !activeWebUrl.value) return
-  siteStorageChangesState.value = 'loading'
-  siteStorageChangesError.value = ''
-  siteStorageChangesCopied.value = false
-  try {
-    const report = await browser.storageChanges({ tabId: tab.id, action })
-    if (activeTab.value?.id !== tab.id) return
-    siteStorageChangesReport.value = report
-    siteStorageChangesState.value = 'idle'
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    siteStorageChangesState.value = 'error'
-    siteStorageChangesError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function selectSiteStorageChanges(): Promise<void> {
-  siteStorageUsageOpen.value = false
-  siteStorageIndexedDbOpen.value = false
-  siteStoragePwaOpen.value = false
-  siteStorageChangesOpen.value = true
-  siteStorageError.value = ''
-  siteStorageKey.value = ''
-  siteStorageValue.value = ''
-  await manageSiteStorageChanges('get')
-}
-
-function storageChangeKindLabel(kind: BrowserStorageKind): string {
-  if (kind === 'local-storage') return 'Local storage'
-  if (kind === 'session-storage') return 'Session storage'
-  return 'Cookie'
-}
-
-function inspectStorageChange(change: BrowserStorageChange): void {
-  siteStorageUsageOpen.value = false
-  siteStorageChangesOpen.value = false
-  siteStorageIndexedDbOpen.value = false
-  siteStoragePwaOpen.value = false
-  siteStorageKind.value = change.kind
-  siteStorageSearch.value = change.key
-  void refreshSiteStorage()
-}
-
-async function loadSiteStorageUsage(): Promise<BrowserStorageUsageReport | null> {
-  const tab = activeTab.value
-  if (!tab || !activeWebUrl.value) return null
-  siteStorageUsageState.value = 'loading'
-  siteStorageUsageError.value = ''
-  siteStorageUsageCopied.value = false
-  try {
-    const report = await browser.inspectStorageUsage(tab.id)
-    if (activeTab.value?.id !== tab.id) return null
-    siteStorageUsageReport.value = report
-    siteStorageUsageState.value = 'idle'
-    return report
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return null
-    siteStorageUsageReport.value = null
-    siteStorageUsageState.value = 'error'
-    siteStorageUsageError.value = error instanceof Error ? error.message : String(error)
-    return null
-  }
-}
-
-async function selectSiteStorageUsage(): Promise<void> {
-  siteStorageChangesOpen.value = false
-  siteStorageIndexedDbOpen.value = false
-  siteStoragePwaOpen.value = false
-  siteStorageUsageOpen.value = true
-  await loadSiteStorageUsage()
-}
-
-async function copySiteStorageUsage(): Promise<void> {
-  if (!siteStorageUsageReport.value) return
-  if (!await copyAppText(JSON.stringify(siteStorageUsageReport.value, null, 2))) return
-  siteStorageUsageCopied.value = true
-  window.setTimeout(() => (siteStorageUsageCopied.value = false), 1_500)
-}
-
-function storageUsageTypeLabel(storageType: string): string {
-  const labels: Record<string, string> = {
-    cache_storage: 'Cache Storage',
-    caches: 'Cache Storage',
-    indexeddb: 'IndexedDB',
-    indexedDB: 'IndexedDB',
-    local_storage: 'Local storage',
-    service_workers: 'Service workers',
-    serviceWorkerRegistrations: 'Service workers',
-    shared_storage: 'Shared storage',
-    storage_buckets: 'Storage buckets',
-    file_systems: 'File systems',
-    websql: 'Web SQL',
-    shader_cache: 'Shader cache'
-  }
-  return labels[storageType] ?? storageType.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
-}
-
-function storageUsageShare(bytes: number): number {
-  const total = siteStorageUsageReport.value?.usage ?? 0
-  return total > 0 ? Math.min(100, (bytes / total) * 100) : 0
-}
-
-function formatStorageUsagePercent(percent: number): string {
-  if (percent <= 0) return '0%'
-  if (percent < 0.01) return '<0.01%'
-  return `${percent.toFixed(2).replace(/\.00$/, '')}%`
-}
-
-async function copySiteStorageChanges(): Promise<void> {
-  if (siteStorageChangesReport.value?.status !== 'compared') return
-  if (!await copyAppText(JSON.stringify(siteStorageChangesReport.value, null, 2))) return
-  siteStorageChangesCopied.value = true
-  window.setTimeout(() => (siteStorageChangesCopied.value = false), 1_500)
-}
-
-async function loadSiteStorageIndexedDb(
-  database = siteStorageIndexedDbDatabase.value || undefined,
-  objectStore = siteStorageIndexedDbStore.value || undefined,
-  offset = siteStorageIndexedDbOffset.value
-): Promise<BrowserIndexedDbReport | null> {
-  const tab = activeTab.value
-  if (!tab || !activeWebUrl.value) return null
-  siteStorageIndexedDbState.value = 'loading'
-  siteStorageIndexedDbError.value = ''
-  siteStorageIndexedDbCopied.value = false
-  try {
-    const report = await browser.inspectIndexedDb({
-      tabId: tab.id,
-      database,
-      objectStore,
-      offset,
-      limit: 50,
-      includeValues: true
-    })
-    if (activeTab.value?.id !== tab.id) return null
-    siteStorageIndexedDbReport.value = report
-    siteStorageIndexedDbOffset.value = report.offset
-    siteStorageIndexedDbState.value = 'idle'
-    return report
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return null
-    siteStorageIndexedDbReport.value = null
-    siteStorageIndexedDbState.value = 'error'
-    siteStorageIndexedDbError.value = error instanceof Error ? error.message : String(error)
-    return null
-  }
-}
-
-async function selectSiteStorageIndexedDb(): Promise<void> {
-  siteStorageUsageOpen.value = false
-  siteStorageChangesOpen.value = false
-  siteStoragePwaOpen.value = false
-  siteStorageIndexedDbOpen.value = true
-  siteStorageError.value = ''
-  siteStorageIndexedDbDatabase.value = ''
-  siteStorageIndexedDbStore.value = ''
-  siteStorageIndexedDbOffset.value = 0
-  siteStorageIndexedDbSearch.value = ''
-  const databases = await loadSiteStorageIndexedDb(undefined, undefined, 0)
-  const firstDatabase = databases?.databases[0]?.name
-  if (!firstDatabase) return
-  siteStorageIndexedDbDatabase.value = firstDatabase
-  const schema = await loadSiteStorageIndexedDb(firstDatabase, undefined, 0)
-  const firstStore = schema?.selectedDatabase?.objectStores?.[0]?.name
-  if (!firstStore) return
-  siteStorageIndexedDbStore.value = firstStore
-  await loadSiteStorageIndexedDb(firstDatabase, firstStore, 0)
-}
-
-async function selectSiteStorageIndexedDbDatabase(): Promise<void> {
-  siteStorageIndexedDbStore.value = ''
-  siteStorageIndexedDbOffset.value = 0
-  siteStorageIndexedDbSearch.value = ''
-  if (!siteStorageIndexedDbDatabase.value) {
-    await loadSiteStorageIndexedDb(undefined, undefined, 0)
-    return
-  }
-  const report = await loadSiteStorageIndexedDb(siteStorageIndexedDbDatabase.value, undefined, 0)
-  const firstStore = report?.selectedDatabase?.objectStores?.[0]?.name
-  if (!firstStore) return
-  siteStorageIndexedDbStore.value = firstStore
-  await loadSiteStorageIndexedDb(siteStorageIndexedDbDatabase.value, firstStore, 0)
-}
-
-async function selectSiteStorageIndexedDbStore(): Promise<void> {
-  siteStorageIndexedDbOffset.value = 0
-  siteStorageIndexedDbSearch.value = ''
-  await loadSiteStorageIndexedDb()
-}
-
-async function moveSiteStorageIndexedDbPage(direction: -1 | 1): Promise<void> {
-  const next = Math.max(0, siteStorageIndexedDbOffset.value + direction * 50)
-  await loadSiteStorageIndexedDb(undefined, undefined, next)
-}
-
-async function copySiteStorageIndexedDb(): Promise<void> {
-  const report = siteStorageIndexedDbReport.value
-  if (!report) return
-  if (!await copyAppText(JSON.stringify({
-    ...report,
-    entries: filteredSiteStorageIndexedDbEntries.value
-  }, null, 2))) return
-  siteStorageIndexedDbCopied.value = true
-  window.setTimeout(() => (siteStorageIndexedDbCopied.value = false), 1_500)
-}
-
-async function loadSiteStoragePwa(
-  cacheName = siteStoragePwaCache.value || undefined,
-  offset = siteStoragePwaOffset.value
-): Promise<BrowserPwaReport | null> {
-  const tab = activeTab.value
-  if (!tab || !activeWebUrl.value) return null
-  siteStoragePwaState.value = 'loading'
-  siteStoragePwaError.value = ''
-  siteStoragePwaCopied.value = false
-  try {
-    const report = await browser.inspectPwa({
-      tabId: tab.id,
-      cacheName,
-      query: siteStoragePwaQuery.value,
-      offset,
-      limit: 50
-    })
-    if (activeTab.value?.id !== tab.id) return null
-    siteStoragePwaReport.value = report
-    siteStoragePwaOffset.value = report.selectedCache?.offset ?? 0
-    siteStoragePwaState.value = 'idle'
-    return report
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return null
-    siteStoragePwaReport.value = null
-    siteStoragePwaState.value = 'error'
-    siteStoragePwaError.value = error instanceof Error ? error.message : String(error)
-    return null
-  }
-}
-
-async function selectSiteStoragePwa(): Promise<void> {
-  siteStorageUsageOpen.value = false
-  siteStorageChangesOpen.value = false
-  siteStorageIndexedDbOpen.value = false
-  siteStoragePwaOpen.value = true
-  siteStoragePwaCache.value = ''
-  siteStoragePwaQuery.value = ''
-  siteStoragePwaOffset.value = 0
-  const report = await loadSiteStoragePwa(undefined, 0)
-  const firstCache = report?.caches[0]?.name
-  if (!firstCache || !report.cacheInspectionAvailable) return
-  siteStoragePwaCache.value = firstCache
-  await loadSiteStoragePwa(firstCache, 0)
-}
-
-async function selectSiteStoragePwaCache(): Promise<void> {
-  siteStoragePwaOffset.value = 0
-  await loadSiteStoragePwa(undefined, 0)
-}
-
-async function filterSiteStoragePwa(): Promise<void> {
-  siteStoragePwaOffset.value = 0
-  await loadSiteStoragePwa(undefined, 0)
-}
-
-async function moveSiteStoragePwaPage(direction: -1 | 1): Promise<void> {
-  const next = Math.max(0, siteStoragePwaOffset.value + direction * 50)
-  await loadSiteStoragePwa(undefined, next)
-}
-
-async function copySiteStoragePwa(): Promise<void> {
-  if (!siteStoragePwaReport.value) return
-  if (!await copyAppText(JSON.stringify(siteStoragePwaReport.value, null, 2))) return
-  siteStoragePwaCopied.value = true
-  window.setTimeout(() => (siteStoragePwaCopied.value = false), 1_500)
-}
-
-async function refreshActiveSiteStorageView(): Promise<void> {
-  if (siteStorageUsageOpen.value) await loadSiteStorageUsage()
-  else if (siteStoragePwaOpen.value) await loadSiteStoragePwa()
-  else if (siteStorageIndexedDbOpen.value) await loadSiteStorageIndexedDb()
-  else if (siteStorageChangesOpen.value) await manageSiteStorageChanges('get')
-  else await refreshSiteStorage()
+  await nextTick()
+  await siteStoragePanel.value?.refresh()
 }
 
 async function toggleSiteStorage(): Promise<void> {
@@ -1841,100 +1272,10 @@ async function toggleSiteStorage(): Promise<void> {
   tabSearchOpen.value = false
   zoomOpen.value = false
   addressSuggestionsOpen.value = false
-  resetSiteStorageView()
   siteStorageOpen.value = true
-  await refreshSiteStorage()
-}
-
-async function selectSiteStorageKind(kind: BrowserStorageKind): Promise<void> {
-  siteStorageUsageOpen.value = false
-  siteStorageChangesOpen.value = false
-  siteStorageIndexedDbOpen.value = false
-  siteStoragePwaOpen.value = false
-  siteStorageChangesError.value = ''
-  siteStorageKind.value = kind
-  siteStorageKey.value = ''
-  siteStorageValue.value = ''
-  await refreshSiteStorage()
-}
-
-function editSiteStorageItem(item: BrowserStorageItem): void {
-  if (item.protected) return
-  siteStorageKey.value = item.key
-  siteStorageValue.value = item.value ?? ''
-}
-
-async function saveSiteStorageItem(): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || !siteStorageKey.value.trim()) return
-  siteStorageState.value = 'saving'
-  siteStorageError.value = ''
-  try {
-    const result = await browser.manageStorage({
-      tabId: tab.id,
-      kind: siteStorageKind.value,
-      action: 'set',
-      key: siteStorageKey.value,
-      value: siteStorageValue.value,
-      includeValues: true
-    })
-    if (activeTab.value?.id !== tab.id) return
-    siteStorageResult.value = result
-    siteStorageKey.value = ''
-    siteStorageValue.value = ''
-    siteStorageState.value = 'idle'
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    siteStorageState.value = 'error'
-    siteStorageError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function deleteSiteStorageItem(item: BrowserStorageItem): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || item.protected) return
-  siteStorageState.value = 'saving'
-  siteStorageError.value = ''
-  try {
-    const result = await browser.manageStorage({
-      tabId: tab.id,
-      kind: siteStorageKind.value,
-      action: 'delete',
-      key: item.key,
-      includeValues: true
-    })
-    if (activeTab.value?.id !== tab.id) return
-    siteStorageResult.value = result
-    siteStorageState.value = 'idle'
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    siteStorageState.value = 'error'
-    siteStorageError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function clearSiteStorageKind(): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || !siteStorageResult.value?.itemCount) return
-  const protectedNote = siteStorageKind.value === 'cookies' ? ' HttpOnly cookies will remain protected.' : ''
-  if (!window.confirm(`Clear ${siteStorageKindLabel.value.toLocaleLowerCase()} for ${activeHostname.value}?${protectedNote}`)) return
-  siteStorageState.value = 'saving'
-  siteStorageError.value = ''
-  try {
-    const result = await browser.manageStorage({
-      tabId: tab.id,
-      kind: siteStorageKind.value,
-      action: 'clear',
-      includeValues: true
-    })
-    if (activeTab.value?.id !== tab.id) return
-    siteStorageResult.value = result
-    siteStorageState.value = 'idle'
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    siteStorageState.value = 'error'
-    siteStorageError.value = error instanceof Error ? error.message : String(error)
-  }
+  await nextTick()
+  siteStoragePanel.value?.reset()
+  await siteStoragePanel.value?.refresh()
 }
 
 async function openTabGroupEditor(groupId: string): Promise<void> {
@@ -1957,7 +1298,7 @@ async function openNewWorkspaceEditor(): Promise<void> {
   workspaceEditorMode.value = 'create'
   workspaceEditorOpen.value = true
   tabGroupEditorId.value = null
-  tabGroupEditorName.value = 'New workspace'
+  tabGroupEditorName.value = t('runtime.workspace.newName')
   tabGroupEditorColor.value = 'purple'
   tabGroupEditorError.value = ''
   workspaceStorageMode.value = 'scratch'
@@ -2042,7 +1383,7 @@ async function transferWorkspaceStorage(): Promise<void> {
       origins: workspaceTransferOrigins()
     })
     workspaceStorageState.value = 'saved'
-    workspaceStorageMessage.value = `${result.cookieCount} cookies and ${result.localStorageItemCount} local storage items copied.`
+    workspaceStorageMessage.value = t('runtimeActions.workspace.copied', { cookies: localNumber(result.cookieCount), items: localNumber(result.localStorageItemCount) })
     state.value = await browser.getState()
   } catch (error) {
     workspaceStorageState.value = 'error'
@@ -2054,10 +1395,10 @@ async function closeEditedWorkspace(): Promise<void> {
   const workspace = state.value.mcpTabGroups.find((candidate) => candidate.id === tabGroupEditorId.value)
   if (!workspace || workspace.isDefault) return
   if (state.value.allHumanInteractionLocked) {
-    tabGroupEditorError.value = 'Unlock all tabs before closing a workspace.'
+    tabGroupEditorError.value = t('runtime.workspace.unlock')
     return
   }
-  if (!window.confirm(`Close workspace "${workspace.name}"? Its tabs, cookies, local storage, cache, and other private browser data will be permanently deleted.`)) return
+  if (!window.confirm(t('runtimeActions.workspace.closeConfirm', { name: workspace.name }))) return
   try {
     await syncState(browser.closeWorkspace(workspace.id))
     closeWorkspaceEditor()
@@ -2082,7 +1423,7 @@ async function removeHistoryEntry(id: string): Promise<void> {
 
 async function clearVisitHistory(): Promise<void> {
   if (!visitHistory.value.length) return
-  if (!window.confirm('Clear all browsing history? This will not remove cookies, passwords, bookmarks, or downloaded files.')) return
+  if (!window.confirm(t('privacyActions.clearHistory'))) return
   historyError.value = ''
   try {
     visitHistory.value = await window.bronomHistory.clear()
@@ -2118,19 +1459,13 @@ async function refreshJanitorWebsites(): Promise<void> {
 
 async function clearSelectedBrowsingData(): Promise<void> {
   const selected: string[] = []
-  if (browsingDataOptions.value.history) selected.push('Browsing history and its address suggestions')
+  if (browsingDataOptions.value.history) selected.push(t('privacyActions.historyAll'))
   if (browsingDataOptions.value.cookiesAndSiteData) {
-    selected.push('Cookies and site data (you may be signed out)')
+    selected.push(t('privacyActions.cookiesAll'))
   }
-  if (browsingDataOptions.value.cache) selected.push('Cached images and files')
+  if (browsingDataOptions.value.cache) selected.push(t('privacyActions.cache'))
   if (!selected.length) return
-  const confirmed = window.confirm([
-    'Clear the selected browsing data for all websites?',
-    '',
-    ...selected.map((item) => `• ${item}`),
-    '',
-    'Bookmarks, downloaded files, saved passwords, and site-permission decisions will remain. Open pages will not reload automatically.'
-  ].join('\n'))
+  const confirmed = window.confirm(t('runtimeActions.browsingData.confirm', { items: selected.map((item) => t('runtimeActions.browsingData.item', { item })).join('\n') }))
   if (!confirmed) return
   browsingDataState.value = 'clearing'
   browsingDataMessage.value = ''
@@ -2138,7 +1473,7 @@ async function clearSelectedBrowsingData(): Promise<void> {
     browsingDataSummary.value = await window.bronomBrowsingData.clear(browsingDataOptions.value)
     janitorWebsites.value = await window.bronomBrowsingData.websites()
     browsingDataState.value = 'cleared'
-    browsingDataMessage.value = `${selected.length === 1 ? 'Selected data was' : 'Selected data were'} cleared for all websites. Reload open pages when you are ready.`
+    browsingDataMessage.value = t('runtime.browsingData.cleared', {}, selected.length)
   } catch (error) {
     browsingDataState.value = 'error'
     browsingDataMessage.value = error instanceof Error ? error.message : String(error)
@@ -2147,28 +1482,22 @@ async function clearSelectedBrowsingData(): Promise<void> {
 
 function janitorWebsiteMeta(site: BrowsingDataWebsiteSummary): string[] {
   const items: string[] = []
-  if (site.cookieCount) items.push(`${site.cookieCount} ${site.cookieCount === 1 ? 'cookie' : 'cookies'}`)
-  if (site.historyEntries) items.push(`${site.historyEntries} history ${site.historyEntries === 1 ? 'page' : 'pages'} · ${site.historyVisits} ${site.historyVisits === 1 ? 'visit' : 'visits'}`)
-  if (site.openTabCount) items.push(`${site.openTabCount} open ${site.openTabCount === 1 ? 'tab' : 'tabs'}`)
-  if (site.bookmarkCount) items.push(`${site.bookmarkCount} ${site.bookmarkCount === 1 ? 'bookmark' : 'bookmarks'} kept`)
-  if (site.savedPasswordCount) items.push(`${site.savedPasswordCount} saved ${site.savedPasswordCount === 1 ? 'account' : 'accounts'} kept`)
-  if (site.permissionDecisionCount) items.push(`${site.permissionDecisionCount} permission ${site.permissionDecisionCount === 1 ? 'decision' : 'decisions'} kept`)
+  if (site.cookieCount) items.push(t('runtimeActions.browsingData.cookieMeta', { count: localNumber(site.cookieCount) }, site.cookieCount))
+  if (site.historyEntries) items.push(t('privacyActions.historyWithVisits', { pages: localNumber(site.historyEntries), visits: localNumber(site.historyVisits) }, site.historyEntries))
+  if (site.openTabCount) items.push(t('privacyActions.openTabs', { count: localNumber(site.openTabCount) }, site.openTabCount))
+  if (site.bookmarkCount) items.push(t('privacyActions.bookmarksKept', { count: localNumber(site.bookmarkCount) }, site.bookmarkCount))
+  if (site.savedPasswordCount) items.push(t('privacyActions.accountsKept', { count: localNumber(site.savedPasswordCount) }, site.savedPasswordCount))
+  if (site.permissionDecisionCount) items.push(t('privacyActions.decisionsKept', { count: localNumber(site.permissionDecisionCount) }, site.permissionDecisionCount))
   return items
 }
 
 async function clearJanitorWebsite(site: BrowsingDataWebsiteSummary): Promise<void> {
   const selected: string[] = []
-  if (browsingDataOptions.value.history) selected.push('Browsing history and address suggestions')
-  if (browsingDataOptions.value.cookiesAndSiteData) selected.push('Cookies and site storage (you may be signed out)')
-  if (browsingDataOptions.value.cache) selected.push('Cached images and files')
+  if (browsingDataOptions.value.history) selected.push(t('privacyActions.historySite'))
+  if (browsingDataOptions.value.cookiesAndSiteData) selected.push(t('privacyActions.cookiesSite'))
+  if (browsingDataOptions.value.cache) selected.push(t('privacyActions.cache'))
   if (!selected.length) return
-  const confirmed = window.confirm([
-    `Clear the selected data for ${site.origin}?`,
-    '',
-    ...selected.map((item) => `• ${item}`),
-    '',
-    'Related subdomains may share cookies. Bookmarks, saved passwords, site permissions, downloads, settings, and open tabs will remain.'
-  ].join('\n'))
+  const confirmed = window.confirm(t('privacyActions.clearSiteConfirm', { origin: site.origin, items: selected.map((item) => t('runtimeActions.browsingData.item', { item })).join('\n') }))
   if (!confirmed) return
   janitorState.value = 'clearing'
   janitorClearingOrigin.value = site.origin
@@ -2177,7 +1506,7 @@ async function clearJanitorWebsite(site: BrowsingDataWebsiteSummary): Promise<vo
     browsingDataSummary.value = await window.bronomBrowsingData.clear({ ...browsingDataOptions.value, origin: site.origin })
     janitorWebsites.value = await window.bronomBrowsingData.websites()
     janitorState.value = 'cleared'
-    janitorMessage.value = `Selected data was cleared for ${site.origin}. Open pages were left in place.`
+    janitorMessage.value = t('privacyActions.clearedSite', { origin: site.origin })
   } catch (error) {
     janitorState.value = 'error'
     janitorMessage.value = error instanceof Error ? error.message : String(error)
@@ -2187,11 +1516,11 @@ async function clearJanitorWebsite(site: BrowsingDataWebsiteSummary): Promise<vo
 }
 
 function historyEntryMeta(entry: BrowserHistoryEntry): string {
-  const visited = new Intl.DateTimeFormat(undefined, {
+  const visited = new Intl.DateTimeFormat(resolvedLocale.value, {
     dateStyle: 'medium',
     timeStyle: 'short'
   }).format(new Date(entry.visitedAt))
-  return entry.visitCount > 1 ? `${visited} · ${entry.visitCount} visits` : visited
+  return entry.visitCount > 1 ? `${visited} · ${t('history.visits', { count: localNumber(entry.visitCount) }, entry.visitCount)}` : visited
 }
 
 async function toggleTabSearch(): Promise<void> {
@@ -2402,7 +1731,7 @@ function tabSearchResultId(result: TabSearchResult): string {
 }
 
 function tabSearchResultLabel(result: TabSearchResult): string {
-  return result.kind === 'saved' ? result.tab.name : result.tab.title || 'New tab'
+  return result.kind === 'saved' ? result.tab.name : result.tab.title || t('tabSearch.newTabTitle')
 }
 
 function tabSearchResultIndex(kind: TabSearchResult['kind'], id: string): number {
@@ -2447,115 +1776,115 @@ async function restoreSavedTabGroup(group: BrowserSavedTabGroupState): Promise<v
     await syncState(browser.restoreSavedTabGroup(group.id))
     tabSearchOpen.value = false
   } catch (error) {
-    showAppToast('error', 'Restore workspace failed', friendlyUiError(error, 'The archived workspace could not be restored.'))
+    showAppToast('error', t('runtime.workspace.restoreFailed'), friendlyUiError(error, t('runtime.workspace.restoreDescription')))
   }
 }
 
 async function deleteSavedTabGroup(event: MouseEvent, group: BrowserSavedTabGroupState): Promise<void> {
   event.stopPropagation()
-  if (!window.confirm(`Delete archived workspace "${group.name}" and its ${group.tabs.length} saved ${group.tabs.length === 1 ? 'tab' : 'tabs'}? Its isolated browser data will also be deleted.`)) return
+  if (!window.confirm(t('runtimeActions.workspace.deleteConfirm', { name: group.name, count: localNumber(group.tabs.length) }, group.tabs.length))) return
   try {
     await syncState(browser.deleteSavedTabGroup(group.id))
     tabSearchSelection.value = Math.min(tabSearchSelection.value, Math.max(0, tabSearchResults.value.length - 1))
     await nextTick()
     tabSearchInput.value?.focus()
   } catch (error) {
-    showAppToast('error', 'Delete workspace failed', friendlyUiError(error, 'The archived workspace could not be deleted.'))
+    showAppToast('error', t('runtime.workspace.deleteFailed'), friendlyUiError(error, t('runtime.workspace.deleteDescription')))
   }
 }
 
 function tabSearchMeta(tab: BrowserTabState): string {
   const status: string[] = []
-  if (tab.mcpGroupName) status.push(`Group: ${tab.mcpGroupName}`)
-  if (tab.pinned) status.push('Pinned')
-  if (tab.active) status.push('Current tab')
-  if (state.value.allHumanInteractionLocked || tab.humanInteractionLocked) status.push('Interaction locked')
-  if (tab.muted) status.push('Muted')
-  else if (tab.audible) status.push('Playing audio')
-  if (mcpActivityByTab.value[tab.id]) status.push('Agent active')
-  if (tab.emulation) status.push(`Emulated: ${emulationDescription(tab.emulation)}`)
-  if (tab.networkRouteCount) status.push(`${tab.networkRouteCount} temporary network ${tab.networkRouteCount === 1 ? 'route' : 'routes'}`)
+  if (tab.mcpGroupName) status.push(t('tabSearch.meta.group', { name: tab.mcpGroupName }))
+  if (tab.pinned) status.push(t('tabSearch.meta.pinned'))
+  if (tab.active) status.push(t('tabSearch.meta.current'))
+  if (state.value.allHumanInteractionLocked || tab.humanInteractionLocked) status.push(t('tabSearch.meta.locked'))
+  if (tab.muted) status.push(t('tabSearch.meta.muted'))
+  else if (tab.audible) status.push(t('tabSearch.meta.audio'))
+  if (mcpActivityByTab.value[tab.id]) status.push(t('tabSearch.meta.agent'))
+  if (tab.emulation) status.push(t('tabSearch.meta.emulated', { state: emulationDescription(tab.emulation) }))
+  if (tab.networkRouteCount) status.push(t('tabSearch.meta.routes', { count: localNumber(tab.networkRouteCount) }, tab.networkRouteCount))
   return status.join(' · ')
 }
 
 function networkEmulationLabel(network: BrowserEmulationState['network']): string {
-  if (network === 'slow-3g') return 'Slow 3G'
-  if (network === 'slow-4g') return 'Slow 4G'
-  if (network === 'fast-4g') return 'Fast 4G'
-  if (network === 'offline') return 'Offline'
-  return 'Normal network'
+  if (network === 'slow-3g') return t('environment.network.slow3g')
+  if (network === 'slow-4g') return t('environment.network.slow4g')
+  if (network === 'fast-4g') return t('environment.network.fast4g')
+  if (network === 'offline') return t('environment.network.offline')
+  return t('runtime.emulation.normal')
 }
 
 function emulationLabel(emulation: BrowserEmulationState): string {
   if (emulation.network !== 'none') return networkEmulationLabel(emulation.network)
-  if (emulation.cacheDisabled) return 'Cache disabled'
-  if (emulation.bypassServiceWorker) return 'Service worker bypassed'
-  if (emulation.dataSaver !== 'auto') return emulation.dataSaver === 'enabled' ? 'Data Saver on' : 'Data Saver off'
-  if (emulation.javaScriptDisabled) return 'JavaScript disabled'
-  if (emulation.viewport) return `${emulation.viewport.width}\u00d7${emulation.viewport.height}${emulation.viewport.mobile ? ' Mobile' : ''}`
-  if (emulation.locale) return `${emulation.locale} locale`
+  if (emulation.cacheDisabled) return t('runtime.emulation.cacheDisabled')
+  if (emulation.bypassServiceWorker) return t('runtime.emulation.workerBypassed')
+  if (emulation.dataSaver !== 'auto') return t(emulation.dataSaver === 'enabled' ? 'runtime.emulation.dataSaverOn' : 'runtime.emulation.dataSaverOff')
+  if (emulation.javaScriptDisabled) return t('runtime.emulation.jsDisabled')
+  if (emulation.viewport) return t('runtimeDetails.emulation.viewport', { size: `${localNumber(emulation.viewport.width)}×${localNumber(emulation.viewport.height)}`, scale: localNumber(emulation.viewport.deviceScaleFactor), mobile: emulation.viewport.mobile ? t('runtimeDetails.emulation.mobile') : '', touch: '', orientation: emulation.viewport.orientation })
+  if (emulation.locale) return t('runtimeDetails.emulation.locale', { locale: emulation.locale })
   if (emulation.timezoneId) return emulation.timezoneId
-  if (emulation.geolocation) return 'Location override'
-  if (emulation.cpuThrottlingRate > 1) return `CPU ${emulation.cpuThrottlingRate}\u00d7`
-  if ((emulation.animationPlaybackRate ?? 1) !== 1) return emulation.animationPlaybackRate === 0 ? 'Animations paused' : `Animations ${Math.round(emulation.animationPlaybackRate! * 100)}%`
-  if (emulation.colorScheme !== 'auto') return `${emulation.colorScheme === 'dark' ? 'Dark' : 'Light'} mode`
-  if (emulation.reducedMotion !== 'auto') return emulation.reducedMotion === 'reduce' ? 'Reduced motion' : 'Full motion'
-  if (emulation.mediaType !== 'auto') return `${emulation.mediaType === 'print' ? 'Print' : 'Screen'} media`
-  if (emulation.forcedColors !== 'auto') return emulation.forcedColors === 'active' ? 'Forced colors' : 'No forced colors'
-  if (emulation.contrast !== 'auto') return `${emulation.contrast} contrast`
-  if (emulation.reducedTransparency !== 'auto') return emulation.reducedTransparency === 'reduce' ? 'Reduced transparency' : 'Full transparency'
+  if (emulation.geolocation) return t('runtime.emulation.location')
+  if (emulation.cpuThrottlingRate > 1) return t('runtimeDetails.emulation.cpu', { rate: localNumber(emulation.cpuThrottlingRate) })
+  if ((emulation.animationPlaybackRate ?? 1) !== 1) return emulation.animationPlaybackRate === 0 ? t('runtime.emulation.animationsPaused') : t('runtime.emulation.animations', { percent: localPercent(emulation.animationPlaybackRate! * 100) })
+  if (emulation.colorScheme !== 'auto') return t(emulation.colorScheme === 'dark' ? 'runtime.emulation.darkMode' : 'runtime.emulation.lightMode')
+  if (emulation.reducedMotion !== 'auto') return t(emulation.reducedMotion === 'reduce' ? 'runtime.emulation.reducedMotion' : 'runtime.emulation.fullMotion')
+  if (emulation.mediaType !== 'auto') return t(emulation.mediaType === 'print' ? 'runtime.emulation.printMedia' : 'runtime.emulation.screenMedia')
+  if (emulation.forcedColors !== 'auto') return t(emulation.forcedColors === 'active' ? 'runtime.emulation.forcedColors' : 'runtime.emulation.noForcedColors')
+  if (emulation.contrast !== 'auto') return t('runtimeDetails.emulation.contrast', { contrast: emulation.contrast })
+  if (emulation.reducedTransparency !== 'auto') return t(emulation.reducedTransparency === 'reduce' ? 'runtime.emulation.reducedTransparency' : 'runtime.emulation.fullTransparency')
   if (emulation.visionDeficiency !== 'none') return visionDeficiencyLabel(emulation.visionDeficiency)
-  if (emulation.renderingDebug?.paintFlashing) return 'Paint flashing'
-  if (emulation.renderingDebug?.layoutShiftRegions) return 'Layout shifts'
-  if (emulation.renderingDebug?.layerBorders) return 'Layer borders'
-  if (emulation.renderingDebug?.fpsCounter) return 'Frame stats'
-  if (emulation.renderingDebug?.scrollBottlenecks) return 'Scroll issues'
-  if (emulation.extraHttpHeaderNames?.length) return `${emulation.extraHttpHeaderNames.length} request ${emulation.extraHttpHeaderNames.length === 1 ? 'header' : 'headers'}`
-  return 'Custom browser'
+  if (emulation.renderingDebug?.paintFlashing) return t('runtime.emulation.paint')
+  if (emulation.renderingDebug?.layoutShiftRegions) return t('runtime.emulation.shifts')
+  if (emulation.renderingDebug?.layerBorders) return t('runtime.emulation.layers')
+  if (emulation.renderingDebug?.fpsCounter) return t('runtime.emulation.frames')
+  if (emulation.renderingDebug?.scrollBottlenecks) return t('runtime.emulation.scroll')
+  if (emulation.extraHttpHeaderNames?.length) return t('runtimeDetails.headers', { count: localNumber(emulation.extraHttpHeaderNames.length) }, emulation.extraHttpHeaderNames.length)
+  return t('runtime.emulation.custom')
 }
 
 function emulationDescription(emulation: BrowserEmulationState): string {
   const conditions: string[] = []
   if (emulation.network !== 'none') conditions.push(networkEmulationLabel(emulation.network))
-  if (emulation.cacheDisabled) conditions.push('HTTP cache disabled')
-  if (emulation.bypassServiceWorker) conditions.push('service worker bypassed')
-  if (emulation.dataSaver !== 'auto') conditions.push(`Data Saver ${emulation.dataSaver === 'enabled' ? 'on' : 'off'}`)
-  if (emulation.javaScriptDisabled) conditions.push('JavaScript disabled')
+  if (emulation.cacheDisabled) conditions.push(t('runtimeDetails.emulation.cache'))
+  if (emulation.bypassServiceWorker) conditions.push(t('runtimeDetails.emulation.worker'))
+  if (emulation.dataSaver !== 'auto') conditions.push(t('runtimeDetails.emulation.dataSaver', { state: t(emulation.dataSaver === 'enabled' ? 'runtimeDetails.emulation.on' : 'runtimeDetails.emulation.off') }))
+  if (emulation.javaScriptDisabled) conditions.push(t('runtimeDetails.emulation.js'))
   if (emulation.viewport) {
-    conditions.push(`${emulation.viewport.width}\u00d7${emulation.viewport.height} at ${emulation.viewport.deviceScaleFactor}\u00d7${emulation.viewport.mobile ? ' mobile' : ''}${emulation.viewport.touch ? ' touch' : ''} ${emulation.viewport.orientation} viewport`)
+    conditions.push(t('runtimeDetails.emulation.viewport', { size: `${localNumber(emulation.viewport.width)}×${localNumber(emulation.viewport.height)}`, scale: localNumber(emulation.viewport.deviceScaleFactor), mobile: emulation.viewport.mobile ? t('runtimeDetails.emulation.mobile') : '', touch: emulation.viewport.touch ? t('runtimeDetails.emulation.touch') : '', orientation: emulation.viewport.orientation }))
   }
-  if (emulation.geolocation) conditions.push('custom geolocation')
-  if (emulation.locale) conditions.push(`${emulation.locale} locale`)
-  if (emulation.timezoneId) conditions.push(`${emulation.timezoneId} time zone`)
-  if (emulation.cpuThrottlingRate > 1) conditions.push(`CPU ${emulation.cpuThrottlingRate}\u00d7 slower`)
-  if ((emulation.animationPlaybackRate ?? 1) !== 1) conditions.push(emulation.animationPlaybackRate === 0 ? 'animations paused' : `animations at ${Math.round(emulation.animationPlaybackRate! * 100)}% speed`)
-  if (emulation.colorScheme !== 'auto') conditions.push(`${emulation.colorScheme} color scheme`)
-  if (emulation.reducedMotion !== 'auto') conditions.push(emulation.reducedMotion === 'reduce' ? 'reduced motion' : 'no reduced motion')
-  if (emulation.mediaType !== 'auto') conditions.push(`${emulation.mediaType} media`)
-  if (emulation.forcedColors !== 'auto') conditions.push(`forced colors ${emulation.forcedColors}`)
-  if (emulation.contrast !== 'auto') conditions.push(`${emulation.contrast} contrast preference`)
-  if (emulation.reducedTransparency !== 'auto') conditions.push(emulation.reducedTransparency === 'reduce' ? 'reduced transparency' : 'no reduced transparency')
-  if (emulation.visionDeficiency !== 'none') conditions.push(`${visionDeficiencyLabel(emulation.visionDeficiency)} simulation`)
-  if (emulation.renderingDebug?.paintFlashing) conditions.push('paint flashing')
-  if (emulation.renderingDebug?.layoutShiftRegions) conditions.push('layout shift regions')
-  if (emulation.renderingDebug?.layerBorders) conditions.push('layer borders')
-  if (emulation.renderingDebug?.fpsCounter) conditions.push('frame rendering stats')
-  if (emulation.renderingDebug?.scrollBottlenecks) conditions.push('scrolling performance issues')
-  if (emulation.userAgent) conditions.push('custom user agent')
+  if (emulation.geolocation) conditions.push(t('runtimeDetails.emulation.geolocation'))
+  if (emulation.locale) conditions.push(t('runtimeDetails.emulation.locale', { locale: emulation.locale }))
+  if (emulation.timezoneId) conditions.push(t('runtimeDetails.emulation.timezone', { timezone: emulation.timezoneId }))
+  if (emulation.cpuThrottlingRate > 1) conditions.push(t('runtimeDetails.emulation.cpu', { rate: localNumber(emulation.cpuThrottlingRate) }))
+  if ((emulation.animationPlaybackRate ?? 1) !== 1) conditions.push(emulation.animationPlaybackRate === 0 ? t('runtimeDetails.emulation.animationsPaused') : t('runtimeDetails.emulation.animations', { percent: localPercent(emulation.animationPlaybackRate! * 100) }))
+  if (emulation.colorScheme !== 'auto') conditions.push(t('runtimeDetails.emulation.color', { scheme: emulation.colorScheme }))
+  if (emulation.reducedMotion !== 'auto') conditions.push(t(emulation.reducedMotion === 'reduce' ? 'runtimeDetails.emulation.reducedMotion' : 'runtimeDetails.emulation.fullMotion'))
+  if (emulation.mediaType !== 'auto') conditions.push(t('runtimeDetails.emulation.media', { media: emulation.mediaType }))
+  if (emulation.forcedColors !== 'auto') conditions.push(t('runtimeDetails.emulation.forced', { state: emulation.forcedColors }))
+  if (emulation.contrast !== 'auto') conditions.push(t('runtimeDetails.emulation.contrast', { contrast: emulation.contrast }))
+  if (emulation.reducedTransparency !== 'auto') conditions.push(t(emulation.reducedTransparency === 'reduce' ? 'runtimeDetails.emulation.reducedTransparency' : 'runtimeDetails.emulation.fullTransparency'))
+  if (emulation.visionDeficiency !== 'none') conditions.push(t('runtimeDetails.emulation.vision', { vision: visionDeficiencyLabel(emulation.visionDeficiency) }))
+  if (emulation.renderingDebug?.paintFlashing) conditions.push(t('runtimeDetails.emulation.paint'))
+  if (emulation.renderingDebug?.layoutShiftRegions) conditions.push(t('runtimeDetails.emulation.shifts'))
+  if (emulation.renderingDebug?.layerBorders) conditions.push(t('runtimeDetails.emulation.layers'))
+  if (emulation.renderingDebug?.fpsCounter) conditions.push(t('runtimeDetails.emulation.frames'))
+  if (emulation.renderingDebug?.scrollBottlenecks) conditions.push(t('runtimeDetails.emulation.scroll'))
+  if (emulation.userAgent) conditions.push(t('runtimeDetails.emulation.userAgent'))
   if (emulation.extraHttpHeaderNames?.length) {
-    conditions.push(`${emulation.extraHttpHeaderNames.length} custom request ${emulation.extraHttpHeaderNames.length === 1 ? 'header' : 'headers'}`)
+    conditions.push(t('runtimeDetails.emulation.customHeaders', { count: localNumber(emulation.extraHttpHeaderNames.length) }, emulation.extraHttpHeaderNames.length))
   }
-  return conditions.join(', ') || 'custom browser conditions'
+  return conditions.join(', ') || t('runtimeDetails.emulation.custom')
 }
 
 function visionDeficiencyLabel(value: BrowserEmulationState['visionDeficiency']): string {
-  if (value === 'blurredVision') return 'Blurred vision'
-  if (value === 'reducedContrast') return 'Reduced contrast'
-  if (value === 'protanopia') return 'Protanopia'
-  if (value === 'deuteranopia') return 'Deuteranopia'
-  if (value === 'tritanopia') return 'Tritanopia'
-  if (value === 'achromatopsia') return 'Achromatopsia'
-  return 'No vision simulation'
+  if (value === 'blurredVision') return t('environment.rendering.blurred')
+  if (value === 'reducedContrast') return t('environment.rendering.reducedContrast')
+  if (value === 'protanopia') return t('environment.rendering.protanopia')
+  if (value === 'deuteranopia') return t('environment.rendering.deuteranopia')
+  if (value === 'tritanopia') return t('environment.rendering.tritanopia')
+  if (value === 'achromatopsia') return t('environment.rendering.achromatopsia')
+  return t('environment.rendering.noSimulation')
 }
 
 async function resetActiveTabEmulation(): Promise<void> {
@@ -2726,28 +2055,17 @@ async function resetEnvironment(): Promise<void> {
   await applyEnvironment(false)
 }
 
-async function clearActiveNetworkRoutes(): Promise<void> {
-  const tab = activeTab.value
-  if (!tab?.networkRouteCount) return
-  const requestSequence = ++networkRouteMutationSequence
-  const nextState = await browser.clearNetworkRoutes(tab.id)
-  if (requestSequence !== networkRouteMutationSequence || activeTab.value?.id !== tab.id) return
-  state.value = nextState
-  networkRoutes.value = []
-  networkRouteState.value = 'ready'
-}
-
 function closedTabMeta(tab: BrowserClosedTabState): string {
   const elapsed = Math.max(0, Date.now() - Date.parse(tab.closedAt))
   let closed: string
-  if (elapsed < 60_000) closed = 'Closed just now'
+  if (elapsed < 60_000) closed = t('tabSearch.meta.justNow')
   else if (elapsed < 60 * 60_000) {
     const minutes = Math.max(1, Math.floor(elapsed / 60_000))
-    closed = `Closed ${minutes} min ago`
+    closed = t('tabSearch.meta.minutesAgo', { count: localNumber(minutes) })
   } else {
-    closed = `Closed ${new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(new Date(tab.closedAt))}`
+    closed = t('tabSearch.meta.closedAt', { time: localTime(tab.closedAt) })
   }
-  return tab.pinned ? `Pinned · ${closed}` : closed
+  return tab.pinned ? `${t('tabSearch.meta.pinned')} · ${closed}` : closed
 }
 
 async function cancelDownload(downloadId: string): Promise<void> {
@@ -2908,30 +2226,6 @@ watch(
 watch(fullModalOpen, (open) => {
   if (open) closeAddressSuggestions()
 }, { flush: 'sync' })
-
-watch(consolePanelOpen, (open) => {
-  if (consoleRefreshTimer !== undefined) {
-    window.clearInterval(consoleRefreshTimer)
-    consoleRefreshTimer = undefined
-  }
-  if (!open) return
-  if (consoleState.value === 'idle') void refreshConsole()
-  consoleRefreshTimer = window.setInterval(() => {
-    if (consolePanelOpen.value) void refreshConsole(false, true)
-  }, 1_000)
-}, { immediate: true })
-
-watch(domChangesPanelOpen, (open) => {
-  if (domChangesRefreshTimer !== undefined) {
-    window.clearInterval(domChangesRefreshTimer)
-    domChangesRefreshTimer = undefined
-  }
-  if (!open) return
-  void manageDomChanges('get')
-  domChangesRefreshTimer = window.setInterval(() => {
-    if (domChangesPanelOpen.value && domChangesReport.value?.active) void manageDomChanges('get', true)
-  }, 1_000)
-}, { immediate: true })
 
 watch(tabSearchQuery, async () => {
   tabSearchSelection.value = 0
@@ -3138,64 +2432,7 @@ watch(
     }
     if (findOpen.value && findTabId && tabId !== findTabId) void closeFind()
     resetSiteStorageView(true)
-    if (!keepPanelOpen && accessibilityPanelOpen.value && accessibilityAudit.value?.tabId !== tabId) accessibilityPanelOpen.value = false
-    accessibilityAudit.value = null
-    accessibilityAuditState.value = 'idle'
-    accessibilityAuditError.value = ''
-    if (!keepPanelOpen && qualityAuditPanelOpen.value && qualityAuditReport.value?.tabId !== tabId) qualityAuditPanelOpen.value = false
-    qualityAuditReport.value = null
-    qualityAuditState.value = 'idle'
-    qualityAuditError.value = ''
-    qualityAuditCopied.value = false
-    if (!keepPanelOpen && performancePanelOpen.value && performanceReport.value?.tabId !== tabId) performancePanelOpen.value = false
-    performanceReport.value = null
-    performanceState.value = 'idle'
-    performanceError.value = ''
-    if (!keepPanelOpen && designOverviewPanelOpen.value && designOverviewReport.value?.tabId !== tabId) designOverviewPanelOpen.value = false
-    designOverviewReport.value = null
-    designOverviewState.value = 'idle'
-    designOverviewError.value = ''
-    if (!keepPanelOpen && pageMetadataPanelOpen.value && pageMetadataReport.value?.tabId !== tabId) pageMetadataPanelOpen.value = false
-    pageMetadataReport.value = null
-    pageMetadataState.value = 'idle'
-    pageMetadataError.value = ''
-    if (!keepPanelOpen && securityPanelOpen.value && securityReport.value?.tabId !== tabId) securityPanelOpen.value = false
-    securityReport.value = null
-    securityReportState.value = 'idle'
-    securityReportError.value = ''
-    if (!keepPanelOpen && coveragePanelOpen.value && coverageResult.value?.tabId !== tabId) coveragePanelOpen.value = false
-    coverageResult.value = null
-    coverageState.value = 'idle'
-    coverageError.value = ''
-    if (!keepPanelOpen && cpuProfilePanelOpen.value && cpuProfileResult.value?.tabId !== tabId) cpuProfilePanelOpen.value = false
-    cpuProfileResult.value = null
-    cpuProfileState.value = 'idle'
-    cpuProfileError.value = ''
-    if (!keepPanelOpen && memoryPanelOpen.value && memoryReport.value?.tabId !== tabId) memoryPanelOpen.value = false
-    memoryReport.value = null
-    memoryState.value = 'idle'
-    memoryError.value = ''
     resetConsoleView(true)
-    if (!keepPanelOpen && debugReportPanelOpen.value && debugReport.value?.tabId !== tabId) debugReportPanelOpen.value = false
-    debugReport.value = null
-    debugReportState.value = 'idle'
-    debugReportError.value = ''
-    if (!keepPanelOpen && reproPanelOpen.value && reproRecording.value?.tabId !== tabId) reproPanelOpen.value = false
-    reproRecording.value = null
-    reproState.value = 'idle'
-    reproError.value = ''
-    if (!keepPanelOpen && domChangesPanelOpen.value && domChangesReport.value?.tabId !== tabId) domChangesPanelOpen.value = false
-    domChangesReport.value = null
-    domChangesState.value = 'idle'
-    domChangesError.value = ''
-    if (!keepPanelOpen && visualComparePanelOpen.value && visualCompareReport.value?.tabId !== tabId) visualComparePanelOpen.value = false
-    visualCompareReport.value = null
-    visualCompareState.value = 'idle'
-    visualCompareError.value = ''
-    if (!keepPanelOpen && inspectorIssuesOpen.value && inspectorIssuesReport.value?.tabId !== tabId) inspectorIssuesOpen.value = false
-    inspectorIssuesReport.value = null
-    inspectorIssuesState.value = 'idle'
-    inspectorIssuesError.value = ''
     resetNetworkMonitorView(true)
     if (responsivePanelOpen.value) {
       if (!keepPanelOpen) responsivePanelOpen.value = false
@@ -3225,61 +2462,8 @@ watch(
   }
 )
 
-watch(
-  () => [activeTab.value?.id, activeTab.value?.reproRecording?.active, activeTab.value?.reproRecording?.stepCount] as const,
-  ([tabId]) => {
-    if (tabId && reproPanelOpen.value) void manageRepro('get')
-  }
-)
-
-watch(
-  () => activeTab.value?.codeCoverageRecording?.startedAt,
-  (current, previous) => {
-    if (!current && previous && coveragePanelOpen.value && coverageResult.value?.status === 'recording') {
-      void manageCodeCoverage('get')
-    }
-  }
-)
-
-watch(
-  () => activeTab.value?.cpuProfileRecording?.startedAt,
-  (current, previous) => {
-    if (!current && previous && cpuProfilePanelOpen.value && cpuProfileResult.value?.status === 'recording') {
-      void manageCpuProfile('get')
-    }
-  }
-)
-
-watch(
-  () => activeTab.value?.memoryAllocationRecording?.startedAt,
-  (current, previous) => {
-    if (!current && previous && memoryPanelOpen.value && memoryReport.value?.allocationStatus === 'recording') {
-      memoryReport.value = {
-        ...memoryReport.value,
-        allocationStatus: 'idle',
-        allocationRecording: undefined,
-        allocationProfile: undefined
-      }
-    }
-  }
-)
-
-watch(
-  () => [activeTab.value?.id, activeTab.value?.domChangesRecording?.active, activeTab.value?.domChangesRecording?.changeCount] as const,
-  ([tabId]) => {
-    if (tabId && domChangesPanelOpen.value) void manageDomChanges('get', true)
-  }
-)
-
-watch(
-  () => [activeTab.value?.id, activeTab.value?.networkRouteCount] as const,
-  ([tabId]) => {
-    if (tabId && networkMonitorOpen.value) void refreshNetworkRoutes(true)
-  }
-)
-
 async function syncState(next: Promise<BrowserState> | BrowserState): Promise<void> {
-  state.value = await next
+  await browserStore.syncOperation(Promise.resolve(next))
 }
 
 async function selectBrowserTab(tabId: string): Promise<boolean> {
@@ -3287,7 +2471,7 @@ async function selectBrowserTab(tabId: string): Promise<boolean> {
     await syncState(browser.selectTab(tabId))
     return true
   } catch (error) {
-    showAppToast('error', 'Open tab failed', friendlyUiError(error, 'The selected tab could not be opened.'))
+    showAppToast('error', t('runtime.workspace.openFailed'), friendlyUiError(error, t('runtime.workspace.openDescription')))
     return false
   }
 }
@@ -3298,7 +2482,7 @@ async function navigate(): Promise<void> {
   try {
     await syncState(browser.navigate({ url: address.value, tabId: state.value.activeTabId ?? undefined }))
   } catch (error) {
-    showAppToast('error', 'Navigation failed', friendlyUiError(error, 'The address could not be opened.'))
+    showAppToast('error', t('runtime.navigation.failed'), friendlyUiError(error, t('runtime.navigation.failedDescription')))
   }
 }
 
@@ -3409,7 +2593,8 @@ function syncAddressSuggestionOverlay(): void {
     bounds: { x, y, width, maxHeight },
     suggestions: addressSuggestions.value.map((suggestion) => ({ ...suggestion })),
     selectedIndex: addressSuggestionSelection.value,
-    theme: addressSuggestionTheme.value
+    theme: addressSuggestionTheme.value,
+    locale: resolvedLocale.value
   }
   window.bronomAddressOverlay.show(request)
 }
@@ -3456,8 +2641,8 @@ function handleAddressKeydown(event: KeyboardEvent): void {
 }
 
 function addressSuggestionMeta(suggestion: AddressSuggestion): string {
-  if (suggestion.kind === 'bookmark') return 'Bookmark'
-  return suggestion.visitCount && suggestion.visitCount > 1 ? `History · ${suggestion.visitCount} visits` : 'History'
+  if (suggestion.kind === 'bookmark') return t('runtime.suggestion.bookmark')
+  return suggestion.visitCount && suggestion.visitCount > 1 ? t('runtime.suggestion.visits', { count: localNumber(suggestion.visitCount) }) : t('runtime.suggestion.history')
 }
 
 async function openFind(): Promise<void> {
@@ -3547,7 +2732,7 @@ async function newTabInWorkspace(groupId: string): Promise<void> {
     expandTabGroup(groupId)
     await focusAddress()
   } catch (error) {
-    showAppToast('error', 'New tab failed', friendlyUiError(error, `A tab could not be opened in ${workspace.name}.`))
+    showAppToast('error', t('runtime.workspace.newTabFailed'), friendlyUiError(error, t('runtime.workspace.newTabDescription', { workspace: workspace.name })))
   }
 }
 
@@ -3582,14 +2767,14 @@ async function openTabInSplitView(tabId: string): Promise<void> {
   splitMenuOpen.value = false
   await updateSplitState(
     browser.openSplitView(tabId),
-    'The selected tab could not be opened in split view.'
+    t('runtimeActions.workspace.splitOpen')
   )
 }
 
 async function changeSplitLayout(orientation: BrowserSplitOrientation): Promise<void> {
   await updateSplitState(
     browser.updateSplitView({ orientation }),
-    'The split-view layout could not be changed.'
+    t('runtimeActions.workspace.splitLayout')
   )
 }
 
@@ -3597,14 +2782,14 @@ async function changeSplitRatio(event: Event): Promise<void> {
   const ratio = Number((event.target as HTMLInputElement).value) / 100
   await updateSplitState(
     browser.updateSplitView({ ratio }),
-    'The split-view size could not be changed.'
+    t('runtimeActions.workspace.splitSize')
   )
 }
 
 async function swapSplitTabs(): Promise<void> {
   await updateSplitState(
     browser.updateSplitView({ swap: true }),
-    'The split-view panes could not be swapped.'
+    t('runtimeActions.workspace.splitSwap')
   )
 }
 
@@ -3612,7 +2797,7 @@ async function exitSplitView(): Promise<void> {
   splitMenuOpen.value = false
   await updateSplitState(
     browser.closeSplitView(),
-    'Split view could not be closed.'
+    t('runtimeActions.workspace.splitClose')
   )
 }
 
@@ -3620,7 +2805,7 @@ async function updateSplitState(next: Promise<BrowserState>, fallback: string): 
   try {
     await syncState(next)
   } catch (error) {
-    showAppToast('error', 'Split view failed', friendlyUiError(error, fallback))
+    showAppToast('error', t('runtime.workspace.splitFailed'), friendlyUiError(error, fallback))
   }
 }
 
@@ -3699,16 +2884,16 @@ async function closeTab(event: MouseEvent, tabId: string): Promise<void> {
 }
 
 function tabTooltip(tab: BrowserTabState): string {
-  const pinned = tab.pinned ? ' — pinned' : ''
-  const sleeping = tab.sleeping ? ' — sleeping; reloads when selected' : ''
-  const audio = tab.muted ? ' — muted' : tab.audible ? ' — playing audio' : ''
-  const locked = state.value.allHumanInteractionLocked || tab.humanInteractionLocked ? ' — page input locked' : ''
-  const problem = tab.pageProblem ? ` — ${tab.pageProblem.title}` : ''
-  const emulation = tab.emulation ? ` — emulated: ${emulationDescription(tab.emulation)}` : ''
-  const networkRoutes = tab.networkRouteCount ? ` — ${tab.networkRouteCount} temporary network ${tab.networkRouteCount === 1 ? 'route' : 'routes'}` : ''
-  const split = state.value.splitView?.firstTabId === tab.id || state.value.splitView?.secondTabId === tab.id ? ' — visible in split view' : ''
-  const workspace = tab.mcpGroupName ? ` — workspace: ${tab.mcpGroupName}` : ''
-  return `${tab.title || 'New tab'}${problem}${pinned}${sleeping}${audio}${locked}${emulation}${networkRoutes}${split}${workspace}`
+  const pinned = tab.pinned ? t('runtimeDetails.tab.pinned') : ''
+  const sleeping = tab.sleeping ? t('runtimeDetails.tab.sleeping') : ''
+  const audio = tab.muted ? t('runtimeDetails.tab.muted') : tab.audible ? t('runtimeDetails.tab.audio') : ''
+  const locked = state.value.allHumanInteractionLocked || tab.humanInteractionLocked ? t('runtimeDetails.tab.locked') : ''
+  const problem = tab.pageProblem ? t('runtimeDetails.tab.problem', { problem: tab.pageProblem.title }) : ''
+  const emulation = tab.emulation ? t('runtimeDetails.tab.emulated', { description: emulationDescription(tab.emulation) }) : ''
+  const networkRoutes = tab.networkRouteCount ? t('runtimeDetails.tab.routes', { count: localNumber(tab.networkRouteCount) }, tab.networkRouteCount) : ''
+  const split = state.value.splitView?.firstTabId === tab.id || state.value.splitView?.secondTabId === tab.id ? t('runtimeDetails.tab.split') : ''
+  const workspace = tab.mcpGroupName ? t('runtimeDetails.tab.workspace', { name: tab.mcpGroupName }) : ''
+  return `${tab.title || t('tabSearch.newTabTitle')}${problem}${pinned}${sleeping}${audio}${locked}${emulation}${networkRoutes}${split}${workspace}`
 }
 
 function pageProblemDetails(tab: BrowserTabState): string {
@@ -3718,7 +2903,7 @@ function pageProblemDetails(tab: BrowserTabState): string {
     return `${problem.errorDescription}${problem.errorCode ? ` (${problem.errorCode})` : ''}`
   }
   if (problem.kind === 'renderer-gone' && problem.reason) {
-    return `${problem.reason}${problem.exitCode !== undefined ? ` · exit ${problem.exitCode}` : ''}`
+    return problem.exitCode !== undefined ? t('runtimeDetails.tab.exit', { reason: problem.reason, code: localNumber(problem.exitCode) }) : problem.reason
   }
   return ''
 }
@@ -3748,622 +2933,43 @@ async function toggleMcpPaused(): Promise<void> {
   mcpControl.value = await window.bronomMcp.setPaused(!mcpControl.value.paused)
 }
 
-function accessibilityImpactCount(impact: BrowserAccessibilityImpact): number {
-  return accessibilityAudit.value?.violations.filter((violation) => violation.impact === impact).length ?? 0
-}
-
-function performanceMetric(name: BrowserPerformanceMetricName): BrowserPerformanceMetric | null {
-  return performanceReport.value?.metrics[name] ?? null
-}
-
-function formatPerformanceMetric(metric: BrowserPerformanceMetric | null): string {
-  if (!metric) return 'Not observed'
-  return metric.unit === 'score' ? metric.value.toFixed(3) : `${Math.round(metric.value)} ms`
-}
-
-function performanceComparisonMetric(name: BrowserPerformanceComparisonMetricName): BrowserPerformanceComparisonMetric | null {
-  return performanceReport.value?.comparison?.metrics.find((metric) => metric.name === name) ?? null
-}
-
-function formatPerformanceDelta(metric: BrowserPerformanceComparisonMetric | null): string {
-  if (!metric || metric.delta === null) return ''
-  const absolute = Math.abs(metric.delta)
-  const value = metric.unit === 'bytes'
-    ? formatBytes(absolute)
-    : metric.unit === 'score' ? absolute.toFixed(3) : `${Math.round(absolute)} ms`
-  const sign = metric.delta > 0 ? '+' : metric.delta < 0 ? '−' : '±'
-  return `${sign}${value} vs baseline`
-}
-
-function performanceBaselineTime(): string {
-  const measuredAt = performanceReport.value?.baseline?.measuredAt
-  if (!measuredAt) return ''
-  const date = new Date(measuredAt)
-  return Number.isNaN(date.valueOf()) ? measuredAt : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
-
-function performanceContributorTitle(contributor: BrowserPerformanceScriptContributor): string {
-  return contributor.sourceFunctionName || contributor.invoker || 'Anonymous script work'
-}
-
-function performanceContributorSource(contributor: BrowserPerformanceScriptContributor): string {
-  if (!contributor.sourceUrl) return contributor.invokerType || 'Source unavailable'
-  try {
-    const url = new URL(contributor.sourceUrl)
-    const source = `${url.host}${url.pathname}`
-    return contributor.sourceCharPosition === undefined ? source : `${source} · char ${contributor.sourceCharPosition}`
-  } catch {
-    return contributor.sourceUrl
-  }
-}
-
-async function runPerformanceReport(action: BrowserPerformanceAction = 'measure'): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || tab.url.startsWith('bronom://home')) return
-  closeTransientPanels()
-  performancePanelOpen.value = true
-  performanceState.value = 'running'
-  performanceError.value = ''
-  try {
-    const report = await browser.measurePerformance({ tabId: tab.id, settleMs: 800, action })
-    if (activeTab.value?.id !== tab.id) return
-    performanceReport.value = report
-    performanceState.value = 'complete'
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    performanceState.value = 'error'
-    performanceError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-function togglePerformanceReport(): void {
-  if (performancePanelOpen.value) {
-    performancePanelOpen.value = false
-    return
-  }
-  void runPerformanceReport()
-}
-
-async function runDesignOverview(): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || tab.url.startsWith('bronom://home')) return
-  closeTransientPanels()
-  designOverviewPanelOpen.value = true
-  designOverviewState.value = 'loading'
-  designOverviewError.value = ''
-  try {
-    const report = await browser.inspectDesign(tab.id)
-    if (activeTab.value?.id !== tab.id) return
-    designOverviewReport.value = report
-    designOverviewState.value = 'ready'
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    designOverviewState.value = 'error'
-    designOverviewError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-function toggleDesignOverview(): void {
-  if (designOverviewPanelOpen.value) {
-    designOverviewPanelOpen.value = false
-    return
-  }
-  void runDesignOverview()
-}
-
-async function runPageMetadata(): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || tab.url.startsWith('bronom://home')) return
-  closeTransientPanels()
-  pageMetadataPanelOpen.value = true
-  pageMetadataState.value = 'loading'
-  pageMetadataError.value = ''
-  try {
-    const report = await browser.inspectPageMetadata(tab.id)
-    if (activeTab.value?.id !== tab.id) return
-    pageMetadataReport.value = report
-    pageMetadataState.value = 'ready'
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    pageMetadataState.value = 'error'
-    pageMetadataError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-function togglePageMetadata(): void {
-  if (pageMetadataPanelOpen.value) {
-    pageMetadataPanelOpen.value = false
-    return
-  }
-  void runPageMetadata()
-}
-
-async function runSecurityReport(): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || tab.url.startsWith('bronom://home')) return
-  closeTransientPanels()
-  securityPanelOpen.value = true
-  securityReportState.value = 'loading'
-  securityReportError.value = ''
-  try {
-    const report = await browser.inspectSecurity(tab.id)
-    if (activeTab.value?.id !== tab.id) return
-    securityReport.value = report
-    securityReportState.value = 'ready'
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    securityReportState.value = 'error'
-    securityReportError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-function toggleSecurityReport(): void {
-  if (securityPanelOpen.value) {
-    securityPanelOpen.value = false
-    return
-  }
-  void runSecurityReport()
-}
-
-async function manageCodeCoverage(
-  action: 'get' | 'start' | 'stop' | 'clear',
-  reload = true
-): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || tab.url.startsWith('bronom://home')) return
-  coverageState.value = 'loading'
-  coverageError.value = ''
-  try {
-    const result = await browser.manageCodeCoverage({
-      tabId: tab.id,
-      action,
-      mode: coverageMode.value,
-      reload
-    })
-    if (activeTab.value?.id !== tab.id) return
-    coverageResult.value = result
-    coverageState.value = 'ready'
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    coverageState.value = 'error'
-    coverageError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-function toggleCodeCoverage(): void {
-  if (coveragePanelOpen.value) {
-    coveragePanelOpen.value = false
-    return
-  }
-  closeTransientPanels()
-  coveragePanelOpen.value = true
-  void manageCodeCoverage('get')
-}
-
-async function manageCpuProfile(action: 'get' | 'start' | 'stop' | 'clear'): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || tab.url.startsWith('bronom://home')) return
-  cpuProfileState.value = 'loading'
-  cpuProfileError.value = ''
-  try {
-    const result = await browser.manageCpuProfile({ tabId: tab.id, action })
-    if (activeTab.value?.id !== tab.id) return
-    cpuProfileResult.value = result
-    cpuProfileState.value = 'ready'
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    cpuProfileState.value = 'error'
-    cpuProfileError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-function toggleCpuProfile(): void {
-  if (cpuProfilePanelOpen.value) {
-    cpuProfilePanelOpen.value = false
-    return
-  }
-  closeTransientPanels()
-  cpuProfilePanelOpen.value = true
-  void manageCpuProfile('get')
-}
-
-function formatSignedBytes(bytes: number): string {
-  if (!bytes) return '0 B'
-  return `${bytes > 0 ? '+' : '−'}${formatBytes(Math.abs(bytes))}`
-}
-
-function formatSignedCount(value: number): string {
-  if (!value) return '0'
-  return `${value > 0 ? '+' : '−'}${Math.abs(value)}`
-}
-
-function memoryDeltaClass(value: number | undefined): string {
-  if (!value) return 'neutral'
-  return value > 0 ? 'growth' : 'reduction'
-}
-
-async function runMemoryReport(action: 'measure' | 'set-baseline' = 'measure', collectGarbage = false): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || tab.url.startsWith('bronom://home')) return
-  closeTransientPanels()
-  memoryPanelOpen.value = true
-  memoryState.value = 'running'
-  memoryError.value = ''
-  try {
-    const report = await browser.measureMemory({ tabId: tab.id, action, collectGarbage })
-    if (activeTab.value?.id !== tab.id) return
-    memoryReport.value = report
-    memoryState.value = 'complete'
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    memoryState.value = 'error'
-    memoryError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function clearMemoryBaseline(): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || tab.url.startsWith('bronom://home')) return
-  memoryState.value = 'running'
-  memoryError.value = ''
-  try {
-    const previous = memoryReport.value
-    const cleared = await browser.measureMemory({ tabId: tab.id, action: 'clear-baseline' })
-    if (activeTab.value?.id !== tab.id) return
-    const preserveCurrent = previous?.tabId === cleared.tabId
-      && previous.url === cleared.url
-      && previous.current
-    memoryReport.value = {
-      ...cleared,
-      ...(preserveCurrent ? {
-        current: previous.current,
-        forcedGarbageCollection: previous.forcedGarbageCollection
-      } : {})
-    }
-    memoryState.value = 'complete'
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    memoryState.value = 'error'
-    memoryError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function manageMemoryAllocation(action: 'start' | 'stop' | 'clear'): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || tab.url.startsWith('bronom://home')) return
-  closeTransientPanels()
-  memoryPanelOpen.value = true
-  memoryState.value = 'running'
-  memoryError.value = ''
-  try {
-    const memoryAction = action === 'start'
-      ? 'start-allocation-sampling'
-      : action === 'stop'
-        ? 'stop-allocation-sampling'
-        : 'clear-allocation-sampling'
-    let report = await browser.measureMemory({ tabId: tab.id, action: memoryAction })
-    if (action === 'clear') report = await browser.measureMemory({ tabId: tab.id, action: 'measure' })
-    if (activeTab.value?.id !== tab.id) return
-    memoryReport.value = report
-    memoryState.value = 'complete'
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    memoryState.value = 'error'
-    memoryError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-function toggleMemoryReport(): void {
-  if (memoryPanelOpen.value) {
-    memoryPanelOpen.value = false
-    return
-  }
-  void runMemoryReport()
-}
-
-function debugTimestamp(value: string): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.valueOf())) return value
-  return new Intl.DateTimeFormat(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    fractionalSecondDigits: 3
-  }).format(date)
-}
-
-function formatSecurityDate(value: string): string {
-  const date = new Date(value)
-  if (!value || Number.isNaN(date.valueOf())) return 'Unavailable'
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date)
-}
-
-function debugRequestStatus(request: BrowserDebugReport['network'][number]): string {
-  if (request.error) return request.error
-  if (request.status !== undefined) return String(request.status)
-  return request.completedAt ? 'Complete' : 'Pending'
-}
-
-function networkRequestStatus(request: BrowserNetworkRequest): string {
-  if (request.error) return request.error.replace(/^net::/, '')
-  if (request.status !== undefined) return String(request.status)
-  return request.completedAt ? 'Done' : 'Pending'
-}
-
-function networkRequestDuration(request: BrowserNetworkRequest): string {
-  if (request.durationMs !== undefined) return formatNetworkMilliseconds(request.durationMs)
-  if (!request.completedAt) return '—'
-  const duration = Date.parse(request.completedAt) - Date.parse(request.startedAt)
-  return Number.isFinite(duration) ? formatNetworkMilliseconds(Math.max(0, duration)) : '—'
-}
-
-function networkWaterfallStyle(request: BrowserNetworkRequest): Record<string, string> {
-  const position = networkWaterfallPosition(request, networkWaterfallRange.value)
-  if (!position) return {}
-  return {
-    '--network-waterfall-left': `${position.leftPercent.toFixed(3)}%`,
-    '--network-waterfall-width': `${position.widthPercent.toFixed(3)}%`
-  }
-}
-
-function networkWaterfallLabel(request: BrowserNetworkRequest): string {
-  const position = networkWaterfallPosition(request, networkWaterfallRange.value)
-  if (!position) return 'Relative request timing unavailable'
-  const start = position.startOffsetMs > 0
-    ? `Started ${formatNetworkMilliseconds(position.startOffsetMs)} after the first visible request`
-    : 'Started with the first visible request'
-  const duration = position.durationMs === undefined
-    ? 'still pending'
-    : `${formatNetworkMilliseconds(position.durationMs)} total`
-  const waiting = request.waitingForResponseMs === undefined
-    ? ''
-    : `, ${formatNetworkMilliseconds(request.waitingForResponseMs)} waiting for the response`
-  return `${start}; ${duration}${waiting}`
-}
-
-function toggleNetworkSortDirection(): void {
-  networkSortDirection.value = networkSortDirection.value === 'asc' ? 'desc' : 'asc'
-}
-
-function setNetworkSortBy(event: Event): void {
-  networkSortBy.value = (event.target as HTMLSelectElement).value as BrowserNetworkRequestSortBy
-  networkSortDirection.value = ['duration', 'waiting', 'size', 'status'].includes(networkSortBy.value) ? 'desc' : 'asc'
-}
-
-function networkRequestName(request: Pick<BrowserNetworkRequest, 'url'>): string {
-  try {
-    const url = new URL(request.url)
-    return `${url.pathname.split('/').filter(Boolean).at(-1) || url.hostname}${url.search}`
-  } catch {
-    return request.url
-  }
-}
-
-function networkRequestSourceSummary(request: BrowserNetworkRequest): string {
-  if (!request.responseSource) return 'Source unavailable'
-  const source = networkResponseSourceLabel(request.responseSource)
-  if (request.responseSource !== 'service-worker' || !request.serviceWorkerResponseSource) return source
-  return `${source} · ${serviceWorkerResponseSourceLabel(request.serviceWorkerResponseSource)}`
-}
-
-function networkInitiatorLabel(type: string): string {
-  return type.replace(/[-_]/g, ' ').replace(/^\w/, (letter) => letter.toUpperCase())
-}
-
-function networkRelationshipCount(details: BrowserNetworkRequestDetails): number {
-  const relationships = details.relationships
-  if (!relationships) return 0
-  return Math.max(0, relationships.redirectChain.length - 1)
-    + (relationships.triggeredBy ? 1 : 0)
-    + relationships.dependents.length
-}
-
-function networkSourceLocation(url: string | undefined, lineNumber?: number, columnNumber?: number): string {
-  const position = lineNumber !== undefined
-    ? `:${lineNumber}${columnNumber !== undefined ? `:${columnNumber}` : ''}`
-    : ''
-  return `${url || 'inline script'}${position}`
-}
-
-function formatNetworkMilliseconds(value: number): string {
-  if (value > 0 && value < 1) return '<1 ms'
-  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 10_000 ? 1 : 2)} s`
-  const rounded = Math.round(value * 10) / 10
-  return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)} ms`
-}
-
-function networkTimingRows(timing: BrowserNetworkRequestDetails['timing']): Array<{
-  key: string
-  label: string
-  value: number
-  subphase?: boolean
-}> {
-  if (!timing) return []
-  const rows = [
-    { key: 'total', label: 'Total', value: timing.totalMs },
-    { key: 'setup', label: 'Before request sent', value: timing.queuedAndConnectingMs },
-    { key: 'proxy', label: 'Proxy negotiation', value: timing.proxyMs, subphase: true },
-    { key: 'dns', label: 'DNS lookup', value: timing.dnsMs, subphase: true },
-    { key: 'connection', label: 'Initial connection', value: timing.connectionMs, subphase: true },
-    { key: 'tls', label: 'TLS handshake', value: timing.tlsMs, subphase: true },
-    { key: 'service-worker', label: 'Service worker preparation', value: timing.serviceWorkerPreparationMs, subphase: true },
-    { key: 'sent', label: 'Request sent', value: timing.requestSentMs },
-    { key: 'waiting', label: 'Waiting (TTFB)', value: timing.waitingForResponseMs },
-    { key: 'headers', label: 'Response headers', value: timing.responseHeadersMs },
-    { key: 'download', label: 'Content download', value: timing.contentDownloadMs }
-  ]
-  return rows.filter((row): row is { key: string; label: string; value: number; subphase?: boolean } => (
-    row.value !== undefined && Number.isFinite(row.value)
-  ))
-}
-
-function networkTimingPercent(value: number, timing: BrowserNetworkRequestDetails['timing']): number {
-  const rows = networkTimingRows(timing)
-  const scale = timing?.totalMs && timing.totalMs > 0
-    ? timing.totalMs
-    : Math.max(...rows.map((row) => row.value), 1)
-  return Math.max(value > 0 ? 2 : 0, Math.min(100, value / scale * 100))
-}
-
 function resetConsoleView(closePanel = false): void {
-  consoleRequestSequence += 1
+  consolePanel.value?.reset(closePanel)
   if (closePanel && !keepsSeparatePanelOpen()) consolePanelOpen.value = false
-  consoleMessages.value = []
-  consoleState.value = 'idle'
-  consoleError.value = ''
-  consoleCopied.value = null
-  consoleCopiedEntryKey.value = null
 }
 
-function resetNetworkMonitorView(closePanel = false): void {
-  networkMonitorRequestSequence += 1
-  networkRouteRequestSequence += 1
-  networkRouteMutationSequence += 1
-  networkRequestDetailsSequence += 1
-  networkContentSearchSequence += 1
-  if (closePanel && !keepsSeparatePanelOpen()) networkMonitorOpen.value = false
-  networkRequests.value = []
-  networkMonitorState.value = 'idle'
-  networkMonitorError.value = ''
-  networkRequestDetails.value = null
-  networkSelectedRequestId.value = null
-  networkRequestDetailsLoading.value = false
-  networkDetailsCopied.value = null
-  resetNetworkReplayFeedback()
-  networkContentSearchOpen.value = false
-  networkContentSearchState.value = 'idle'
-  networkContentSearchResult.value = null
-  networkContentSearchError.value = ''
-  networkHarCopied.value = false
-  networkHarSaveState.value = 'idle'
-  networkHarExport.value = null
-  networkRoutes.value = []
-  networkRouteState.value = 'idle'
-  networkRouteError.value = ''
-  resetNetworkRouteDraft()
+async function refreshConsole(clear = false): Promise<void> {
+  await nextTick()
+  await consolePanel.value?.refresh(clear)
 }
 
-async function refreshNetworkMonitor(clear = false): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || tab.url.startsWith('bronom://home')) return
-  const requestSequence = ++networkMonitorRequestSequence
-  networkMonitorState.value = 'loading'
-  networkMonitorError.value = ''
-  networkHarCopied.value = false
-  networkHarSaveState.value = 'idle'
-  networkHarExport.value = null
-  if (clear) {
-    networkRequestDetails.value = null
-    networkSelectedRequestId.value = null
-    networkDetailsCopied.value = null
-    resetNetworkReplayFeedback()
-    networkContentSearchResult.value = null
-    networkContentSearchState.value = 'idle'
-  }
-  try {
-    const requests = await browser.listNetworkRequests(tab.id, clear)
-    if (requestSequence !== networkMonitorRequestSequence || activeTab.value?.id !== tab.id) return
-    networkRequests.value = requests
-    networkMonitorState.value = 'ready'
-    if (networkSelectedRequestId.value && !requests.some((request) => request.id === networkSelectedRequestId.value)) {
-      networkSelectedRequestId.value = null
-      networkRequestDetails.value = null
-    }
-  } catch (error) {
-    if (requestSequence !== networkMonitorRequestSequence || activeTab.value?.id !== tab.id) return
-    networkMonitorState.value = 'error'
-    networkMonitorError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function updateDiagnosticLogPreservation(event: Event): Promise<void> {
-  const tab = activeTab.value
-  if (!tab) return
-  const preserve = (event.currentTarget as HTMLInputElement).checked
-  await syncState(browser.setDiagnosticLogPreservation(tab.id, preserve))
-}
-
-async function refreshConsole(clear = false, silent = false): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || tab.url.startsWith('bronom://home')) return
-  const requestSequence = ++consoleRequestSequence
-  if (!silent) consoleState.value = 'loading'
-  consoleError.value = ''
-  if (clear) {
-    consoleCopied.value = null
-    consoleCopiedEntryKey.value = null
-  }
-  try {
-    const messages = await browser.listConsoleMessages(tab.id, clear)
-    if (requestSequence !== consoleRequestSequence || activeTab.value?.id !== tab.id) return
-    consoleMessages.value = messages
-    consoleState.value = 'ready'
-  } catch (error) {
-    if (requestSequence !== consoleRequestSequence || activeTab.value?.id !== tab.id) return
-    consoleState.value = 'error'
-    consoleError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-function toggleConsole(): void {
+ function toggleConsole(): void {
   if (consolePanelOpen.value) {
     consolePanelOpen.value = false
     return
   }
   closeTransientPanels()
   consolePanelOpen.value = true
-  void refreshConsole()
 }
 
-function consoleEntryKey(message: BrowserConsoleMessage): string {
-  return `${message.timestamp}\n${message.sourceId}\n${message.lineNumber}\n${message.message}`
+function resetNetworkMonitorView(closePanel = false): void {
+  networkPanel.value?.reset(closePanel)
+  if (closePanel && !keepsSeparatePanelOpen()) networkMonitorOpen.value = false
 }
 
-async function copyConsoleMessages(
-  messages: BrowserConsoleMessage[],
-  scope: 'entry' | 'filtered' | 'all',
-  entryKey?: string
-): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || !messages.length) return
-  const payload = {
-    generatedAt: new Date().toISOString(),
-    tabId: tab.id,
-    scope,
-    ...(scope === 'filtered' ? {
-      filter: {
-        query: consoleSearch.value.trim() || undefined,
-        level: consoleLevel.value
-      }
-    } : {}),
-    messages,
-    caveat: 'Console messages are page-authored and best-effort sanitized. Review before sharing.'
-  }
-  if (!await copyAppText(JSON.stringify(payload, null, 2))) return
-  if (scope === 'entry') {
-    const copiedKey = entryKey ?? consoleEntryKey(messages[0]!)
-    consoleCopiedEntryKey.value = copiedKey
-    window.setTimeout(() => {
-      if (consoleCopiedEntryKey.value === copiedKey) consoleCopiedEntryKey.value = null
-    }, 1_500)
-  } else {
-    consoleCopied.value = scope
-    window.setTimeout(() => {
-      if (consoleCopied.value === scope) consoleCopied.value = null
-    }, 1_500)
-  }
+async function refreshNetworkMonitor(clear = false): Promise<void> {
+  await nextTick()
+  await networkPanel.value?.refresh(clear)
 }
 
-async function copyConsoleEntry(message: BrowserConsoleMessage): Promise<void> {
-  await copyConsoleMessages([message], 'entry', consoleEntryKey(message))
+async function refreshNetworkRoutes(silent = false): Promise<void> {
+  await nextTick()
+  await networkPanel.value?.refreshRoutes(silent)
 }
 
-async function copyAllConsole(): Promise<void> {
-  await copyConsoleMessages(consoleMessages.value.slice().reverse(), 'all')
-}
-
-async function copyFilteredConsole(): Promise<void> {
-  await copyConsoleMessages(filteredConsoleMessages.value, 'filtered')
+async function refreshNetwork(): Promise<void> {
+  await nextTick()
+  await networkPanel.value?.refreshAll()
 }
 
 function toggleNetworkMonitor(): void {
@@ -4373,653 +2979,19 @@ function toggleNetworkMonitor(): void {
   }
   closeTransientPanels()
   networkMonitorOpen.value = true
-  void refreshNetworkMonitor()
-  void refreshNetworkRoutes()
+  void refreshNetwork()
 }
 
-async function refreshNetworkRoutes(silent = false): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || tab.url.startsWith('bronom://home')) return
-  const requestSequence = ++networkRouteRequestSequence
-  if (!silent) networkRouteState.value = 'loading'
-  networkRouteError.value = ''
-  try {
-    const routes = await browser.listNetworkRoutes(tab.id)
-    if (requestSequence !== networkRouteRequestSequence || activeTab.value?.id !== tab.id) return
-    networkRoutes.value = routes
-    networkRouteState.value = 'ready'
-  } catch (error) {
-    if (requestSequence !== networkRouteRequestSequence || activeTab.value?.id !== tab.id) return
-    networkRouteState.value = 'error'
-    networkRouteError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-function openRequestConditions(): void {
+async function openRequestConditions(): Promise<void> {
   if (!networkMonitorOpen.value) {
     closeTransientPanels()
     networkMonitorOpen.value = true
-    void refreshNetworkMonitor()
+    await nextTick()
   }
-  requestConditionsExpanded.value = true
-  void refreshNetworkRoutes()
+  await networkPanel.value?.openRequestConditions()
 }
 
-function parsedNetworkRouteHeaders(): Record<string, string> {
-  const source = networkRouteHeaders.value.trim()
-  if (!source) return {}
-  const parsed: unknown = JSON.parse(source)
-  if (
-    typeof parsed !== 'object'
-    || parsed === null
-    || Array.isArray(parsed)
-    || Object.values(parsed as Record<string, unknown>).some((value) => typeof value !== 'string')
-  ) throw new Error('Response headers must be a JSON object with string values.')
-  return parsed as Record<string, string>
-}
-
-function resetNetworkRouteDraft(): void {
-  networkRoutePattern.value = ''
-  networkRouteMethod.value = ''
-  networkRouteTimes.value = 1
-  networkRouteAbort.value = 'BlockedByClient'
-  networkRouteThrottle.value = 'slow-4g'
-  networkRouteStatus.value = 200
-  networkRouteHeaders.value = ''
-  networkRouteBody.value = ''
-}
-
-async function addNetworkRouteFromDraft(): Promise<void> {
-  const tab = activeTab.value
-  if (!tab) return
-  const requestSequence = ++networkRouteMutationSequence
-  networkRouteState.value = 'saving'
-  networkRouteError.value = ''
-  try {
-    const input: BrowserNetworkRouteInput = {
-      urlPattern: networkRoutePattern.value.trim(),
-      ...(networkRouteMode.value === 'throttle'
-        ? { throttle: networkRouteThrottle.value }
-        : {
-            times: networkRouteTimes.value,
-            ...(networkRouteMethod.value.trim() ? { method: networkRouteMethod.value.trim().toUpperCase() } : {})
-          }),
-      ...(networkRouteMode.value === 'abort'
-        ? { abort: networkRouteAbort.value }
-        : networkRouteMode.value === 'fulfill' ? {
-            response: {
-              status: networkRouteStatus.value,
-              headers: parsedNetworkRouteHeaders(),
-              body: networkRouteBody.value
-            }
-          } : {})
-    }
-    const routes = await browser.addNetworkRoute(tab.id, input)
-    if (requestSequence !== networkRouteMutationSequence || activeTab.value?.id !== tab.id) return
-    const nextState = await browser.getState()
-    if (requestSequence !== networkRouteMutationSequence || activeTab.value?.id !== tab.id) return
-    networkRoutes.value = routes
-    state.value = nextState
-    resetNetworkRouteDraft()
-    networkRouteState.value = 'ready'
-  } catch (error) {
-    if (requestSequence !== networkRouteMutationSequence || activeTab.value?.id !== tab.id) return
-    networkRouteState.value = 'error'
-    networkRouteError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function removeNetworkRoute(routeId: string): Promise<void> {
-  const tab = activeTab.value
-  if (!tab) return
-  const requestSequence = ++networkRouteMutationSequence
-  networkRouteState.value = 'saving'
-  networkRouteError.value = ''
-  try {
-    const routes = await browser.removeNetworkRoute(tab.id, routeId)
-    if (requestSequence !== networkRouteMutationSequence || activeTab.value?.id !== tab.id) return
-    const nextState = await browser.getState()
-    if (requestSequence !== networkRouteMutationSequence || activeTab.value?.id !== tab.id) return
-    networkRoutes.value = routes
-    state.value = nextState
-    networkRouteState.value = 'ready'
-  } catch (error) {
-    if (requestSequence !== networkRouteMutationSequence || activeTab.value?.id !== tab.id) return
-    networkRouteState.value = 'error'
-    networkRouteError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function moveNetworkRoute(routeId: string, direction: 'up' | 'down'): Promise<void> {
-  const tab = activeTab.value
-  if (!tab) return
-  const requestSequence = ++networkRouteMutationSequence
-  networkRouteState.value = 'saving'
-  networkRouteError.value = ''
-  try {
-    const routes = await browser.moveNetworkRoute(tab.id, routeId, direction)
-    if (requestSequence !== networkRouteMutationSequence || activeTab.value?.id !== tab.id) return
-    networkRoutes.value = routes
-    networkRouteState.value = 'ready'
-  } catch (error) {
-    if (requestSequence !== networkRouteMutationSequence || activeTab.value?.id !== tab.id) return
-    networkRouteState.value = 'error'
-    networkRouteError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function selectNetworkRequest(request: BrowserNetworkRequest): Promise<void> {
-  const tab = activeTab.value
-  if (!tab) return
-  const requestSequence = ++networkRequestDetailsSequence
-  networkSelectedRequestId.value = request.id
-  networkRequestDetails.value = null
-  networkDetailsCopied.value = null
-  resetNetworkReplayFeedback()
-  networkRequestDetailsLoading.value = true
-  networkMonitorError.value = ''
-  try {
-    const details = await browser.getNetworkRequestDetails(tab.id, request.id, 20_000)
-    if (
-      requestSequence === networkRequestDetailsSequence
-      && activeTab.value?.id === tab.id
-      && networkSelectedRequestId.value === request.id
-    ) {
-      networkRequestDetails.value = details
-    }
-  } catch (error) {
-    if (requestSequence !== networkRequestDetailsSequence || activeTab.value?.id !== tab.id) return
-    networkMonitorError.value = error instanceof Error ? error.message : String(error)
-  } finally {
-    if (requestSequence === networkRequestDetailsSequence && activeTab.value?.id === tab.id) {
-      networkRequestDetailsLoading.value = false
-    }
-  }
-}
-
-function resetNetworkReplayFeedback(): void {
-  if (networkReplayConfirmTimer !== undefined) {
-    window.clearTimeout(networkReplayConfirmTimer)
-    networkReplayConfirmTimer = undefined
-  }
-  networkReplayState.value = 'idle'
-  networkReplayMessage.value = ''
-}
-
-async function replaySelectedNetworkRequest(): Promise<void> {
-  const tab = activeTab.value
-  const request = networkRequestDetails.value
-  if (!tab || !request || request.resourceType.toLowerCase() !== 'xhr') return
-  const method = request.method.trim().toUpperCase()
-  const confirmationRequired = networkReplayRequiresConfirmation(method)
-  if (confirmationRequired && networkReplayState.value !== 'confirming') {
-    resetNetworkReplayFeedback()
-    networkReplayState.value = 'confirming'
-    networkReplayMessage.value = `Replaying ${method} can repeat writes or other side effects. Click again to confirm.`
-    networkReplayConfirmTimer = window.setTimeout(() => resetNetworkReplayFeedback(), 6_000)
-    return
-  }
-
-  if (networkReplayConfirmTimer !== undefined) {
-    window.clearTimeout(networkReplayConfirmTimer)
-    networkReplayConfirmTimer = undefined
-  }
-  networkReplayState.value = 'replaying'
-  networkReplayMessage.value = `Replaying ${method} XHR inside this tab…`
-  try {
-    const result = await browser.replayNetworkRequest(tab.id, request.id, confirmationRequired)
-    if (activeTab.value?.id !== tab.id) return
-    await refreshNetworkMonitor()
-    const replayed = networkRequests.value.find((candidate) => candidate.id === result.replayedRequest.id)
-    if (replayed) await selectNetworkRequest(replayed)
-    networkReplayState.value = 'replayed'
-    networkReplayMessage.value = `Replayed ${method} XHR. The new request is selected for inspection.`
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    networkReplayState.value = 'error'
-    networkReplayMessage.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function selectRelatedNetworkRequest(request: BrowserNetworkRequest): Promise<void> {
-  networkSearch.value = ''
-  networkResourceFilter.value = ''
-  networkFailuresOnly.value = false
-  await nextTick()
-  await selectNetworkRequest(request)
-}
-
-function closeNetworkContentSearch(): void {
-  networkContentSearchSequence += 1
-  networkContentSearchOpen.value = false
-  networkContentSearchState.value = 'idle'
-  networkContentSearchResult.value = null
-  networkContentSearchError.value = ''
-}
-
-function toggleNetworkContentSearch(): void {
-  if (networkContentSearchOpen.value) {
-    closeNetworkContentSearch()
-    return
-  }
-  networkContentSearchOpen.value = true
-  void nextTick(() => networkContentSearchInput.value?.focus())
-}
-
-async function runNetworkContentSearch(): Promise<void> {
-  const tab = activeTab.value
-  const query = networkContentSearchQuery.value.trim()
-  if (!tab || !query) return
-  const sequence = ++networkContentSearchSequence
-  networkContentSearchState.value = 'searching'
-  networkContentSearchError.value = ''
-  try {
-    const result = await browser.searchNetwork({
-      tabId: tab.id,
-      query,
-      caseSensitive: networkContentSearchCaseSensitive.value
-    })
-    if (sequence !== networkContentSearchSequence || activeTab.value?.id !== tab.id) return
-    networkContentSearchResult.value = result
-    networkContentSearchState.value = 'complete'
-  } catch (error) {
-    if (sequence !== networkContentSearchSequence || activeTab.value?.id !== tab.id) return
-    networkContentSearchState.value = 'error'
-    networkContentSearchError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function selectNetworkSearchMatch(match: BrowserNetworkSearchMatch): Promise<void> {
-  const request = networkRequests.value.find((candidate) => candidate.id === match.requestId)
-  if (!request) {
-    networkContentSearchError.value = 'That request is no longer in the bounded Network log. Refresh and search again.'
-    return
-  }
-  await selectNetworkRequest(request)
-}
-
-async function copySanitizedNetworkDetails(format: 'json' | BrowserNetworkRequestCopyFormat = 'json'): Promise<void> {
-  if (!networkRequestDetails.value) return
-  networkMonitorError.value = ''
-  try {
-    const text = format === 'json'
-      ? JSON.stringify(networkRequestDetails.value, null, 2)
-      : formatNetworkRequestCopy(networkRequestDetails.value, format)
-    if (!await copyAppText(text)) return
-    networkDetailsCopied.value = format
-    window.setTimeout(() => {
-      if (networkDetailsCopied.value === format) networkDetailsCopied.value = null
-    }, 1_500)
-  } catch (error) {
-    networkMonitorError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function copySanitizedNetworkHar(): Promise<void> {
-  const tab = activeTab.value
-  if (!tab) return
-  networkMonitorError.value = ''
-  try {
-    const har: BrowserNetworkHar = await browser.createNetworkHar({
-      tabId: tab.id,
-      query: networkSearch.value,
-      resourceType: networkResourceFilter.value || undefined,
-      errorsOnly: networkFailuresOnly.value,
-      includeBodies: false,
-      maxRequests: 100
-    })
-    if (activeTab.value?.id !== tab.id) return
-    if (!await copyAppText(JSON.stringify(har, null, 2))) return
-    if (activeTab.value?.id !== tab.id) return
-    networkHarCopied.value = true
-    window.setTimeout(() => (networkHarCopied.value = false), 1_500)
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    networkMonitorError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function saveSanitizedNetworkHar(): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || networkHarSaveState.value === 'saving') return
-  networkMonitorError.value = ''
-  networkHarSaveState.value = 'saving'
-  networkHarExport.value = null
-  try {
-    const exported = await browser.saveNetworkHar({
-      tabId: tab.id,
-      query: networkSearch.value,
-      resourceType: networkResourceFilter.value || undefined,
-      errorsOnly: networkFailuresOnly.value,
-      includeBodies: false,
-      maxRequests: 100
-    })
-    if (activeTab.value?.id !== tab.id) return
-    networkHarExport.value = exported
-    networkHarSaveState.value = 'saved'
-    window.setTimeout(() => {
-      if (networkHarSaveState.value === 'saved') networkHarSaveState.value = 'idle'
-    }, 2_500)
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    networkHarSaveState.value = 'idle'
-    networkMonitorError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function runDebugReport(): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || tab.url.startsWith('bronom://home')) return
-  closeTransientPanels()
-  debugReportPanelOpen.value = true
-  debugReportState.value = 'running'
-  debugReportError.value = ''
-  debugReportCopied.value = false
-  try {
-    const report = await browser.createDebugReport({
-      tabId: tab.id,
-      maxConsoleMessages: 30,
-      maxNetworkRequests: 30,
-      includeSuccessfulRequests: false
-    })
-    if (activeTab.value?.id !== tab.id) return
-    debugReport.value = report
-    debugReportState.value = 'complete'
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    debugReportState.value = 'error'
-    debugReportError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-function toggleDebugReport(): void {
-  if (debugReportPanelOpen.value) {
-    debugReportPanelOpen.value = false
-    return
-  }
-  void runDebugReport()
-}
-
-async function copyDebugReport(): Promise<void> {
-  if (!debugReport.value) return
-  if (!await copyAppText(JSON.stringify(debugReport.value, null, 2))) return
-  debugReportCopied.value = true
-  window.setTimeout(() => (debugReportCopied.value = false), 1_500)
-}
-
-async function manageRepro(action: 'start' | 'get' | 'stop' | 'clear'): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || tab.url.startsWith('bronom://home')) return
-  reproState.value = 'loading'
-  reproError.value = ''
-  reproCopied.value = false
-  reproPlaywrightCopied.value = false
-  try {
-    const recording = await browser.manageRepro(action, tab.id)
-    if (activeTab.value?.id !== tab.id) return
-    reproRecording.value = recording
-    reproState.value = 'ready'
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    reproState.value = 'error'
-    reproError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-function toggleReproRecorder(): void {
-  if (reproPanelOpen.value) {
-    reproPanelOpen.value = false
-    return
-  }
-  closeTransientPanels()
-  reproPanelOpen.value = true
-  void manageRepro('get')
-}
-
-async function startReproRecording(): Promise<void> {
-  await manageRepro('start')
-}
-
-async function stopReproRecording(): Promise<void> {
-  await manageRepro('stop')
-}
-
-async function clearReproRecording(): Promise<void> {
-  await manageRepro('clear')
-}
-
-async function copyReproRecording(): Promise<void> {
-  if (!reproRecording.value) return
-  if (!await copyAppText(JSON.stringify(reproRecording.value, null, 2))) return
-  reproCopied.value = true
-  window.setTimeout(() => (reproCopied.value = false), 1_500)
-}
-
-async function copyReproPlaywright(): Promise<void> {
-  if (!reproRecording.value) return
-  if (!await copyAppText(formatReproAsPlaywright(reproRecording.value))) return
-  reproPlaywrightCopied.value = true
-  window.setTimeout(() => (reproPlaywrightCopied.value = false), 1_500)
-}
-
-function formatReproElapsed(elapsedMs: number): string {
-  if (elapsedMs < 1_000) return `+${elapsedMs} ms`
-  return `+${(elapsedMs / 1_000).toFixed(elapsedMs < 10_000 ? 1 : 0)} s`
-}
-
-async function manageDomChanges(
-  action: 'start' | 'get' | 'stop' | 'clear',
-  quiet = false
-): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || tab.url.startsWith('bronom://home')) return
-  const request = ++domChangesRequestSequence
-  if (!quiet) domChangesState.value = 'loading'
-  domChangesError.value = ''
-  if (!quiet) domChangesCopied.value = false
-  try {
-    const report = await browser.manageDomChanges(action, tab.id)
-    if (request !== domChangesRequestSequence || activeTab.value?.id !== tab.id) return
-    domChangesReport.value = report
-    domChangesState.value = 'ready'
-  } catch (error) {
-    if (request !== domChangesRequestSequence || activeTab.value?.id !== tab.id) return
-    domChangesState.value = 'error'
-    domChangesError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-function toggleDomChanges(): void {
-  if (domChangesPanelOpen.value) {
-    domChangesPanelOpen.value = false
-    return
-  }
-  closeTransientPanels()
-  domChangesPanelOpen.value = true
-}
-
-async function copyDomChanges(): Promise<void> {
-  if (!domChangesReport.value) return
-  if (!await copyAppText(JSON.stringify(domChangesReport.value, null, 2))) return
-  domChangesCopied.value = true
-  window.setTimeout(() => (domChangesCopied.value = false), 1_500)
-}
-
-function domChangeDescription(entry: BrowserDomChangeEntry): string {
-  if (entry.kind === 'attributes') {
-    return `${entry.attributeName ?? 'Attribute'} changed${entry.occurrences > 1 ? ` ${entry.occurrences} times` : ''}`
-  }
-  if (entry.kind === 'text') return `Text content changed${entry.occurrences > 1 ? ` ${entry.occurrences} times` : ''} (content not recorded)`
-  const parts: string[] = []
-  if (entry.addedNodes) parts.push(`${entry.addedNodes} added`)
-  if (entry.removedNodes) parts.push(`${entry.removedNodes} removed`)
-  return parts.length ? parts.join(' · ') : 'Child structure changed'
-}
-
-async function manageVisualCompare(action: 'get' | 'set-baseline' | 'compare' | 'clear'): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || tab.url.startsWith('bronom://home')) return
-  visualCompareState.value = 'loading'
-  visualCompareError.value = ''
-  visualCompareCopied.value = false
-  try {
-    const report = await browser.visualCompare({ tabId: tab.id, action, settleMs: 200 })
-    if (activeTab.value?.id !== tab.id) return
-    visualCompareReport.value = report
-    visualCompareState.value = 'ready'
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    visualCompareState.value = 'error'
-    visualCompareError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-function toggleVisualCompare(): void {
-  if (visualComparePanelOpen.value) {
-    visualComparePanelOpen.value = false
-    return
-  }
-  closeTransientPanels()
-  visualComparePanelOpen.value = true
-  void manageVisualCompare('get')
-}
-
-async function copyVisualDiff(): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || visualCompareReport.value?.status !== 'compared') return
-  visualCompareError.value = ''
-  try {
-    await browser.copyVisualDiff(tab.id)
-    visualCompareCopied.value = true
-    window.setTimeout(() => (visualCompareCopied.value = false), 1_500)
-  } catch (error) {
-    visualCompareState.value = 'error'
-    visualCompareError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function refreshInspectorIssues(): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || tab.url.startsWith('bronom://home')) return
-  inspectorIssuesState.value = 'loading'
-  inspectorIssuesError.value = ''
-  inspectorIssuesCopied.value = false
-  try {
-    const report = await browser.listInspectorIssues(tab.id)
-    if (activeTab.value?.id !== tab.id) return
-    inspectorIssuesReport.value = report
-    inspectorIssuesState.value = 'ready'
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    inspectorIssuesState.value = 'error'
-    inspectorIssuesError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-function toggleInspectorIssues(): void {
-  if (inspectorIssuesOpen.value) {
-    inspectorIssuesOpen.value = false
-    return
-  }
-  closeTransientPanels()
-  inspectorIssuesOpen.value = true
-  void refreshInspectorIssues()
-}
-
-async function clearInspectorIssues(): Promise<void> {
-  const tab = activeTab.value
-  if (!tab) return
-  inspectorIssuesState.value = 'loading'
-  inspectorIssuesError.value = ''
-  try {
-    const report = await browser.listInspectorIssues(tab.id, true)
-    if (activeTab.value?.id !== tab.id) return
-    inspectorIssuesReport.value = report
-    inspectorIssuesState.value = 'ready'
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    inspectorIssuesState.value = 'error'
-    inspectorIssuesError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function copyInspectorIssues(): Promise<void> {
-  if (!inspectorIssuesReport.value) return
-  if (!await copyAppText(JSON.stringify(inspectorIssuesReport.value, null, 2))) return
-  inspectorIssuesCopied.value = true
-  window.setTimeout(() => (inspectorIssuesCopied.value = false), 1_500)
-}
-
-async function runAccessibilityAudit(): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || tab.url.startsWith('bronom://home')) return
-  closeTransientPanels()
-  accessibilityPanelOpen.value = true
-  accessibilityAuditState.value = 'running'
-  accessibilityAuditError.value = ''
-  accessibilityAudit.value = null
-  try {
-    const audit = await browser.runAccessibilityAudit({
-      tabId: tab.id,
-      standard: 'wcag-aa',
-      maxViolations: 50,
-      maxNodesPerViolation: 3
-    })
-    if (activeTab.value?.id !== tab.id) return
-    accessibilityAudit.value = audit
-    accessibilityAuditState.value = 'complete'
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    accessibilityAuditState.value = 'error'
-    accessibilityAuditError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-function toggleAccessibilityAudit(): void {
-  if (accessibilityPanelOpen.value) {
-    accessibilityPanelOpen.value = false
-    return
-  }
-  void runAccessibilityAudit()
-}
-
-async function runQualityAudit(): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || tab.url.startsWith('bronom://home')) return
-  closeTransientPanels()
-  qualityAuditPanelOpen.value = true
-  qualityAuditState.value = 'running'
-  qualityAuditError.value = ''
-  qualityAuditReport.value = null
-  qualityAuditCopied.value = false
-  try {
-    const report = await browser.runQualityAudit(tab.id)
-    if (activeTab.value?.id !== tab.id) return
-    qualityAuditReport.value = report
-    qualityAuditState.value = 'complete'
-  } catch (error) {
-    if (activeTab.value?.id !== tab.id) return
-    qualityAuditState.value = 'error'
-    qualityAuditError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-function toggleQualityAudit(): void {
-  if (qualityAuditPanelOpen.value) {
-    qualityAuditPanelOpen.value = false
-    return
-  }
-  void runQualityAudit()
-}
-
-async function copyQualityAudit(): Promise<void> {
-  if (!qualityAuditReport.value) return
-  if (!await copyAppText(JSON.stringify(qualityAuditReport.value, null, 2))) return
-  qualityAuditCopied.value = true
-  window.setTimeout(() => (qualityAuditCopied.value = false), 1_500)
-}
-
-function dismissAppToast(id: number): void {
+ function dismissAppToast(id: number): void {
   const timer = appToastTimers.get(id)
   if (timer !== undefined) window.clearTimeout(timer)
   appToastTimers.delete(id)
@@ -5054,7 +3026,7 @@ async function copyAppText(text: string): Promise<boolean> {
     await browser.copyText(text)
     return true
   } catch (error) {
-    showAppToast('error', 'Copy failed', friendlyUiError(error, 'The system clipboard did not accept the text.'))
+    showAppToast('error', t('runtime.capture.copyFailed'), friendlyUiError(error, t('runtime.capture.clipboardFailed')))
     return false
   }
 }
@@ -5072,12 +3044,12 @@ async function copyPageSnapshot(): Promise<void> {
     pageSnapshotState.value = 'copied'
     showAppToast(
       'success',
-      'Page snapshot copied',
-      `${result.characters.toLocaleString()} characters of headings, controls, and visible text are ready to paste into your agent chat${result.truncated ? ' (bounded at 30,000 characters).' : '.'}`
+      t('runtimeActions.pageSnapshot.copied'),
+      t('runtimeActions.pageSnapshot.ready', { count: localNumber(result.characters), limit: t(result.truncated ? 'runtimeActions.pageSnapshot.bounded' : 'runtimeActions.pageSnapshot.period') })
     )
   } catch (error) {
     pageSnapshotState.value = 'error'
-    showAppToast('error', 'Page snapshot failed', friendlyUiError(error, 'Could not copy the current page snapshot.'))
+    showAppToast('error', t('runtime.toast.pageSnapshotFailed'), friendlyUiError(error, t('runtime.toast.pageSnapshotDescription')))
   }
   pageSnapshotResetTimer = window.setTimeout(() => {
     if (pageSnapshotState.value !== 'copying') pageSnapshotState.value = 'idle'
@@ -5124,8 +3096,8 @@ async function toggleElementPicker(mode: ElementPickerMode = 'context'): Promise
     if (result.copied) {
       showAppToast(
         'success',
-        mode === 'screenshot' ? 'Element screenshot copied' : 'Element copied',
-        mode === 'screenshot' ? 'Paste the PNG into your agent chat.' : 'Safe DOM context is ready to paste into your agent chat.'
+        t(mode === 'screenshot' ? 'runtime.toast.elementScreenshotCopied' : 'runtime.toast.elementCopied'),
+        t(mode === 'screenshot' ? 'runtime.capture.pastePng' : 'runtime.capture.safeContext')
       )
       resetElementPickerSoon()
     }
@@ -5135,8 +3107,8 @@ async function toggleElementPicker(mode: ElementPickerMode = 'context'): Promise
     elementPickerState.value = 'error'
     showAppToast(
       'error',
-      mode === 'screenshot' ? 'Element screenshot failed' : 'Element selection failed',
-      friendlyUiError(error, mode === 'screenshot' ? 'Could not capture or copy the selected element.' : 'Could not copy the selected element context.')
+      t(mode === 'screenshot' ? 'runtime.toast.elementScreenshotFailed' : 'runtime.toast.elementFailed'),
+      friendlyUiError(error, t(mode === 'screenshot' ? 'runtime.toast.elementScreenshotDescription' : 'runtime.toast.elementDescription'))
     )
     resetElementPickerSoon()
   }
@@ -5177,16 +3149,16 @@ async function toggleAreaCapture(): Promise<void> {
     areaCaptureTabId = undefined
     areaCaptureState.value = result.copied ? 'copied' : 'idle'
     if (result.copied) {
-      showAppToast('success', 'Area screenshot copied', 'Paste the PNG into your agent chat.')
+      showAppToast('success', t('runtime.toast.areaCopied'), t('runtime.capture.pastePng'))
       resetAreaCaptureSoon()
     }
   } catch (error) {
     if (areaCaptureTabId !== tabId) return
     areaCaptureTabId = undefined
-    const message = friendlyUiError(error, 'Could not capture this area.')
-    areaCaptureError.value = `Could not copy area: ${message}`
+    const message = friendlyUiError(error, t('runtimeActions.capture.areaFallback'))
+    areaCaptureError.value = t('runtimeActions.capture.areaCopyFailed', { error: message })
     areaCaptureState.value = 'error'
-    showAppToast('error', 'Screenshot failed', message)
+    showAppToast('error', t('runtime.capture.screenshotFailed'), message)
     resetAreaCaptureSoon()
   }
 }
@@ -5211,17 +3183,17 @@ async function capturePageScreenshot(mode: 'viewport' | 'full-page'): Promise<vo
     areaCaptureTabId = undefined
     areaCaptureState.value = result.copied ? 'copied' : 'idle'
     if (result.copied) {
-      showAppToast('success', mode === 'full-page' ? 'Full-page screenshot copied' : 'Viewport screenshot copied', 'Paste the PNG into your agent chat.')
+      showAppToast('success', t(mode === 'full-page' ? 'runtime.toast.fullCopied' : 'runtime.toast.viewportCopied'), t('runtime.capture.pastePng'))
       resetAreaCaptureSoon()
     }
   } catch (error) {
     if (areaCaptureTabId !== tabId) return
     areaCaptureTabId = undefined
-    const captureName = mode === 'full-page' ? 'full page' : 'viewport'
-    const message = friendlyUiError(error, `Could not capture the ${captureName}.`)
-    areaCaptureError.value = `Could not copy ${captureName}: ${message}`
+    const captureName = t(mode === 'full-page' ? 'runtimeActions.capture.fullPage' : 'runtimeActions.capture.viewport')
+    const message = friendlyUiError(error, t('runtimeActions.capture.pageFallback', { area: captureName }))
+    areaCaptureError.value = t('runtimeActions.capture.pageCopyFailed', { area: captureName, error: message })
     areaCaptureState.value = 'error'
-    showAppToast('error', 'Screenshot failed', message)
+    showAppToast('error', t('runtime.capture.screenshotFailed'), message)
     resetAreaCaptureSoon()
   }
 }
@@ -5236,9 +3208,10 @@ function applyTheme(next: AppSettings): void {
   document.documentElement.style.colorScheme = effectiveTheme === 'light' ? 'light' : 'dark'
 }
 
-function handleSystemThemeChange(theme: 'light' | 'dark'): void {
-  systemTheme.value = theme
-  if (settings.value.theme === 'system') applyTheme(settings.value)
+watch([settings, systemTheme], () => applyTheme(settings.value), { deep: true, immediate: true })
+
+function handleExtractedSettingError(error: unknown): void {
+  showAppToast('error', t('runtime.toast.settingNotSaved'), friendlyUiError(error, t('runtime.toast.settingKept')))
 }
 
 async function applySettingsChange(operation: Promise<AppSettings>): Promise<boolean> {
@@ -5246,7 +3219,7 @@ async function applySettingsChange(operation: Promise<AppSettings>): Promise<boo
     applyTheme(await operation)
     return true
   } catch (error) {
-    showAppToast('error', 'Setting not saved', friendlyUiError(error, 'Bronom kept your previous setting.'))
+    showAppToast('error', t('runtime.toast.settingNotSaved'), friendlyUiError(error, t('runtime.toast.settingKept')))
     return false
   }
 }
@@ -5255,38 +3228,8 @@ async function selectTheme(theme: ThemeName): Promise<boolean> {
   return applySettingsChange(window.bronomSettings.setTheme(theme))
 }
 
-async function selectInterfaceScale(event: Event): Promise<void> {
-  const input = event.target as HTMLSelectElement
-  const scale = Number(input.value) as InterfaceScale
-  if (!(await applySettingsChange(window.bronomSettings.setInterfaceScale(scale)))) {
-    input.value = String(settings.value.interfaceScale)
-  }
-}
-
 async function selectSearchEngine(searchEngine: SearchEngineName): Promise<boolean> {
   return applySettingsChange(window.bronomSettings.setSearchEngine(searchEngine))
-}
-
-async function setHideInTray(event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement
-  if (!(await applySettingsChange(window.bronomSettings.setHideInTray(input.checked)))) {
-    input.checked = settings.value.hideInTray
-  }
-}
-
-async function setAttentionSound(event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement
-  if (!(await applySettingsChange(window.bronomSettings.setAttentionSound(input.checked)))) {
-    input.checked = settings.value.attentionSound
-  }
-}
-
-async function setAttentionSoundCue(event: Event): Promise<void> {
-  const input = event.target as HTMLSelectElement
-  const cue = input.value as AttentionSoundCue
-  if (!(await applySettingsChange(window.bronomSettings.setAttentionSoundCue(cue)))) {
-    input.value = settings.value.attentionSoundCue
-  }
 }
 
 function downloadSettingsFailure(error: unknown): void {
@@ -5296,7 +3239,7 @@ function downloadSettingsFailure(error: unknown): void {
 
 async function chooseDownloadDirectory(): Promise<void> {
   downloadSettingsState.value = 'working'
-  downloadSettingsMessage.value = 'Opening the folder picker…'
+  downloadSettingsMessage.value = t('runtime.downloadSettings.openingPicker')
   try {
     const result = await window.bronomSettings.chooseDownloadDirectory()
     if (result.canceled) {
@@ -5306,7 +3249,7 @@ async function chooseDownloadDirectory(): Promise<void> {
     }
     applyTheme(result.settings)
     downloadSettingsState.value = 'saved'
-    downloadSettingsMessage.value = 'New website downloads will use this folder.'
+    downloadSettingsMessage.value = t('runtime.downloadSettings.folderSelected')
   } catch (error) {
     downloadSettingsFailure(error)
   }
@@ -5315,13 +3258,13 @@ async function chooseDownloadDirectory(): Promise<void> {
 async function setAskWhereToSaveDownloads(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement
   downloadSettingsState.value = 'working'
-  downloadSettingsMessage.value = 'Saving download preferences…'
+  downloadSettingsMessage.value = t('runtime.downloadSettings.saving')
   try {
     applyTheme(await window.bronomSettings.setAskWhereToSaveDownloads(input.checked))
     downloadSettingsState.value = 'saved'
     downloadSettingsMessage.value = input.checked
-      ? 'Bronom will ask where to save each new website download.'
-      : 'New website downloads will save automatically.'
+      ? t('runtime.downloadSettings.ask')
+      : t('runtime.downloadSettings.automatic')
   } catch (error) {
     input.checked = settings.value.askWhereToSaveDownloads
     downloadSettingsFailure(error)
@@ -5330,7 +3273,7 @@ async function setAskWhereToSaveDownloads(event: Event): Promise<void> {
 
 async function openDownloadDirectory(): Promise<void> {
   downloadSettingsState.value = 'working'
-  downloadSettingsMessage.value = 'Opening the download folder…'
+  downloadSettingsMessage.value = t('runtime.downloadSettings.openingFolder')
   try {
     await window.bronomSettings.openDownloadDirectory()
     downloadSettingsState.value = 'idle'
@@ -5342,11 +3285,11 @@ async function openDownloadDirectory(): Promise<void> {
 
 async function resetDownloadSettings(): Promise<void> {
   downloadSettingsState.value = 'working'
-  downloadSettingsMessage.value = 'Restoring download defaults…'
+  downloadSettingsMessage.value = t('runtime.downloadSettings.restoring')
   try {
     applyTheme(await window.bronomSettings.resetDownloads())
     downloadSettingsState.value = 'saved'
-    downloadSettingsMessage.value = 'Downloads will use the default folder and save automatically.'
+    downloadSettingsMessage.value = t('runtime.downloadSettings.restored')
   } catch (error) {
     downloadSettingsFailure(error)
   }
@@ -5372,9 +3315,9 @@ async function sleepInactiveTabsNow(): Promise<void> {
 }
 
 function memorySaverTimeoutLabel(timeoutMinutes: number): string {
-  if (timeoutMinutes < 60) return `${timeoutMinutes} minutes`
+  if (timeoutMinutes < 60) return t('runtimeActions.memory.minutes', { count: localNumber(timeoutMinutes) }, timeoutMinutes)
   const hours = timeoutMinutes / 60
-  return `${hours} ${hours === 1 ? 'hour' : 'hours'}`
+  return t('runtimeActions.memory.hours', { count: localNumber(hours) }, hours)
 }
 
 function testAttentionSound(): void {
@@ -5385,7 +3328,7 @@ async function setMcpAuthentication(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement
   if (!input.checked) {
     const confirmed = window.confirm(
-      'Disable MCP authentication? Any process on this computer will be able to control your logged-in browser and attach local files.'
+      t('runtimeActions.mcp.disableConfirm')
     )
     if (!confirmed) {
       input.checked = true
@@ -5400,15 +3343,15 @@ async function setMcpAuthentication(event: Event): Promise<void> {
 async function applyMcpPort(): Promise<void> {
   if (!mcpPortValid.value) {
     mcpPortState.value = 'error'
-    mcpPortMessage.value = `Choose a whole number from ${MIN_MCP_PORT} through ${MAX_MCP_PORT}.`
+    mcpPortMessage.value = t('runtimeActions.mcp.invalidPort', { min: MIN_MCP_PORT, max: MAX_MCP_PORT })
     return
   }
   mcpPortState.value = 'saving'
-  mcpPortMessage.value = `Moving the MCP listener to port ${parsedMcpPort.value}…`
+  mcpPortMessage.value = t('runtimeActions.mcp.moving', { port: parsedMcpPort.value })
   try {
     applyTheme(await window.bronomSettings.setMcpPort(parsedMcpPort.value))
     mcpPortState.value = 'saved'
-    mcpPortMessage.value = `MCP port ${parsedMcpPort.value} is active.`
+    mcpPortMessage.value = t('runtimeActions.mcp.active', { port: parsedMcpPort.value })
   } catch (error) {
     mcpPortState.value = 'error'
     mcpPortMessage.value = error instanceof Error ? error.message : String(error)
@@ -5464,10 +3407,10 @@ async function fillSelectedCredential(credential: CredentialSummary): Promise<vo
   credentialFillState.value = 'filling'
   try {
     const filled = await window.bronomCredentials.fill(tabId, credential.id)
-    if (!filled) throw new Error('The saved account no longer matches this website.')
-    showAppToast('success', 'Password filled', `${credential.username || 'Unnamed account'} was filled. Agents remain paused.`)
+    if (!filled) throw new Error(t('runtimeActions.credential.noLongerMatches'))
+    showAppToast('success', t('runtime.toast.passwordFilled'), t('runtime.toast.passwordFilledDescription', { username: credential.username || t('credentialPicker.unnamed') }))
   } catch (error) {
-    showAppToast('error', 'Password fill failed', friendlyUiError(error, 'The saved password could not be filled.'))
+    showAppToast('error', t('runtime.toast.passwordFillFailed'), friendlyUiError(error, t('runtime.toast.passwordFillDescription')))
   } finally {
     credentialFillState.value = 'idle'
   }
@@ -5518,27 +3461,27 @@ function handleCredentialPickerKeydown(event: KeyboardEvent): void {
 async function removeSavedCredential(id: string): Promise<void> {
   try {
     const removed = await window.bronomCredentials.remove(id)
-    if (!removed) throw new Error('The saved account no longer exists.')
-    showAppToast('success', 'Password removed', 'The saved account was removed from this device.')
+    if (!removed) throw new Error(t('runtimeActions.credential.noLongerExists'))
+    showAppToast('success', t('runtime.toast.passwordRemoved'), t('runtime.toast.passwordRemovedDescription'))
   } catch (error) {
-    showAppToast('error', 'Remove password failed', friendlyUiError(error, 'The saved account could not be removed.'))
+    showAppToast('error', t('runtime.toast.passwordRemoveFailed'), friendlyUiError(error, t('runtime.toast.passwordRemoveDescription')))
   }
 }
 
 function permissionLabel(permission: string): string {
   const labels: Record<string, string> = {
-    'clipboard-read': 'Clipboard read',
-    'clipboard-sanitized-write': 'Clipboard write',
-    'display-capture': 'Screen capture',
-    fileSystem: 'Files and folders',
-    fullscreen: 'Fullscreen',
-    geolocation: 'Location',
-    'idle-detection': 'Activity detection',
-    media: 'Camera and microphone',
-    notifications: 'Notifications',
-    'storage-access': 'Third-party storage',
-    'top-level-storage-access': 'Related-site storage',
-    'window-management': 'Window management'
+    'clipboard-read': t('runtime.permissions.clipboardRead'),
+    'clipboard-sanitized-write': t('runtime.permissions.clipboardWrite'),
+    'display-capture': t('runtime.permissions.display'),
+    fileSystem: t('runtime.permissions.files'),
+    fullscreen: t('runtime.permissions.fullscreen'),
+    geolocation: t('runtime.permissions.location'),
+    'idle-detection': t('runtime.permissions.activity'),
+    media: t('runtime.permissions.media'),
+    notifications: t('runtime.permissions.notifications'),
+    'storage-access': t('runtime.permissions.storage'),
+    'top-level-storage-access': t('runtime.permissions.relatedStorage'),
+    'window-management': t('runtime.permissions.windows')
   }
   return labels[permission] ?? permission.replaceAll('-', ' ')
 }
@@ -5761,7 +3704,7 @@ async function loadCommercialLicenseState(): Promise<void> {
 async function activateCommercialLicense(): Promise<void> {
   const key = commercialLicenseKey.value.trim()
   if (!key) {
-    commercialLicenseError.value = 'Enter the supporter key from your Creem receipt.'
+    commercialLicenseError.value = t('runtime.license.enterKey')
     return
   }
   commercialLicenseAction.value = 'activating'
@@ -5789,7 +3732,7 @@ async function refreshCommercialLicense(): Promise<void> {
 }
 
 async function deactivateCommercialLicense(): Promise<void> {
-  if (!window.confirm('Deactivate this Bronom installation and free its device slot?')) return
+  if (!window.confirm(t('runtimeDetails.deactivate'))) return
   commercialLicenseAction.value = 'deactivating'
   commercialLicenseError.value = ''
   try {
@@ -6047,9 +3990,16 @@ function resetPanelDockSize(): void {
   reportShellHeight()
 }
 
+useShellWindowLifecycle({
+  shell,
+  onKeyDown: handleKeyDown,
+  onWindowResize: handleWindowResize,
+  onShellResize: reportShellHeight
+})
+
 onMounted(async () => {
   bindFoley()
-  unsubscribe = browser.onStateChanged((next) => (state.value = next))
+  await browserStore.initialize()
   unsubscribeMcpActivity = browser.onMcpTabActivity(handleMcpTabActivity)
   unsubscribeDownloads = window.bronomDownloads.onChanged(applyDownloads)
   unsubscribeBookmarks = window.bronomBookmarks.onChanged((next) => (bookmarks.value = next))
@@ -6072,8 +4022,6 @@ onMounted(async () => {
       window.bronomAddressOverlay.hide()
     })
   }
-  unsubscribeSettings = window.bronomSettings.onChanged(applyTheme)
-  unsubscribeSystemTheme = window.bronomSettings.onSystemThemeChanged(handleSystemThemeChange)
   unsubscribePermissions = window.bronomPermissions.onChanged((next) => (sitePermissions.value = next))
   unsubscribeCredentials = window.bronomCredentials.onChanged((next) => (credentials.value = next))
   unsubscribeLicense = window.bronomLicense.onChanged((next) => (commercialLicense.value = next))
@@ -6083,12 +4031,15 @@ onMounted(async () => {
   })
   unsubscribeHelp = window.bronomShell.onHelpRequested(handleHelpRequested)
   unsubscribeClipboardFailed = window.bronomShell.onClipboardFailed((message) => {
-    showAppToast('error', 'Copy failed', friendlyUiError(message, 'The system clipboard did not accept the text.'))
+    showAppToast('error', t('runtime.capture.copyFailed'), friendlyUiError(message, t('runtime.capture.clipboardFailed')))
   })
   unsubscribeActionFailed = window.bronomShell.onActionFailed(({ action, message }) => {
-    const normalizedAction = action.trim() || 'browser action'
-    const title = `${normalizedAction.charAt(0).toUpperCase()}${normalizedAction.slice(1)} failed`
-    showAppToast('error', title, friendlyUiError(message, 'The requested browser action could not be completed.'))
+    const title = action === 'reload'
+      ? t('runtimeActions.actionFailure.reload')
+      : action === 'save link'
+        ? t('runtimeActions.actionFailure.saveLink')
+        : t('runtimeActions.actionFailure.generic')
+    showAppToast('error', title, friendlyUiError(message, t('runtime.toast.actionFailed')))
   })
   unsubscribePanelRequested = window.bronomPanelWindow.onPanelRequested((panel) => {
     if (isDetachedPanelWindow) void showDetachedPanel(panel)
@@ -6107,10 +4058,7 @@ onMounted(async () => {
   unsubscribePanelClosed = window.bronomPanelWindow.onClosed(() => {
     if (!isDetachedPanelWindow) closeDockedPanels()
   })
-  const [browserState, appSettings, nativeSystemTheme, systemDownloadDirectory, permissions, appUpdateState, mcpControlState, credentialStatus, savedCredentials, savedDownloads, savedBookmarks, savedVisitHistory, savedCommercialLicense] = await Promise.all([
-    browser.getState(),
-    window.bronomSettings.get(),
-    window.bronomSettings.getSystemTheme(),
+  const [systemDownloadDirectory, permissions, appUpdateState, mcpControlState, credentialStatus, savedCredentials, savedDownloads, savedBookmarks, savedVisitHistory, savedCommercialLicense] = await Promise.all([
     window.bronomSettings.getDefaultDownloadDirectory(),
     window.bronomPermissions.list(),
     window.bronomUpdates.getState(),
@@ -6122,10 +4070,7 @@ onMounted(async () => {
     window.bronomHistory.list(),
     window.bronomLicense.getState()
   ])
-  state.value = browserState
-  systemTheme.value = nativeSystemTheme
   defaultDownloadDirectory.value = systemDownloadDirectory
-  applyTheme(appSettings)
   sitePermissions.value = permissions
   updateState.value = appUpdateState
   mcpControl.value = mcpControlState
@@ -6136,16 +4081,13 @@ onMounted(async () => {
   for (const download of savedDownloads) knownDownloadIds.add(download.id)
   bookmarks.value = savedBookmarks
   visitHistory.value = savedVisitHistory
-  window.addEventListener('keydown', handleKeyDown)
-  window.addEventListener('resize', handleWindowResize)
   await nextTick()
-  resizeObserver = new ResizeObserver(reportShellHeight)
-  if (shell.value) resizeObserver.observe(shell.value)
   reportShellHeight()
 })
 
 onBeforeUnmount(() => {
-  unsubscribe?.()
+  browserStore.dispose()
+  settingsStore.dispose()
   unsubscribeMcpActivity?.()
   unsubscribeDownloads?.()
   unsubscribeBookmarks?.()
@@ -6153,8 +4095,6 @@ onBeforeUnmount(() => {
   unsubscribeMcpControl?.()
   unsubscribeUserAttention?.()
   unsubscribeShortcutRequested?.()
-  unsubscribeSettings?.()
-  unsubscribeSystemTheme?.()
   unsubscribePermissions?.()
   unsubscribeCredentials?.()
   unsubscribeLicense?.()
@@ -6171,22 +4111,17 @@ onBeforeUnmount(() => {
   unsubscribePanelActive?.()
   unsubscribePanelRedock?.()
   unsubscribePanelClosed?.()
-  resizeObserver?.disconnect()
   if (updateNoticeDismissTimer !== undefined) window.clearTimeout(updateNoticeDismissTimer)
   if (elementPickerResetTimer !== undefined) window.clearTimeout(elementPickerResetTimer)
   if (pageSnapshotResetTimer !== undefined) window.clearTimeout(pageSnapshotResetTimer)
   if (areaCaptureResetTimer !== undefined) window.clearTimeout(areaCaptureResetTimer)
   if (pdfExportResetTimer !== undefined) window.clearTimeout(pdfExportResetTimer)
-  if (consoleRefreshTimer !== undefined) window.clearInterval(consoleRefreshTimer)
-  if (domChangesRefreshTimer !== undefined) window.clearInterval(domChangesRefreshTimer)
-  if (networkReplayConfirmTimer !== undefined) window.clearTimeout(networkReplayConfirmTimer)
+  disposeDiagnosticsController()
   for (const timer of mcpActivityTimers.values()) window.clearTimeout(timer)
   mcpActivityTimers.clear()
   for (const timer of appToastTimers.values()) window.clearTimeout(timer)
   appToastTimers.clear()
   activeMcpRequestsByTab.clear()
-  window.removeEventListener('keydown', handleKeyDown)
-  window.removeEventListener('resize', handleWindowResize)
   window.removeEventListener('pointermove', movePanelResize)
   window.removeEventListener('pointerup', finishPanelResize)
   window.removeEventListener('pointercancel', finishPanelResize)
@@ -6221,24 +4156,24 @@ onBeforeUnmount(() => {
         class="app-home-button"
         :class="{ active: homeTab?.active }"
         type="button"
-        title="Open Bronom Home"
-        aria-label="Open Bronom Home"
+        :title="t('shell.home.open')"
+        :aria-label="t('shell.home.open')"
         :aria-current="homeTab?.active ? 'page' : undefined"
         @click="openApplicationHome"
       >
-        <span v-if="homeTab?.loading" class="spinner" aria-label="Loading" />
+        <span v-if="homeTab?.loading" class="spinner" :aria-label="t('shell.loading')" />
         <IconDashboard v-else aria-hidden="true" />
-        <span>Home</span>
+        <span>{{ t('shell.home.label') }}</span>
       </button>
       <span class="topbar-divider" aria-hidden="true" />
-      <div class="tabs-strip" role="tablist" aria-label="Browser tabs and workspaces">
+      <div class="tabs-strip" role="tablist" :aria-label="t('shell.tabs.list')">
         <template v-for="workspace in state.mcpTabGroups" :key="workspace.id">
           <button
             class="tab-group-label"
             :class="{ active: tabGroupContainsActiveTab(workspace.id) }"
             :style="tabGroupColorStyle(workspace.color)"
-            :title="`${isTabGroupCollapsed(workspace.id) ? 'Expand' : 'Collapse'} workspace ${workspace.name} · ${workspace.id}`"
-            :aria-label="`${isTabGroupCollapsed(workspace.id) ? 'Expand' : 'Collapse'} workspace ${workspace.name}, ${tabGroupTabCount(workspace.id)} ${tabGroupTabCount(workspace.id) === 1 ? 'tab' : 'tabs'}`"
+            :title="t(isTabGroupCollapsed(workspace.id) ? 'runtime.tabs.expand' : 'runtime.tabs.collapse', { name: workspace.name, id: workspace.id })"
+            :aria-label="t(isTabGroupCollapsed(workspace.id) ? 'runtime.tabs.expandAria' : 'runtime.tabs.collapseAria', { name: workspace.name, count: localNumber(tabGroupTabCount(workspace.id)) }, tabGroupTabCount(workspace.id))"
             :aria-expanded="!isTabGroupCollapsed(workspace.id)"
             type="button"
             @click="toggleTabGroup(workspace.id)"
@@ -6249,7 +4184,7 @@ onBeforeUnmount(() => {
             <IconKeep
               v-if="workspace.isDefault"
               class="tab-group-default-badge"
-              aria-label="Default workspace for new tabs"
+              :aria-label="t('shell.tabs.defaultWorkspace')"
             />
             <span>{{ workspace.name }}</span>
             <span class="tab-group-count" aria-hidden="true">{{ tabGroupTabCount(workspace.id) }}</span>
@@ -6258,8 +4193,8 @@ onBeforeUnmount(() => {
             class="new-tab workspace-new-tab"
             type="button"
             :style="tabGroupColorStyle(workspace.color)"
-            :title="`New tab in ${workspace.name} workspace`"
-            :aria-label="`New tab in ${workspace.name} workspace`"
+            :title="t('runtime.tabs.newTab', { name: workspace.name })"
+            :aria-label="t('runtime.tabs.newTab', { name: workspace.name })"
             @click="newTabInWorkspace(workspace.id)"
           ><IconAdd aria-hidden="true" /></button>
         <template v-for="tab in tabGroupTabs(workspace.id)" :key="tab.id">
@@ -6295,33 +4230,33 @@ onBeforeUnmount(() => {
           @drop="finishTabDrop($event, tab)"
           @dragend="clearTabDrag"
         >
-          <span v-if="tab.loading" class="spinner" aria-label="Loading" />
-          <IconError v-else-if="tab.pageProblem" class="favicon-fallback tab-problem-icon" aria-label="Page needs attention" />
+          <span v-if="tab.loading" class="spinner" :aria-label="t('shell.loading')" />
+          <IconError v-else-if="tab.pageProblem" class="favicon-fallback tab-problem-icon" :aria-label="t('shell.tabs.pageAttention')" />
           <img v-else-if="tab.faviconDataUrl" class="favicon-image" :src="tab.faviconDataUrl" alt="" draggable="false" />
           <span v-else-if="tab.url === 'about:blank'" class="favicon-fallback" aria-hidden="true">✦</span>
           <IconLanguage v-else class="favicon-fallback" aria-hidden="true" />
-          <span class="tab-title">{{ tab.title || 'New tab' }}</span>
-          <IconBedtime v-if="tab.sleeping" class="tab-sleep-mark" aria-label="Sleeping to save resources" />
+          <span class="tab-title">{{ tab.title || t('tabSearch.newTabTitle') }}</span>
+          <IconBedtime v-if="tab.sleeping" class="tab-sleep-mark" :aria-label="t('shell.tabs.sleeping')" />
           <IconHorizontalSplit
             v-if="state.splitView?.orientation === 'horizontal' && (state.splitView.firstTabId === tab.id || state.splitView.secondTabId === tab.id)"
             class="tab-split-mark"
-            aria-label="Visible in stacked split view"
+            :aria-label="t('shell.tabs.stackedVisible')"
           />
           <IconVerticalSplit
             v-else-if="state.splitView && (state.splitView.firstTabId === tab.id || state.splitView.secondTabId === tab.id)"
             class="tab-split-mark"
-            aria-label="Visible in side-by-side split view"
+            :aria-label="t('shell.tabs.sideVisible')"
           />
-          <IconSpeed v-if="tab.emulation" class="tab-emulation-mark" :aria-label="`Emulated: ${emulationDescription(tab.emulation)}`" />
-          <IconRoute v-if="tab.networkRouteCount" class="tab-network-route-mark" :aria-label="`${tab.networkRouteCount} temporary network ${tab.networkRouteCount === 1 ? 'route' : 'routes'}`" />
-          <IconLock v-if="state.allHumanInteractionLocked || tab.humanInteractionLocked" class="tab-lock-mark" aria-label="Page input locked" />
+          <IconSpeed v-if="tab.emulation" class="tab-emulation-mark" :aria-label="t('runtime.emulation.reset', { description: emulationDescription(tab.emulation) })" />
+          <IconRoute v-if="tab.networkRouteCount" class="tab-network-route-mark" :aria-label="t('runtime.tabs.routes', { count: localNumber(tab.networkRouteCount) }, tab.networkRouteCount)" />
+          <IconLock v-if="state.allHumanInteractionLocked || tab.humanInteractionLocked" class="tab-lock-mark" :aria-label="t('shell.tabs.inputLocked')" />
           <span
             v-if="tab.audible || tab.muted"
             class="tab-audio"
             :class="{ muted: tab.muted }"
             role="button"
-            :title="tab.muted ? `Unmute ${tab.title || 'tab'}` : `Mute ${tab.title || 'tab'}`"
-            :aria-label="tab.muted ? `Unmute ${tab.title || 'tab'}` : `Mute ${tab.title || 'tab'}`"
+            :title="t(tab.muted ? 'runtime.tabs.unmute' : 'runtime.tabs.mute', { title: tab.title || t('runtime.tabs.unnamed') })"
+            :aria-label="t(tab.muted ? 'runtime.tabs.unmute' : 'runtime.tabs.mute', { title: tab.title || t('runtime.tabs.unnamed') })"
             :aria-pressed="tab.muted"
             @click="toggleTabMuted($event, tab)"
           >
@@ -6331,8 +4266,8 @@ onBeforeUnmount(() => {
           <span
             class="tab-close"
             role="button"
-            :title="state.allHumanInteractionLocked ? 'Unlock all tabs to close this tab' : 'Close tab (Ctrl/Cmd+W)'"
-            :aria-label="state.allHumanInteractionLocked ? 'Close tab unavailable while all tabs are locked' : 'Close tab'"
+            :title="state.allHumanInteractionLocked ? t('runtime.locks.unlockToClose') : t('runtime.locks.closeShortcut')"
+            :aria-label="state.allHumanInteractionLocked ? t('runtime.locks.closeUnavailable') : t('tabSearch.closeTab')"
             aria-keyshortcuts="Control+W Meta+W"
             :aria-disabled="state.allHumanInteractionLocked"
             data-lock-protected-tab-close
@@ -6342,17 +4277,17 @@ onBeforeUnmount(() => {
         </template>
         </template>
         <span class="workspace-action-divider" aria-hidden="true" />
-        <button class="new-workspace" type="button" title="Create a new isolated workspace" aria-label="Create workspace" @click="openNewWorkspaceEditor">
+        <button class="new-workspace" type="button" :title="t('shell.tabs.createWorkspaceTitle')" :aria-label="t('shell.tabs.createWorkspace')" @click="openNewWorkspaceEditor">
           <IconAddBox aria-hidden="true" />
-          <span>Workspace</span>
+          <span>{{ t('shell.tabs.workspace') }}</span>
         </button>
       </div>
       <div class="topbar-actions">
         <button
           class="topbar-icon-button command-palette-button"
           type="button"
-          title="Commands (Ctrl/Cmd+Shift+P)"
-          aria-label="Open command palette"
+          :title="t('shell.actions.commandsTitle')"
+          :aria-label="t('shell.actions.commands')"
           aria-keyshortcuts="Control+Shift+P Meta+Shift+P"
           :aria-expanded="commandPaletteOpen"
           @click="toggleCommandPalette"
@@ -6362,8 +4297,8 @@ onBeforeUnmount(() => {
         <button
           class="topbar-icon-button tab-search-button"
           type="button"
-          title="Search tabs (Ctrl/Cmd+Shift+A)"
-          aria-label="Search tabs"
+          :title="t('shell.actions.searchTabsTitle')"
+          :aria-label="t('shell.actions.searchTabs')"
           aria-keyshortcuts="Control+Shift+A Meta+Shift+A"
           :aria-expanded="tabSearchOpen"
           @click="toggleTabSearch"
@@ -6387,8 +4322,8 @@ onBeforeUnmount(() => {
         <button
           class="topbar-icon-button history-button"
           type="button"
-          title="Browsing history (Ctrl+H / Cmd+Y)"
-          aria-label="Browsing history"
+          :title="t('shell.actions.historyTitle')"
+          :aria-label="t('shell.actions.history')"
           aria-keyshortcuts="Control+H Meta+Y"
           :aria-expanded="historyOpen"
           @click="toggleVisitHistory"
@@ -6408,7 +4343,7 @@ onBeforeUnmount(() => {
         >
           <IconLock v-if="state.allHumanInteractionLocked" aria-hidden="true" />
           <IconLockOpen v-else aria-hidden="true" />
-          {{ state.allHumanInteractionLocked ? 'Tabs locked' : 'Lock tabs' }}
+          {{ state.allHumanInteractionLocked ? t('shell.tabs.locked') : t('shell.tabs.lock') }}
         </button>
         <UpdateNotification
           v-if="showUpdateStatusPill"
@@ -6424,8 +4359,8 @@ onBeforeUnmount(() => {
           <button
             class="mcp-pause-button"
             type="button"
-            :title="canToggleMcpPaused ? (mcpControl.paused ? 'Resume new MCP commands' : 'Pause new MCP commands') : 'MCP server is unavailable'"
-            :aria-label="mcpControl.paused ? 'Resume agents' : 'Pause agents'"
+            :title="canToggleMcpPaused ? t(mcpControl.paused ? 'runtime.mcp.resumeCommands' : 'runtime.mcp.pauseCommands') : t('runtime.mcp.unavailable')"
+            :aria-label="t(mcpControl.paused ? 'runtime.mcp.resumeAgents' : 'runtime.mcp.pauseAgents')"
             :aria-pressed="mcpControl.paused"
             :disabled="!canToggleMcpPaused"
             @click="toggleMcpPaused"
@@ -6437,8 +4372,8 @@ onBeforeUnmount(() => {
         <button
           class="topbar-icon-button settings-button"
           type="button"
-          title="Settings"
-          aria-label="Settings"
+          :title="t('shell.actions.settings')"
+          :aria-label="t('shell.actions.settings')"
           :aria-expanded="settingsOpen"
           @click="toggleSettings"
         >
@@ -6447,9 +4382,9 @@ onBeforeUnmount(() => {
       </div>
     </div>
     <div v-if="!activeIsHome" class="toolbar">
-      <button class="icon-button" type="button" title="Back" aria-label="Back" :disabled="!activeTab?.canGoBack" @click="syncState(browser.back())"><IconArrowBack aria-hidden="true" /></button>
-      <button class="icon-button" type="button" title="Forward" aria-label="Forward" :disabled="!activeTab?.canGoForward" @click="syncState(browser.forward())"><IconArrowForward aria-hidden="true" /></button>
-      <button class="icon-button" type="button" :title="activeTab?.loading ? 'Stop' : 'Reload'" :aria-label="activeTab?.loading ? 'Stop' : 'Reload'" @click="syncState(activeTab?.loading ? browser.stop() : browser.reload())">
+      <button class="icon-button" type="button" :title="t('shell.toolbar.back')" :aria-label="t('shell.toolbar.back')" :disabled="!activeTab?.canGoBack" @click="syncState(browser.back())"><IconArrowBack aria-hidden="true" /></button>
+      <button class="icon-button" type="button" :title="t('shell.toolbar.forward')" :aria-label="t('shell.toolbar.forward')" :disabled="!activeTab?.canGoForward" @click="syncState(browser.forward())"><IconArrowForward aria-hidden="true" /></button>
+      <button class="icon-button" type="button" :title="t(activeTab?.loading ? 'runtime.tabs.stop' : 'runtime.tabs.reload')" :aria-label="t(activeTab?.loading ? 'runtime.tabs.stop' : 'runtime.tabs.reload')" @click="syncState(activeTab?.loading ? browser.stop() : browser.reload())">
         <IconStop v-if="activeTab?.loading" aria-hidden="true" />
         <IconRefresh v-else aria-hidden="true" />
       </button>
@@ -6459,8 +4394,8 @@ onBeforeUnmount(() => {
           class="site-controls-button"
           :class="{ active: siteControlsOpen, customized: activeSitePermissions.length > 0 }"
           type="button"
-          :title="activeWebUrl ? `Site controls for ${activeHostname}` : 'Site controls are available on websites'"
-          :aria-label="activeWebUrl ? `Site controls for ${activeHostname}` : 'Site controls are unavailable'"
+          :title="activeWebUrl ? t('runtime.tabs.siteControls', { host: activeHostname }) : t('runtime.tabs.siteControlsAvailable')"
+          :aria-label="activeWebUrl ? t('runtime.tabs.siteControls', { host: activeHostname }) : t('runtime.tabs.siteControlsUnavailable')"
           aria-controls="site-controls-panel"
           :aria-expanded="siteControlsOpen"
           :disabled="!activeWebUrl"
@@ -6473,7 +4408,7 @@ onBeforeUnmount(() => {
           ref="addressInput"
           v-model="address"
           class="address"
-          aria-label="Address"
+          :aria-label="t('shell.toolbar.address')"
           role="combobox"
           aria-keyshortcuts="Control+L Meta+L"
           aria-autocomplete="list"
@@ -6482,7 +4417,7 @@ onBeforeUnmount(() => {
           :aria-activedescendant="addressSuggestionsVisible && selectedAddressSuggestion ? addressSuggestionId(selectedAddressSuggestion) : undefined"
           autocomplete="off"
           spellcheck="false"
-          placeholder="Search or enter address"
+          :placeholder="t('shell.toolbar.addressPlaceholder')"
           @focus="showAddressSuggestions"
           @input="showAddressSuggestions"
           @keydown="handleAddressKeydown"
@@ -6492,8 +4427,8 @@ onBeforeUnmount(() => {
           class="emulation-pill"
           :class="{ offline: activeEmulation.network === 'offline' }"
           type="button"
-          :title="`Reset tab emulation: ${emulationDescription(activeEmulation)}`"
-          :aria-label="`Reset tab emulation: ${emulationDescription(activeEmulation)}`"
+          :title="t('runtime.emulation.reset', { description: emulationDescription(activeEmulation) })"
+          :aria-label="t('runtime.emulation.reset', { description: emulationDescription(activeEmulation) })"
           @click="resetActiveTabEmulation"
         >
           <IconSpeed aria-hidden="true" />
@@ -6504,12 +4439,12 @@ onBeforeUnmount(() => {
           v-if="activeNetworkRouteCount"
           class="network-routes-pill"
           type="button"
-          :title="`Open ${activeNetworkRouteCount} temporary request ${activeNetworkRouteCount === 1 ? 'condition' : 'conditions'}`"
-          :aria-label="`Open ${activeNetworkRouteCount} temporary request ${activeNetworkRouteCount === 1 ? 'condition' : 'conditions'}`"
+          :title="t('shell.pageTools.openRoutes', { count: localNumber(activeNetworkRouteCount) }, activeNetworkRouteCount)"
+          :aria-label="t('shell.pageTools.openRoutes', { count: localNumber(activeNetworkRouteCount) }, activeNetworkRouteCount)"
           @click="openRequestConditions"
         >
           <IconRoute aria-hidden="true" />
-          <span>{{ activeNetworkRouteCount }} {{ activeNetworkRouteCount === 1 ? 'condition' : 'conditions' }}</span>
+          <span>{{ t('shell.pageTools.routeCount', { count: localNumber(activeNetworkRouteCount) }, activeNetworkRouteCount) }}</span>
           <IconKeyboardArrowRight aria-hidden="true" />
         </button>
         <section
@@ -6528,25 +4463,25 @@ onBeforeUnmount(() => {
               <small>{{ activeAddressKind }} · {{ activeOrigin }}</small>
             </span>
             <div class="panel-header-actions">
-              <PanelDockPicker v-model="panelDock" label="Dock site controls" />
-              <button class="panel-close" type="button" aria-label="Close site controls" @click="siteControlsOpen = false"><IconClose aria-hidden="true" /></button>
+              <PanelDockPicker v-model="panelDock" :label="t('runtime.tabs.dockSiteControls')" />
+              <button class="panel-close" type="button" :aria-label="t('shell.siteControls.close')" @click="siteControlsOpen = false"><IconClose aria-hidden="true" /></button>
             </div>
           </header>
           <div class="site-data-summary" :aria-busy="siteDataState === 'loading'">
-            <article :aria-label="siteDataSummary ? `${siteDataSummary.cookieCount} ${siteDataSummary.cookieCount === 1 ? 'cookie' : 'cookies'} available to this address` : 'Loading cookie count'">
+            <article :aria-label="siteDataSummary ? t('runtime.tabs.cookieAvailable', { count: localNumber(siteDataSummary.cookieCount) }, siteDataSummary.cookieCount) : t('runtime.tabs.loadingCookies')">
               <IconPrivacy aria-hidden="true" />
-              <span><strong>{{ siteDataSummary?.cookieCount ?? '…' }}</strong><small>{{ siteDataSummary?.cookieCount === 1 ? 'cookie' : 'cookies' }}</small></span>
+              <span><strong>{{ siteDataSummary?.cookieCount ?? '…' }}</strong><small>{{ siteDataSummary?.cookieCount === 1 ? t('shell.siteControls.cookie') : t('shell.siteControls.cookies') }}</small></span>
             </article>
-            <article :aria-label="siteDataSummary ? `${siteDataSummary.historyEntries} ${siteDataSummary.historyEntries === 1 ? 'history page' : 'history pages'} and ${siteDataSummary.historyVisits} ${siteDataSummary.historyVisits === 1 ? 'visit' : 'visits'}` : 'Loading history count'">
+            <article :aria-label="siteDataSummary ? t('runtime.tabs.historyAvailable', { pages: localNumber(siteDataSummary.historyEntries), visits: localNumber(siteDataSummary.historyVisits) }, siteDataSummary.historyEntries) : t('runtime.tabs.loadingHistory')">
               <IconHistory aria-hidden="true" />
-              <span><strong>{{ siteDataSummary?.historyEntries ?? '…' }}</strong><small>{{ siteDataSummary?.historyEntries === 1 ? 'history page' : 'history pages' }}<template v-if="siteDataSummary"> · {{ siteDataSummary.historyVisits }} {{ siteDataSummary.historyVisits === 1 ? 'visit' : 'visits' }}</template></small></span>
+              <span><strong>{{ siteDataSummary?.historyEntries ?? '…' }}</strong><small>{{ siteDataSummary?.historyEntries === 1 ? t('shell.siteControls.historyPage') : t('shell.siteControls.historyPages') }}<template v-if="siteDataSummary"> · {{ siteDataSummary.historyVisits }} {{ siteDataSummary.historyVisits === 1 ? t('shell.siteControls.visit') : t('shell.siteControls.visits') }}</template></small></span>
             </article>
           </div>
           <output v-if="siteDataState === 'error'" class="site-controls-error" aria-live="polite">{{ siteDataMessage }}</output>
           <section class="site-permission-controls" aria-labelledby="site-permission-controls-title">
             <div class="site-controls-section-heading">
-              <strong id="site-permission-controls-title">Permissions</strong>
-              <span>{{ activeSitePermissions.length ? `${activeSitePermissions.length} customized` : 'Using defaults' }}</span>
+              <strong id="site-permission-controls-title">{{ t('shell.siteControls.permissions') }}</strong>
+              <span>{{ activeSitePermissions.length ? `${activeSitePermissions.length} customized` : t('shell.siteControls.defaults') }}</span>
             </div>
             <div v-if="activeSitePermissions.length" class="site-permission-list">
               <div v-for="permission in activeSitePermissions" :key="permission.permission" class="site-permission-control">
@@ -6554,20 +4489,20 @@ onBeforeUnmount(() => {
                 <select
                   :id="`site-control-${permission.permission}`"
                   :value="permission.decision"
-                  :aria-label="`${permissionLabel(permission.permission)} permission for ${permission.origin}`"
+                  :aria-label="t('runtimeActions.permission.aria', { permission: permissionLabel(permission.permission), origin: permission.origin })"
                   @change="setSitePermission(permission, $event)"
                 >
-                  <option value="allow">Allow</option>
-                  <option value="deny">Block</option>
+                  <option value="allow">{{ t('shell.siteControls.allow') }}</option>
+                  <option value="deny">{{ t('shell.siteControls.block') }}</option>
                 </select>
-                <button type="button" :aria-label="`Reset ${permissionLabel(permission.permission)} permission for ${permission.origin}`" title="Reset to default" @click="resetSitePermissionFromControls(permission)"><IconClose aria-hidden="true" /></button>
+                <button type="button" :aria-label="t('runtimeActions.permission.resetAria', { permission: permissionLabel(permission.permission), origin: permission.origin })" :title="t('shell.siteControls.reset')" @click="resetSitePermissionFromControls(permission)"><IconClose aria-hidden="true" /></button>
               </div>
             </div>
-            <p v-else>No custom decisions for this website. Bronom will ask when a permission is needed.</p>
+            <p v-else>{{ t('shell.siteControls.empty') }}</p>
           </section>
           <footer>
-            <button class="site-controls-secondary" type="button" @click="openSitePermissionSettings">All site settings</button>
-            <button class="site-controls-primary" type="button" @click="openSitePrivacySettings">Clear data for this website</button>
+            <button class="site-controls-secondary" type="button" @click="openSitePermissionSettings">{{ t('shell.siteControls.allSettings') }}</button>
+            <button class="site-controls-primary" type="button" @click="openSitePrivacySettings">{{ t('shell.siteControls.clearData') }}</button>
           </footer>
         </section>
         <section
@@ -6575,7 +4510,7 @@ onBeforeUnmount(() => {
           id="address-suggestions"
           class="sr-only"
           role="listbox"
-          aria-label="Local address suggestions"
+          :aria-label="t('shell.suggestions')"
         >
           <span
             v-for="(suggestion, index) in addressSuggestions"
@@ -6589,8 +4524,8 @@ onBeforeUnmount(() => {
       <button
         class="icon-button find-button"
         type="button"
-        title="Find in page (Ctrl/Cmd+F)"
-        aria-label="Find in page"
+        :title="t('shell.toolbar.findTitle')"
+        :aria-label="t('shell.toolbar.find')"
         aria-keyshortcuts="Control+F Meta+F"
         :disabled="!activeTab"
         @click="openFind"
@@ -6600,8 +4535,8 @@ onBeforeUnmount(() => {
       <button
         class="zoom-button"
         type="button"
-        :title="`Page zoom: ${activeTab?.zoomPercent ?? 100}% (Ctrl/Cmd + Plus, Minus, or 0)`"
-        aria-label="Page zoom controls"
+        :title="t('runtime.address.zoom', { percent: localPercent(activeTab?.zoomPercent ?? 100) })"
+        :aria-label="t('shell.toolbar.zoom')"
         :aria-expanded="zoomOpen"
         :disabled="!activeTab"
         @click="zoomOpen ? zoomOpen = false : openZoom()"
@@ -6612,8 +4547,8 @@ onBeforeUnmount(() => {
         class="icon-button bookmarks-button"
         :class="{ bookmarked: Boolean(currentBookmark) }"
         type="button"
-        :title="currentBookmark ? 'Bookmarks — current page saved (Ctrl/Cmd+D to remove)' : 'Bookmarks (Ctrl/Cmd+D to save current page)'"
-        aria-label="Bookmarks"
+        :title="t(currentBookmark ? 'runtime.tabs.bookmarkSaved' : 'runtime.tabs.bookmarkSave')"
+        :aria-label="t('shell.toolbar.bookmarks')"
         aria-keyshortcuts="Control+D Meta+D"
         :aria-expanded="bookmarksOpen"
         @click="toggleBookmarks"
@@ -6624,7 +4559,7 @@ onBeforeUnmount(() => {
       <div
         class="interaction-locks"
         role="group"
-        :aria-label="effectiveHumanInteractionLocked ? 'Page input is locked' : 'Page input lock'"
+        :aria-label="t(effectiveHumanInteractionLocked ? 'runtime.locks.inputLocked' : 'runtime.locks.inputLock')"
       >
         <button
           class="interaction-lock-button"
@@ -6638,7 +4573,7 @@ onBeforeUnmount(() => {
         >
           <IconLock v-if="tabHumanInteractionLocked" aria-hidden="true" />
           <IconLockOpen v-else aria-hidden="true" />
-          Tab
+          {{ t('shell.split.tab') }}
         </button>
       </div>
       <div v-if="regularTabs.length > 1 || state.splitView" class="split-view-control">
@@ -6646,8 +4581,8 @@ onBeforeUnmount(() => {
           class="icon-button split-view-button"
           :class="{ active: Boolean(state.splitView) }"
           type="button"
-          :title="state.splitView ? `Split view with ${splitPartner?.title || 'another tab'}` : 'Open two tabs in split view'"
-          aria-label="Split view"
+          :title="state.splitView ? t('runtime.tabs.splitWith', { title: splitPartner?.title || t('runtime.tabs.splitOther') }) : t('runtime.tabs.splitOpen')"
+          :aria-label="t('shell.split.heading')"
           aria-haspopup="dialog"
           :aria-expanded="splitMenuOpen"
           @click="toggleSplitMenu"
@@ -6665,29 +4600,29 @@ onBeforeUnmount(() => {
         >
           <header>
             <div>
-              <span class="eyebrow">Workspace</span>
-              <h2 id="split-view-menu-title">Split view</h2>
+              <span class="eyebrow">{{ t('shell.split.workspace') }}</span>
+              <h2 id="split-view-menu-title">{{ t('shell.split.heading') }}</h2>
             </div>
-            <button class="panel-close" type="button" aria-label="Close split view menu" @click="splitMenuOpen = false"><IconClose aria-hidden="true" /></button>
+            <button class="panel-close" type="button" :aria-label="t('shell.split.closeMenu')" @click="splitMenuOpen = false"><IconClose aria-hidden="true" /></button>
           </header>
           <template v-if="state.splitView">
-            <p class="split-view-summary">{{ activeTab?.title || 'Current tab' }} with {{ splitPartner?.title || 'another tab' }}</p>
-            <div class="split-layout-options" role="group" aria-label="Split layout">
+            <p class="split-view-summary">{{ activeTab?.title || t('shell.split.tab') }} {{ t('shell.split.with') }} {{ splitPartner?.title || t('shell.split.tab') }}</p>
+            <div class="split-layout-options" role="group" :aria-label="t('shell.split.layout')">
               <button
                 type="button"
                 :class="{ selected: state.splitView.orientation === 'vertical' }"
                 :aria-pressed="state.splitView.orientation === 'vertical'"
                 @click="changeSplitLayout('vertical')"
-              ><IconVerticalSplit aria-hidden="true" /><span>Side by side</span></button>
+              ><IconVerticalSplit aria-hidden="true" /><span>{{ t('shell.split.side') }}</span></button>
               <button
                 type="button"
                 :class="{ selected: state.splitView.orientation === 'horizontal' }"
                 :aria-pressed="state.splitView.orientation === 'horizontal'"
                 @click="changeSplitLayout('horizontal')"
-              ><IconHorizontalSplit aria-hidden="true" /><span>Stacked</span></button>
+              ><IconHorizontalSplit aria-hidden="true" /><span>{{ t('shell.split.stacked') }}</span></button>
             </div>
             <label class="split-ratio-control">
-              <span>First pane</span>
+              <span>{{ t('shell.split.first') }}</span>
               <input
                 type="range"
                 min="25"
@@ -6699,17 +4634,17 @@ onBeforeUnmount(() => {
               <output>{{ Math.round(state.splitView.ratio * 100) }}%</output>
             </label>
             <footer>
-              <button type="button" @click="swapSplitTabs"><IconSwapHoriz aria-hidden="true" /> Swap panes</button>
-              <button class="danger" type="button" @click="exitSplitView"><IconClose aria-hidden="true" /> Exit split view</button>
+              <button type="button" @click="swapSplitTabs"><IconSwapHoriz aria-hidden="true" /> {{ t('shell.split.swap') }}</button>
+              <button class="danger" type="button" @click="exitSplitView"><IconClose aria-hidden="true" /> {{ t('shell.split.exit') }}</button>
             </footer>
           </template>
           <template v-else>
-            <p class="split-view-summary">Choose a tab to show on the right of {{ activeTab?.title || 'this page' }}.</p>
+            <p class="split-view-summary">{{ t('shell.split.choose', { page: activeTab?.title || t('shell.split.thisPage') }) }}</p>
             <div class="split-candidate-list">
               <button v-for="tab in splitCandidates" :key="tab.id" type="button" @click="openTabInSplitView(tab.id)">
                 <img v-if="tab.faviconDataUrl" :src="tab.faviconDataUrl" alt="" />
                 <IconLanguage v-else aria-hidden="true" />
-                <span><strong>{{ tab.title || 'New tab' }}</strong><small>{{ tab.mcpGroupName || 'No workspace' }}</small></span>
+                <span><strong>{{ tab.title || t('shell.split.newTab') }}</strong><small>{{ tab.mcpGroupName || t('shell.split.noWorkspace') }}</small></span>
               </button>
             </div>
           </template>
@@ -6749,8 +4684,8 @@ onBeforeUnmount(() => {
         class="icon-button page-tools-button"
         :class="{ active: pageToolsOpen }"
         type="button"
-        title="Page tools"
-        aria-label="Page tools"
+        :title="t('shell.pageTools.heading')"
+        :aria-label="t('shell.pageTools.heading')"
         aria-haspopup="dialog"
         aria-controls="page-tools-panel"
         :aria-expanded="pageToolsOpen"
@@ -6770,85 +4705,85 @@ onBeforeUnmount(() => {
       >
         <header>
           <div>
-            <span class="eyebrow">Current website</span>
-            <h2 id="page-tools-title">Page tools</h2>
+            <span class="eyebrow">{{ t('shell.pageTools.current') }}</span>
+            <h2 id="page-tools-title">{{ t('shell.pageTools.heading') }}</h2>
           </div>
           <div class="panel-header-actions">
-            <PanelDockPicker v-model="panelDock" label="Dock page tools" />
-            <button class="panel-close" type="button" aria-label="Close page tools" @click="pageToolsOpen = false"><IconClose aria-hidden="true" /></button>
+            <PanelDockPicker v-model="panelDock" :label="t('runtime.tabs.dockPageTools')" />
+            <button class="panel-close" type="button" :aria-label="t('shell.pageTools.close')" @click="pageToolsOpen = false"><IconClose aria-hidden="true" /></button>
           </div>
         </header>
         <div class="page-tools-content">
           <section aria-labelledby="page-tools-inspect-title">
-            <h3 id="page-tools-inspect-title">Inspect &amp; simulate</h3>
+            <h3 id="page-tools-inspect-title">{{ t('shell.pageTools.inspect') }}</h3>
             <div class="page-tools-grid">
               <button
                 type="button"
-                :aria-label="activeWebUrl ? `Site storage for ${activeHostname}` : 'Site storage is unavailable'"
+                :aria-label="activeWebUrl ? t('runtime.tabs.siteStorage', { host: activeHostname }) : t('runtime.tabs.siteStorageUnavailable')"
                 :disabled="!activeWebUrl"
                 @click="toggleSiteStorage"
               >
                 <IconDatabase aria-hidden="true" />
-                <span><strong>Site storage</strong><small>Cookies and browser storage</small></span>
+                <span><strong>{{ t('panels.siteStorage') }}</strong><small>{{ t('shell.pageTools.storageDescription') }}</small></span>
               </button>
               <button
                 :class="{ complete: Boolean(activeEmulation?.viewport) }"
                 type="button"
-                :aria-label="`Responsive preview: ${responsivePreviewLabel}`"
+                :aria-label="t('runtime.address.responsive', { status: responsivePreviewLabel })"
                 @click="toggleResponsivePreview"
               >
                 <IconDevices aria-hidden="true" />
-                <span><strong>Responsive preview</strong><small>{{ responsivePreviewLabel }}</small></span>
+                <span><strong>{{ t('shell.pageTools.responsive') }}</strong><small>{{ responsivePreviewLabel }}</small></span>
               </button>
               <button
                 :class="{ complete: activeEnvironmentOverrideCount > 0, error: environmentState === 'error', running: environmentState === 'applying' }"
                 type="button"
-                :aria-label="`Environment: ${environmentLabel}`"
+                :aria-label="t('runtime.address.environment', { status: environmentLabel })"
                 :disabled="environmentState === 'applying'"
                 @click="toggleEnvironment"
               >
                 <IconProgress v-if="environmentState === 'applying'" class="state-spinner" aria-hidden="true" />
                 <IconSpeed v-else aria-hidden="true" />
-                <span><strong>Environment</strong><small>{{ environmentLabel }}</small></span>
+                <span><strong>{{ t('shell.pageTools.environment') }}</strong><small>{{ environmentLabel }}</small></span>
               </button>
               <button
                 type="button"
-                aria-label="Open Console"
+                :aria-label="t('shell.pageTools.openConsole')"
                 @click="toggleConsole"
               >
                 <IconTerminal aria-hidden="true" />
-                <span><strong>Console</strong><small>Errors, call stacks, and grouped messages</small></span>
+                <span><strong>{{ t('panels.console') }}</strong><small>{{ t('shell.pageTools.consoleDescription') }}</small></span>
               </button>
               <button
                 type="button"
-                aria-label="Open network monitor"
+                :aria-label="t('shell.pageTools.openNetwork')"
                 @click="toggleNetworkMonitor"
               >
                 <IconNetworkCheck aria-hidden="true" />
-                <span><strong>Network</strong><small>HTTP, WebSocket, timing, and sanitized HAR</small></span>
+                <span><strong>{{ t('panels.network') }}</strong><small>{{ t('shell.pageTools.networkDescription') }}</small></span>
               </button>
               <button
                 :class="{ warning: activeNetworkRouteCount > 0 }"
                 type="button"
-                :aria-label="`Request conditions: ${activeNetworkRouteCount ? `${activeNetworkRouteCount} active` : 'none active'}`"
+                :aria-label="t('runtime.address.conditions', { status: activeNetworkRouteCount ? t('network.conditions.active', { count: localNumber(activeNetworkRouteCount) }) : t('runtime.address.noneActive') })"
                 @click="openRequestConditions"
               >
                 <IconRoute aria-hidden="true" />
-                <span><strong>Request conditions</strong><small>{{ activeNetworkRouteCount ? `${activeNetworkRouteCount} temporary active` : 'Block, mock, or throttle requests' }}</small></span>
+                <span><strong>{{ t('shell.pageTools.conditions') }}</strong><small>{{ activeNetworkRouteCount ? `${activeNetworkRouteCount} temporary active` : t('shell.pageTools.conditionsDescription') }}</small></span>
               </button>
             </div>
           </section>
           <section aria-labelledby="page-tools-diagnose-title">
-            <h3 id="page-tools-diagnose-title">Diagnose &amp; reproduce</h3>
+            <h3 id="page-tools-diagnose-title">{{ t('shell.pageTools.diagnose') }}</h3>
             <div class="page-tools-grid">
               <button
                 :class="{ warning: activeInspectorIssueCount > 0 }"
                 type="button"
-                :aria-label="`Open browser issues: ${inspectorIssuesLabel}`"
+                :aria-label="t('issues.toolAria', { status: inspectorIssuesLabel })"
                 @click="toggleInspectorIssues"
               >
                 <IconWarning aria-hidden="true" />
-                <span><strong>Issues</strong><small>{{ inspectorIssuesLabel }}</small></span>
+                <span><strong>{{ t('panels.issues') }}</strong><small>{{ inspectorIssuesLabel }}</small></span>
               </button>
               <button
                 :class="{
@@ -6858,13 +4793,13 @@ onBeforeUnmount(() => {
                   running: securityReportState === 'loading'
                 }"
                 type="button"
-                :aria-label="`Security: ${securityLabel}`"
+                :aria-label="t('securityReport.toolAria', { status: securityLabel })"
                 :disabled="securityReportState === 'loading'"
                 @click="toggleSecurityReport"
               >
                 <IconProgress v-if="securityReportState === 'loading'" class="state-spinner" aria-hidden="true" />
                 <IconShieldLock v-else aria-hidden="true" />
-                <span><strong>Security</strong><small>{{ securityLabel }}</small></span>
+                <span><strong>{{ t('panels.security') }}</strong><small>{{ securityLabel }}</small></span>
               </button>
               <button
                 :class="{
@@ -6882,25 +4817,25 @@ onBeforeUnmount(() => {
                 <IconCheck v-else-if="debugReportState === 'complete' && debugReportSignalCount === 0" aria-hidden="true" />
                 <IconError v-else-if="debugReportState === 'error'" aria-hidden="true" />
                 <IconBugReport v-else aria-hidden="true" />
-                <span><strong>Debug report</strong><small>{{ debugReportLabel }}</small></span>
+                <span><strong>{{ t('panels.debugReport') }}</strong><small>{{ debugReportLabel }}</small></span>
               </button>
               <button
                 :class="{ running: activeTab?.reproRecording?.active }"
                 type="button"
-                :aria-label="`Repro recorder: ${reproLabel}`"
+                :aria-label="t('repro.toolAria', { status: reproLabel })"
                 @click="toggleReproRecorder"
               >
                 <IconRecord aria-hidden="true" />
-                <span><strong>Repro recorder</strong><small>{{ reproLabel }}</small></span>
+                <span><strong>{{ t('panels.reproRecorder') }}</strong><small>{{ reproLabel }}</small></span>
               </button>
               <button
                 :class="{ running: activeTab?.domChangesRecording?.active }"
                 type="button"
-                :aria-label="`DOM changes: ${domChangesLabel}`"
+                :aria-label="t('domChanges.toolAria', { status: domChangesLabel })"
                 @click="toggleDomChanges"
               >
                 <IconAccountTree aria-hidden="true" />
-                <span><strong>DOM changes</strong><small>{{ domChangesLabel }}</small></span>
+                <span><strong>{{ t('panels.domChanges') }}</strong><small>{{ domChangesLabel }}</small></span>
               </button>
               <button
                 :class="{
@@ -6910,13 +4845,13 @@ onBeforeUnmount(() => {
                   running: visualCompareState === 'loading'
                 }"
                 type="button"
-                :aria-label="`Visual compare: ${visualCompareLabel}`"
+                :aria-label="t('visualCompare.toolAria', { status: visualCompareLabel })"
                 :disabled="visualCompareState === 'loading'"
                 @click="toggleVisualCompare"
               >
                 <IconProgress v-if="visualCompareState === 'loading'" class="state-spinner" aria-hidden="true" />
                 <IconDifference v-else aria-hidden="true" />
-                <span><strong>Visual compare</strong><small>{{ visualCompareLabel }}</small></span>
+                <span><strong>{{ t('panels.visualCompare') }}</strong><small>{{ visualCompareLabel }}</small></span>
               </button>
               <button
                 :class="{
@@ -6931,7 +4866,7 @@ onBeforeUnmount(() => {
                 <IconCheck v-if="elementPickerMode === 'context' && elementPickerState === 'copied'" aria-hidden="true" />
                 <IconClose v-else-if="elementPickerMode === 'context' && elementPickerState === 'picking'" aria-hidden="true" />
                 <IconAdsClick v-else aria-hidden="true" />
-                <span><strong>Pick element</strong><small>Copy DOM, box model, styles, and a11y</small></span>
+                <span><strong>{{ t('shell.pageTools.pickElement') }}</strong><small>{{ t('shell.pageTools.pickDescription') }}</small></span>
               </button>
               <button
                 :class="{
@@ -6946,12 +4881,12 @@ onBeforeUnmount(() => {
                 <IconCheck v-if="elementPickerMode === 'screenshot' && elementPickerState === 'copied'" aria-hidden="true" />
                 <IconClose v-else-if="elementPickerMode === 'screenshot' && elementPickerState === 'picking'" aria-hidden="true" />
                 <IconScreenshotRegion v-else aria-hidden="true" />
-                <span><strong>Element screenshot</strong><small>Pick one component and copy its complete PNG</small></span>
+                <span><strong>{{ t('shell.pageTools.elementScreenshot') }}</strong><small>{{ t('shell.pageTools.screenshotDescription') }}</small></span>
               </button>
             </div>
           </section>
           <section aria-labelledby="page-tools-audit-title">
-            <h3 id="page-tools-audit-title">Audit &amp; optimize</h3>
+            <h3 id="page-tools-audit-title">{{ t('shell.pageTools.audit') }}</h3>
             <div class="page-tools-grid">
               <button
                 :class="{
@@ -6961,7 +4896,7 @@ onBeforeUnmount(() => {
                   running: qualityAuditState === 'running'
                 }"
                 type="button"
-                :aria-label="`Quality audit: ${qualityAuditLabel}`"
+                :aria-label="t('runtime.address.quality', { status: qualityAuditLabel })"
                 :disabled="qualityAuditState === 'running'"
                 @click="toggleQualityAudit"
               >
@@ -6969,7 +4904,7 @@ onBeforeUnmount(() => {
                 <IconCheck v-else-if="qualityAuditReport?.status === 'pass'" aria-hidden="true" />
                 <IconError v-else-if="qualityAuditState === 'error' || qualityAuditReport?.status === 'error'" aria-hidden="true" />
                 <IconFactCheck v-else aria-hidden="true" />
-                <span><strong>Quality audit</strong><small>{{ qualityAuditLabel }}</small></span>
+                <span><strong>{{ t('panels.qualityAudit') }}</strong><small>{{ qualityAuditLabel }}</small></span>
               </button>
               <button
                 :class="{
@@ -6987,7 +4922,7 @@ onBeforeUnmount(() => {
                 <IconCheck v-else-if="accessibilityAuditState === 'complete' && accessibilityAudit?.violationCount === 0" aria-hidden="true" />
                 <IconError v-else-if="accessibilityAuditState === 'error'" aria-hidden="true" />
                 <IconAccessibility v-else aria-hidden="true" />
-                <span><strong>Accessibility</strong><small>{{ accessibilityAuditLabel }}</small></span>
+                <span><strong>{{ t('panels.accessibility') }}</strong><small>{{ accessibilityAuditLabel }}</small></span>
               </button>
               <button
                 :class="{ error: performanceState === 'error', running: performanceState === 'running' }"
@@ -6999,7 +4934,7 @@ onBeforeUnmount(() => {
                 <IconProgress v-if="performanceState === 'running'" class="state-spinner" aria-hidden="true" />
                 <IconError v-else-if="performanceState === 'error'" aria-hidden="true" />
                 <IconMonitoring v-else aria-hidden="true" />
-                <span><strong>Performance</strong><small>{{ performanceLabel }}</small></span>
+                <span><strong>{{ t('panels.performance') }}</strong><small>{{ performanceLabel }}</small></span>
               </button>
               <button
                 :class="{
@@ -7008,13 +4943,13 @@ onBeforeUnmount(() => {
                   running: designOverviewState === 'loading'
                 }"
                 type="button"
-                :aria-label="`Design overview: ${designOverviewLabel}`"
+                :aria-label="t('designOverview.toolAria', { status: designOverviewLabel })"
                 :disabled="designOverviewState === 'loading'"
                 @click="toggleDesignOverview"
               >
                 <IconProgress v-if="designOverviewState === 'loading'" class="state-spinner" aria-hidden="true" />
                 <IconPalette v-else aria-hidden="true" />
-                <span><strong>Design overview</strong><small>{{ designOverviewLabel }}</small></span>
+                <span><strong>{{ t('panels.designOverview') }}</strong><small>{{ designOverviewLabel }}</small></span>
               </button>
               <button
                 :class="{
@@ -7023,13 +4958,13 @@ onBeforeUnmount(() => {
                   running: pageMetadataState === 'loading'
                 }"
                 type="button"
-                :aria-label="`Page metadata: ${pageMetadataLabel}`"
+                :aria-label="t('pageMetadata.toolAria', { status: pageMetadataLabel })"
                 :disabled="pageMetadataState === 'loading'"
                 @click="togglePageMetadata"
               >
                 <IconProgress v-if="pageMetadataState === 'loading'" class="state-spinner" aria-hidden="true" />
                 <IconLanguage v-else aria-hidden="true" />
-                <span><strong>Page metadata</strong><small>{{ pageMetadataLabel }}</small></span>
+                <span><strong>{{ t('panels.pageMetadata') }}</strong><small>{{ pageMetadataLabel }}</small></span>
               </button>
               <button
                 :class="{
@@ -7038,13 +4973,13 @@ onBeforeUnmount(() => {
                   running: Boolean(activeTab?.codeCoverageRecording) || coverageState === 'loading'
                 }"
                 type="button"
-                :aria-label="`Code coverage: ${coverageLabel}`"
+                :aria-label="t('coverage.toolAria', { status: coverageLabel })"
                 :disabled="coverageState === 'loading'"
                 @click="toggleCodeCoverage"
               >
                 <IconProgress v-if="coverageState === 'loading'" class="state-spinner" aria-hidden="true" />
                 <IconCode v-else aria-hidden="true" />
-                <span><strong>Code coverage</strong><small>{{ coverageLabel }}</small></span>
+                <span><strong>{{ t('panels.coverage') }}</strong><small>{{ coverageLabel }}</small></span>
               </button>
               <button
                 :class="{
@@ -7053,35 +4988,35 @@ onBeforeUnmount(() => {
                   running: Boolean(activeTab?.cpuProfileRecording) || cpuProfileState === 'loading'
                 }"
                 type="button"
-                :aria-label="`JavaScript CPU profile: ${cpuProfileLabel}`"
+                :aria-label="t('cpuProfile.toolAria', { status: cpuProfileLabel })"
                 :disabled="cpuProfileState === 'loading'"
                 @click="toggleCpuProfile"
               >
                 <IconProgress v-if="cpuProfileState === 'loading'" class="state-spinner" aria-hidden="true" />
                 <IconMonitoring v-else aria-hidden="true" />
-                <span><strong>JavaScript CPU</strong><small>{{ cpuProfileLabel }}</small></span>
+                <span><strong>{{ t('shell.pageTools.javascriptCpu') }}</strong><small>{{ cpuProfileLabel }}</small></span>
               </button>
               <button
                 :class="{ error: memoryState === 'error', running: memoryState === 'running' }"
                 type="button"
-                :aria-label="`Page memory: ${memoryLabel}`"
+                :aria-label="t('memory.toolAria', { status: memoryLabel })"
                 :disabled="memoryState === 'running'"
                 @click="toggleMemoryReport"
               >
                 <IconProgress v-if="memoryState === 'running'" class="state-spinner" aria-hidden="true" />
                 <IconError v-else-if="memoryState === 'error'" aria-hidden="true" />
                 <IconMemory v-else aria-hidden="true" />
-                <span><strong>Memory</strong><small>{{ memoryLabel }}</small></span>
+                <span><strong>{{ t('panels.memory') }}</strong><small>{{ memoryLabel }}</small></span>
               </button>
             </div>
           </section>
           <section aria-labelledby="page-tools-export-title">
-            <h3 id="page-tools-export-title">Export &amp; account</h3>
+            <h3 id="page-tools-export-title">{{ t('shell.pageTools.exportAccount') }}</h3>
             <div class="page-tools-grid">
               <button
                 :class="{ copied: pageSnapshotState === 'copied', error: pageSnapshotState === 'error', running: pageSnapshotState === 'copying' }"
                 type="button"
-                aria-label="Copy page snapshot for agent"
+                :aria-label="t('shell.pageTools.copySnapshotAria')"
                 :disabled="pageSnapshotState === 'copying'"
                 @click="copyPageSnapshot"
               >
@@ -7089,7 +5024,7 @@ onBeforeUnmount(() => {
                 <IconCheck v-else-if="pageSnapshotState === 'copied'" aria-hidden="true" />
                 <IconError v-else-if="pageSnapshotState === 'error'" aria-hidden="true" />
                 <IconAccountTree v-else aria-hidden="true" />
-                <span><strong>Copy page snapshot</strong><small>Headings, controls, and visible text</small></span>
+                <span><strong>{{ t('shell.pageTools.copySnapshot') }}</strong><small>{{ t('shell.pageTools.copySnapshotDescription') }}</small></span>
               </button>
               <button
                 type="button"
@@ -7101,21 +5036,21 @@ onBeforeUnmount(() => {
                 <IconCheck v-else-if="pdfExportState === 'saved'" aria-hidden="true" />
                 <IconError v-else-if="pdfExportState === 'error'" aria-hidden="true" />
                 <IconPdf v-else aria-hidden="true" />
-                <span><strong>Save as PDF</strong><small>{{ pdfExportLabel }}</small></span>
+                <span><strong>{{ t('shell.pageTools.savePdf') }}</strong><small>{{ pdfExportLabel }}</small></span>
               </button>
               <button
                 type="button"
-                :aria-label="activeCredentials.length ? 'Fill saved password and pause agents' : 'No saved password for this site'"
+                :aria-label="activeCredentials.length ? t('shell.pageTools.fillPassword') : t('shell.pageTools.noPassword')"
                 :disabled="!credentialStorage.available || !activeCredentials.length"
                 @click="pageToolsOpen = false; fillSavedPassword()"
               >
                 <IconPassword aria-hidden="true" />
-                <span><strong>Saved password</strong><small>{{ activeCredentials.length ? `${activeCredentials.length} available · pauses agents` : 'No saved account for this site' }}</small></span>
+                <span><strong>{{ t('shell.pageTools.savedPassword') }}</strong><small>{{ activeCredentials.length ? t('shell.pageTools.accountsAvailable', { count: localNumber(activeCredentials.length) }) : t('shell.pageTools.noAccount') }}</small></span>
               </button>
             </div>
           </section>
         </div>
-        <footer><span>{{ activeHostname }}</span><span>Page-specific actions</span></footer>
+        <footer><span>{{ activeHostname }}</span><span>{{ t('shell.pageTools.pageActions') }}</span></footer>
       </section>
     </div>
     <div v-if="!activeIsHome && activeTab?.pageProblem" class="page-problem-bar" role="alert" aria-live="assertive">
@@ -7127,7 +5062,7 @@ onBeforeUnmount(() => {
       </span>
       <button type="button" @click="syncState(browser.reload(activeTab.id))">
         <IconRefresh aria-hidden="true" />
-        {{ activeTab.pageProblem.kind === 'unresponsive' ? 'Reload' : 'Try again' }}
+        {{ activeTab.pageProblem.kind === 'unresponsive' ? t('pageProblem.reload') : t('pageProblem.tryAgain') }}
       </button>
     </div>
     <section
@@ -7141,21 +5076,21 @@ onBeforeUnmount(() => {
     >
       <header>
         <div>
-          <span class="eyebrow">Responsive testing</span>
-          <h2 id="responsive-preview-title">Responsive preview</h2>
+          <span class="eyebrow">{{ t('responsive.kicker') }}</span>
+          <h2 id="responsive-preview-title">{{ t('responsive.heading') }}</h2>
         </div>
         <div class="panel-header-actions">
-          <PanelDockPicker v-model="panelDock" label="Dock responsive preview" />
-          <button class="panel-close" type="button" aria-label="Close responsive preview" @click="responsivePanelOpen = false"><IconClose aria-hidden="true" /></button>
+          <PanelDockPicker v-model="panelDock" :label="t('panelDocks.responsive')" />
+          <button class="panel-close" type="button" :aria-label="t('responsive.close')" @click="responsivePanelOpen = false"><IconClose aria-hidden="true" /></button>
         </div>
       </header>
       <form class="responsive-preview-content" @submit.prevent="applyResponsivePreview">
         <section aria-labelledby="responsive-presets-title">
           <div class="responsive-section-heading">
-            <div><h3 id="responsive-presets-title">Viewport preset</h3><p>Generic sizes expose layout breakpoints without pretending to be a physical device.</p></div>
-            <button type="button" title="Rotate viewport" aria-label="Rotate responsive viewport" @click="toggleResponsiveOrientation"><IconScreenRotation aria-hidden="true" /> Rotate</button>
+            <div><h3 id="responsive-presets-title">{{ t('responsive.preset') }}</h3><p>{{ t('responsive.presetHelp') }}</p></div>
+            <button type="button" :title="t('responsive.rotateTitle')" :aria-label="t('responsive.rotateAria')" @click="toggleResponsiveOrientation"><IconScreenRotation aria-hidden="true" /> {{ t('responsive.rotate') }}</button>
           </div>
-          <div class="responsive-preset-grid" role="group" aria-label="Responsive viewport preset">
+          <div class="responsive-preset-grid" role="group" :aria-label="t('responsive.presetAria')">
             <button
               v-for="preset in BROWSER_VIEWPORT_PRESETS"
               :key="preset.id"
@@ -7174,42 +5109,42 @@ onBeforeUnmount(() => {
               :aria-pressed="responsivePresetId === 'custom'"
               @click="selectResponsivePreset('custom')"
             >
-              <strong>Custom</strong>
-              <span>200–3840 px</span>
-              <small>Choose exact conditions</small>
+              <strong>{{ t('responsive.custom') }}</strong>
+              <span>{{ t('responsive.range') }}</span>
+              <small>{{ t('responsive.customDescription') }}</small>
             </button>
           </div>
         </section>
         <section class="responsive-orientation" aria-labelledby="responsive-orientation-title">
-          <div><h3 id="responsive-orientation-title">Orientation</h3><p>Width and height rotate together.</p></div>
-          <div role="group" aria-label="Viewport orientation">
-            <button type="button" :class="{ selected: responsiveOrientation === 'portrait' }" :aria-pressed="responsiveOrientation === 'portrait'" @click="setResponsiveOrientation('portrait')">Portrait</button>
-            <button type="button" :class="{ selected: responsiveOrientation === 'landscape' }" :aria-pressed="responsiveOrientation === 'landscape'" @click="setResponsiveOrientation('landscape')">Landscape</button>
+          <div><h3 id="responsive-orientation-title">{{ t('responsive.orientation') }}</h3><p>{{ t('responsive.orientationHelp') }}</p></div>
+          <div role="group" :aria-label="t('responsive.orientationAria')">
+            <button type="button" :class="{ selected: responsiveOrientation === 'portrait' }" :aria-pressed="responsiveOrientation === 'portrait'" @click="setResponsiveOrientation('portrait')">{{ t('responsive.portrait') }}</button>
+            <button type="button" :class="{ selected: responsiveOrientation === 'landscape' }" :aria-pressed="responsiveOrientation === 'landscape'" @click="setResponsiveOrientation('landscape')">{{ t('responsive.landscape') }}</button>
           </div>
         </section>
         <section v-if="responsivePresetId === 'custom'" class="responsive-custom" aria-labelledby="responsive-custom-title">
-          <div><h3 id="responsive-custom-title">Custom conditions</h3><p>Viewport values are CSS pixels.</p></div>
+          <div><h3 id="responsive-custom-title">{{ t('responsive.customConditions') }}</h3><p>{{ t('responsive.cssPixels') }}</p></div>
           <div class="responsive-fields">
-            <label>Width<input v-model.number="responsiveWidth" type="number" min="200" max="3840" step="1" required @input="responsiveState = 'idle'" /></label>
-            <label>Height<input v-model.number="responsiveHeight" type="number" min="200" max="3840" step="1" required @input="responsiveState = 'idle'" /></label>
-            <label>DPR<input v-model.number="responsiveDeviceScaleFactor" type="number" min="0.5" max="5" step="0.5" required @input="responsiveState = 'idle'" /></label>
+            <label>{{ t('responsive.width') }}<input v-model.number="responsiveWidth" type="number" min="200" max="3840" step="1" required @input="responsiveState = 'idle'" /></label>
+            <label>{{ t('responsive.height') }}<input v-model.number="responsiveHeight" type="number" min="200" max="3840" step="1" required @input="responsiveState = 'idle'" /></label>
+            <label>{{ t('responsive.dpr') }}<input v-model.number="responsiveDeviceScaleFactor" type="number" min="0.5" max="5" step="0.5" required @input="responsiveState = 'idle'" /></label>
           </div>
           <div class="responsive-toggles">
-            <label><input v-model="responsiveMobile" type="checkbox" @change="responsiveState = 'idle'" /> Mobile rendering</label>
-            <label><input v-model="responsiveTouch" type="checkbox" @change="responsiveState = 'idle'" /> Touch events</label>
+            <label><input v-model="responsiveMobile" type="checkbox" @change="responsiveState = 'idle'" /> {{ t('responsive.mobile') }}</label>
+            <label><input v-model="responsiveTouch" type="checkbox" @change="responsiveState = 'idle'" /> {{ t('responsive.touch') }}</label>
           </div>
         </section>
         <output class="responsive-preview-summary" :class="{ error: responsiveState === 'error' || !responsiveViewport }" aria-live="polite">
           <IconDevices aria-hidden="true" />
-          <span><strong>{{ responsiveState === 'applied' ? 'Viewport applied' : responsiveState === 'applying' ? 'Applying viewport…' : 'Preview conditions' }}</strong><small>{{ responsiveError || responsiveSummary }}</small></span>
+          <span><strong>{{ responsiveState === 'applied' ? t('responsive.applied') : responsiveState === 'applying' ? t('responsive.applyingViewport') : t('responsive.previewConditions') }}</strong><small>{{ responsiveError || responsiveSummary }}</small></span>
         </output>
-        <p class="responsive-preview-caveat"><IconInfo aria-hidden="true" /> Simulation changes only this website tab. It is useful for responsive debugging, but it is not a physical-device test.</p>
+        <p class="responsive-preview-caveat"><IconInfo aria-hidden="true" /> {{ t('responsive.limitation') }}</p>
         <footer>
-          <button type="button" :disabled="!activeEmulation?.viewport || responsiveState === 'applying'" @click="resetResponsivePreview">Reset viewport</button>
+          <button type="button" :disabled="!activeEmulation?.viewport || responsiveState === 'applying'" @click="resetResponsivePreview">{{ t('responsive.reset') }}</button>
           <button class="primary" type="submit" :disabled="!responsiveViewport || responsiveState === 'applying'">
             <IconProgress v-if="responsiveState === 'applying'" class="state-spinner" aria-hidden="true" />
             <IconDevices v-else aria-hidden="true" />
-            {{ responsiveState === 'applying' ? 'Applying…' : 'Apply preview' }}
+            {{ responsiveState === 'applying' ? t('responsive.applying') : t('responsive.apply') }}
           </button>
         </footer>
       </form>
@@ -7225,2384 +5160,286 @@ onBeforeUnmount(() => {
     >
       <header>
         <div>
-          <span class="eyebrow">Current website</span>
-          <h2 id="environment-panel-title">Environment</h2>
+          <span class="eyebrow">{{ t('environment.kicker') }}</span>
+          <h2 id="environment-panel-title">{{ t('environment.heading') }}</h2>
         </div>
         <div class="panel-header-actions">
-          <PanelDockPicker v-model="panelDock" label="Dock Environment" />
-          <button class="panel-close" type="button" aria-label="Close Environment" @click="environmentPanelOpen = false"><IconClose aria-hidden="true" /></button>
+          <PanelDockPicker v-model="panelDock" :label="t('panels.dockNamed', { panel: t('environment.heading') })" />
+          <button class="panel-close" type="button" :aria-label="t('environment.close')" @click="environmentPanelOpen = false"><IconClose aria-hidden="true" /></button>
         </div>
       </header>
       <form class="environment-content" @submit.prevent="applyEnvironment(false)">
         <section aria-labelledby="environment-speed-title">
           <div class="environment-section-heading">
-            <div><h3 id="environment-speed-title">Loading conditions</h3><p>Reproduce slower devices and unreliable connections.</p></div>
+            <div><h3 id="environment-speed-title">{{ t('environment.loading.heading') }}</h3><p>{{ t('environment.loading.description') }}</p></div>
           </div>
           <div class="environment-field-grid">
             <label>
-              <span>Network</span>
-              <select v-model="environmentDraft.network" aria-label="Network" @change="environmentState = 'idle'">
-                <option value="none">No throttling</option>
-                <option value="fast-4g">Fast 4G</option>
-                <option value="slow-4g">Slow 4G</option>
-                <option value="slow-3g">Slow 3G</option>
-                <option value="offline">Offline</option>
+              <span>{{ t('environment.network.label') }}</span>
+              <select v-model="environmentDraft.network" :aria-label="t('environment.network.label')" @change="environmentState = 'idle'">
+                <option value="none">{{ t('environment.network.none') }}</option>
+                <option value="fast-4g">{{ t('environment.network.fast4g') }}</option>
+                <option value="slow-4g">{{ t('environment.network.slow4g') }}</option>
+                <option value="slow-3g">{{ t('environment.network.slow3g') }}</option>
+                <option value="offline">{{ t('environment.network.offline') }}</option>
               </select>
-              <small>Applies to new HTTP and WebSocket traffic.</small>
+              <small>{{ t('environment.network.help') }}</small>
             </label>
             <label>
-              <span>CPU</span>
-              <select v-model.number="environmentDraft.cpuThrottlingRate" aria-label="CPU" @change="environmentState = 'idle'">
-                <option :value="1">No slowdown</option>
-                <option :value="2">2× slowdown</option>
-                <option :value="4">4× slowdown</option>
-                <option :value="6">6× slowdown</option>
-                <option :value="20">20× slowdown</option>
+              <span>{{ t('environment.cpu.label') }}</span>
+              <select v-model.number="environmentDraft.cpuThrottlingRate" :aria-label="t('environment.cpu.label')" @change="environmentState = 'idle'">
+                <option :value="1">{{ t('environment.cpu.none') }}</option>
+                <option :value="2">{{ t('environment.cpu.x2') }}</option>
+                <option :value="4">{{ t('environment.cpu.x4') }}</option>
+                <option :value="6">{{ t('environment.cpu.x6') }}</option>
+                <option :value="20">{{ t('environment.cpu.x20') }}</option>
               </select>
-              <small>Relative to this computer, not a physical device.</small>
+              <small>{{ t('environment.cpu.help') }}</small>
             </label>
             <label class="environment-field-wide">
-              <span>Data Saver</span>
-              <select v-model="environmentDraft.dataSaver" aria-label="Data Saver" @change="environmentState = 'idle'">
-                <option value="auto">Use system setting</option>
-                <option value="enabled">Enabled</option>
-                <option value="disabled">Disabled</option>
+              <span>{{ t('environment.dataSaver.label') }}</span>
+              <select v-model="environmentDraft.dataSaver" :aria-label="t('environment.dataSaver.label')" @change="environmentState = 'idle'">
+                <option value="auto">{{ t('environment.dataSaver.system') }}</option>
+                <option value="enabled">{{ t('environment.dataSaver.enabled') }}</option>
+                <option value="disabled">{{ t('environment.dataSaver.disabled') }}</option>
               </select>
-              <small>Overrides <code>navigator.connection.saveData</code>; it does not throttle bandwidth.</small>
+              <small>{{ t('environment.dataSaver.help') }}</small>
             </label>
           </div>
           <label class="environment-toggle">
             <input v-model="environmentDraft.cacheDisabled" type="checkbox" @change="environmentState = 'idle'" />
-            <span><strong>Disable HTTP cache</strong><small>Ignore memory and disk cache for new requests without deleting cached data.</small></span>
+            <span><strong>{{ t('environment.cache.label') }}</strong><small>{{ t('environment.cache.help') }}</small></span>
           </label>
           <label class="environment-toggle">
             <input v-model="environmentDraft.bypassServiceWorker" type="checkbox" @change="environmentState = 'idle'" />
-            <span><strong>Bypass service worker</strong><small>Send new requests to the network without unregistering the website’s worker.</small></span>
+            <span><strong>{{ t('environment.serviceWorker.label') }}</strong><small>{{ t('environment.serviceWorker.help') }}</small></span>
           </label>
-          <p v-if="environmentDraft.network === 'offline'" class="environment-warning"><IconWarning aria-hidden="true" /> Offline blocks new network traffic until this condition is changed or all tab emulation is reset.</p>
-          <p v-if="environmentDraft.network === 'offline' && environmentDraft.bypassServiceWorker" class="environment-warning"><IconWarning aria-hidden="true" /> Bypassing the service worker also bypasses its offline responses, so matching requests will fail while Offline is active.</p>
+          <p v-if="environmentDraft.network === 'offline'" class="environment-warning"><IconWarning aria-hidden="true" /> {{ t('environment.serviceWorker.offline') }}</p>
+          <p v-if="environmentDraft.network === 'offline' && environmentDraft.bypassServiceWorker" class="environment-warning"><IconWarning aria-hidden="true" /> {{ t('environment.serviceWorker.combined') }}</p>
         </section>
         <section aria-labelledby="environment-runtime-title">
           <div class="environment-section-heading">
-            <div><h3 id="environment-runtime-title">Page runtime</h3><p>Inspect motion precisely or check the page’s HTML and CSS fallback without client scripts.</p></div>
+            <div><h3 id="environment-runtime-title">{{ t('environment.runtime.heading') }}</h3><p>{{ t('environment.runtime.description') }}</p></div>
           </div>
           <div class="environment-field-grid">
             <label class="environment-field-wide">
-              <span>Animation playback</span>
-              <select v-model.number="environmentDraft.animationPlaybackRate" aria-label="Animation playback" @change="environmentState = 'idle'">
-                <option :value="1">Normal speed</option>
-                <option :value="0.25">25% speed</option>
-                <option :value="0.1">10% speed</option>
-                <option :value="0">Paused</option>
+              <span>{{ t('environment.runtime.animation') }}</span>
+              <select v-model.number="environmentDraft.animationPlaybackRate" :aria-label="t('environment.runtime.animation')" @change="environmentState = 'idle'">
+                <option :value="1">{{ t('environment.runtime.normal') }}</option>
+                <option :value="0.25">{{ t('environment.runtime.quarter') }}</option>
+                <option :value="0.1">{{ t('environment.runtime.tenth') }}</option>
+                <option :value="0">{{ t('environment.runtime.paused') }}</option>
               </select>
-              <small>Controls CSS Animations, transitions, and Web Animations on this tab; animation-frame scripts continue normally.</small>
+              <small>{{ t('environment.runtime.animationHelp') }}</small>
             </label>
           </div>
           <label class="environment-toggle">
             <input v-model="environmentDraft.javaScriptDisabled" type="checkbox" @change="environmentState = 'idle'" />
-            <span><strong>Disable JavaScript</strong><small>Reload to test startup. Bronom controls and MCP reset remain available.</small></span>
+            <span><strong>{{ t('environment.runtime.disableJs') }}</strong><small>{{ t('environment.runtime.disableJsHelp') }}</small></span>
           </label>
-          <p v-if="environmentDraft.javaScriptDisabled" class="environment-warning"><IconWarning aria-hidden="true" /> Page interactions and agent evaluation may stop working until JavaScript is enabled again, but Environment and <code>browser_emulate</code> can always restore it.</p>
+          <p v-if="environmentDraft.javaScriptDisabled" class="environment-warning"><IconWarning aria-hidden="true" /> {{ t('environment.runtime.disableJsWarning') }}</p>
         </section>
         <section aria-labelledby="environment-rendering-title">
           <div class="environment-section-heading">
-            <div><h3 id="environment-rendering-title">Rendering preferences</h3><p>Test CSS branches driven by user preferences.</p></div>
+            <div><h3 id="environment-rendering-title">{{ t('environment.rendering.heading') }}</h3><p>{{ t('environment.rendering.description') }}</p></div>
           </div>
           <div class="environment-field-grid">
             <label>
-              <span>Media type</span>
-              <select v-model="environmentDraft.mediaType" aria-label="Media type" @change="environmentState = 'idle'">
-                <option value="auto">No override</option>
-                <option value="screen">Screen</option>
-                <option value="print">Print</option>
+              <span>{{ t('environment.rendering.media') }}</span>
+              <select v-model="environmentDraft.mediaType" :aria-label="t('environment.rendering.media')" @change="environmentState = 'idle'">
+                <option value="auto">{{ t('environment.rendering.noOverride') }}</option>
+                <option value="screen">{{ t('environment.rendering.screen') }}</option>
+                <option value="print">{{ t('environment.rendering.print') }}</option>
               </select>
-              <small>Tests <code>@media print</code> without opening print preview.</small>
+              <small>{{ t('environment.rendering.printHelp') }}</small>
             </label>
             <label>
-              <span>Color scheme</span>
-              <select v-model="environmentDraft.colorScheme" aria-label="Color scheme" @change="environmentState = 'idle'">
-                <option value="auto">No override</option>
-                <option value="light">Prefer light</option>
-                <option value="dark">Prefer dark</option>
+              <span>{{ t('environment.rendering.colorScheme') }}</span>
+              <select v-model="environmentDraft.colorScheme" :aria-label="t('environment.rendering.colorScheme')" @change="environmentState = 'idle'">
+                <option value="auto">{{ t('environment.rendering.noOverride') }}</option>
+                <option value="light">{{ t('environment.rendering.light') }}</option>
+                <option value="dark">{{ t('environment.rendering.dark') }}</option>
               </select>
-              <small>Emulates <code>prefers-color-scheme</code>.</small>
+              <small>{{ t('environment.rendering.colorHelp') }}</small>
             </label>
             <label>
-              <span>Forced colors</span>
-              <select v-model="environmentDraft.forcedColors" aria-label="Forced colors" @change="environmentState = 'idle'">
-                <option value="auto">No override</option>
-                <option value="active">Active</option>
-                <option value="none">Inactive</option>
+              <span>{{ t('environment.rendering.forcedColors') }}</span>
+              <select v-model="environmentDraft.forcedColors" :aria-label="t('environment.rendering.forcedColors')" @change="environmentState = 'idle'">
+                <option value="auto">{{ t('environment.rendering.noOverride') }}</option>
+                <option value="active">{{ t('environment.rendering.active') }}</option>
+                <option value="none">{{ t('environment.rendering.inactive') }}</option>
               </select>
-              <small>Tests <code>forced-colors</code> branches such as Windows High Contrast.</small>
+              <small>{{ t('environment.rendering.forcedHelp') }}</small>
             </label>
             <label>
-              <span>Contrast</span>
-              <select v-model="environmentDraft.contrast" aria-label="Contrast" @change="environmentState = 'idle'">
-                <option value="auto">No override</option>
-                <option value="more">Prefer more</option>
-                <option value="less">Prefer less</option>
-                <option value="custom">Custom</option>
-                <option value="no-preference">No preference</option>
+              <span>{{ t('environment.rendering.contrast') }}</span>
+              <select v-model="environmentDraft.contrast" :aria-label="t('environment.rendering.contrast')" @change="environmentState = 'idle'">
+                <option value="auto">{{ t('environment.rendering.noOverride') }}</option>
+                <option value="more">{{ t('environment.rendering.more') }}</option>
+                <option value="less">{{ t('environment.rendering.less') }}</option>
+                <option value="custom">{{ t('environment.rendering.custom') }}</option>
+                <option value="no-preference">{{ t('environment.rendering.noPreference') }}</option>
               </select>
-              <small>Emulates <code>prefers-contrast</code>.</small>
+              <small>{{ t('environment.rendering.contrastHelp') }}</small>
             </label>
             <label>
-              <span>Motion</span>
-              <select v-model="environmentDraft.reducedMotion" aria-label="Motion" @change="environmentState = 'idle'">
-                <option value="auto">No override</option>
-                <option value="reduce">Reduce motion</option>
-                <option value="no-preference">No preference</option>
+              <span>{{ t('environment.rendering.motion') }}</span>
+              <select v-model="environmentDraft.reducedMotion" :aria-label="t('environment.rendering.motion')" @change="environmentState = 'idle'">
+                <option value="auto">{{ t('environment.rendering.noOverride') }}</option>
+                <option value="reduce">{{ t('environment.rendering.reduceMotion') }}</option>
+                <option value="no-preference">{{ t('environment.rendering.noPreference') }}</option>
               </select>
-              <small>Emulates <code>prefers-reduced-motion</code>.</small>
+              <small>{{ t('environment.rendering.motionHelp') }}</small>
             </label>
             <label>
-              <span>Transparency</span>
-              <select v-model="environmentDraft.reducedTransparency" aria-label="Transparency" @change="environmentState = 'idle'">
-                <option value="auto">No override</option>
-                <option value="reduce">Reduce transparency</option>
-                <option value="no-preference">No preference</option>
+              <span>{{ t('environment.rendering.transparency') }}</span>
+              <select v-model="environmentDraft.reducedTransparency" :aria-label="t('environment.rendering.transparency')" @change="environmentState = 'idle'">
+                <option value="auto">{{ t('environment.rendering.noOverride') }}</option>
+                <option value="reduce">{{ t('environment.rendering.reduceTransparency') }}</option>
+                <option value="no-preference">{{ t('environment.rendering.noPreference') }}</option>
               </select>
-              <small>Emulates <code>prefers-reduced-transparency</code>.</small>
+              <small>{{ t('environment.rendering.transparencyHelp') }}</small>
             </label>
             <label class="environment-field-wide">
-              <span>Vision simulation</span>
-              <select v-model="environmentDraft.visionDeficiency" aria-label="Vision simulation" @change="environmentState = 'idle'">
-                <option value="none">No simulation</option>
-                <option value="blurredVision">Blurred vision</option>
-                <option value="reducedContrast">Reduced contrast</option>
-                <option value="protanopia">Protanopia · no red</option>
-                <option value="deuteranopia">Deuteranopia · no green</option>
-                <option value="tritanopia">Tritanopia · no blue</option>
-                <option value="achromatopsia">Achromatopsia · no color</option>
+              <span>{{ t('environment.rendering.vision') }}</span>
+              <select v-model="environmentDraft.visionDeficiency" :aria-label="t('environment.rendering.vision')" @change="environmentState = 'idle'">
+                <option value="none">{{ t('environment.rendering.noSimulation') }}</option>
+                <option value="blurredVision">{{ t('environment.rendering.blurred') }}</option>
+                <option value="reducedContrast">{{ t('environment.rendering.reducedContrast') }}</option>
+                <option value="protanopia">{{ t('environment.rendering.protanopia') }}</option>
+                <option value="deuteranopia">{{ t('environment.rendering.deuteranopia') }}</option>
+                <option value="tritanopia">{{ t('environment.rendering.tritanopia') }}</option>
+                <option value="achromatopsia">{{ t('environment.rendering.achromatopsia') }}</option>
               </select>
-              <small>Visual simulation helps reveal color-only meaning; it is not a medical representation of every person.</small>
+              <small>{{ t('environment.rendering.visionHelp') }}</small>
             </label>
           </div>
         </section>
         <section aria-labelledby="environment-debug-overlays-title">
           <div class="environment-section-heading">
-            <div><h3 id="environment-debug-overlays-title">Rendering diagnostics</h3><p>Show Chromium’s live compositor and layout evidence over this page.</p></div>
+            <div><h3 id="environment-debug-overlays-title">{{ t('environment.diagnostics.heading') }}</h3><p>{{ t('environment.diagnostics.description') }}</p></div>
           </div>
           <label class="environment-toggle">
             <input v-model="environmentDraft.renderingDebug.paintFlashing" type="checkbox" @change="environmentState = 'idle'" />
-            <span><strong>Paint flashing</strong><small>Flash repainted regions in green to reveal unnecessary rendering work.</small></span>
+            <span><strong>{{ t('environment.diagnostics.paint') }}</strong><small>{{ t('environment.diagnostics.paintHelp') }}</small></span>
           </label>
           <label class="environment-toggle">
             <input v-model="environmentDraft.renderingDebug.layoutShiftRegions" type="checkbox" @change="environmentState = 'idle'" />
-            <span><strong>Layout shift regions</strong><small>Briefly highlight content that moves unexpectedly; reload before reproducing startup shifts.</small></span>
+            <span><strong>{{ t('environment.diagnostics.shifts') }}</strong><small>{{ t('environment.diagnostics.shiftsHelp') }}</small></span>
           </label>
           <label class="environment-toggle">
             <input v-model="environmentDraft.renderingDebug.layerBorders" type="checkbox" @change="environmentState = 'idle'" />
-            <span><strong>Layer borders</strong><small>Show composited layer borders and tiles over the page.</small></span>
+            <span><strong>{{ t('environment.diagnostics.layers') }}</strong><small>{{ t('environment.diagnostics.layersHelp') }}</small></span>
           </label>
           <label class="environment-toggle">
             <input v-model="environmentDraft.renderingDebug.fpsCounter" type="checkbox" @change="environmentState = 'idle'" />
-            <span><strong>Frame rendering stats</strong><small>Display live frame timing, dropped frames, and GPU rendering information.</small></span>
+            <span><strong>{{ t('environment.diagnostics.frames') }}</strong><small>{{ t('environment.diagnostics.framesHelp') }}</small></span>
           </label>
           <label class="environment-toggle">
             <input v-model="environmentDraft.renderingDebug.scrollBottlenecks" type="checkbox" @change="environmentState = 'idle'" />
-            <span><strong>Scrolling performance issues</strong><small>Highlight regions with listeners or behavior that can delay scrolling.</small></span>
+            <span><strong>{{ t('environment.diagnostics.scrolling') }}</strong><small>{{ t('environment.diagnostics.scrollingHelp') }}</small></span>
           </label>
-          <p v-if="environmentDraft.renderingDebug.paintFlashing || environmentDraft.renderingDebug.layoutShiftRegions" class="environment-warning"><IconWarning aria-hidden="true" /> These diagnostics can flash rapidly. Disable them immediately if flashing content could affect you.</p>
+          <p v-if="environmentDraft.renderingDebug.paintFlashing || environmentDraft.renderingDebug.layoutShiftRegions" class="environment-warning"><IconWarning aria-hidden="true" /> {{ t('environment.diagnostics.warning') }}</p>
         </section>
         <section aria-labelledby="environment-identity-title">
           <div class="environment-section-heading">
-            <div><h3 id="environment-identity-title">Region, identity &amp; location</h3><p>Overrides stay isolated to this tab.</p></div>
+            <div><h3 id="environment-identity-title">{{ t('environment.identity.heading') }}</h3><p>{{ t('environment.identity.description') }}</p></div>
           </div>
           <div class="environment-field-grid environment-region-grid">
             <label>
-              <span>Locale <small>optional</small></span>
-              <input v-model.trim="environmentDraft.locale" aria-label="Locale" type="text" maxlength="64" placeholder="System default · en-US" spellcheck="false" @input="environmentState = 'idle'" />
-              <small>Controls locale-aware formatting, language APIs, and subsequent request headers after reload.</small>
+              <span>{{ t('environment.identity.locale') }} <small>{{ t('environment.identity.optional') }}</small></span>
+              <input v-model.trim="environmentDraft.locale" :aria-label="t('environment.identity.locale')" type="text" maxlength="64" :placeholder="t('environment.identity.localePlaceholder')" spellcheck="false" @input="environmentState = 'idle'" />
+              <small>{{ t('environment.identity.localeHelp') }}</small>
             </label>
             <label>
-              <span>Time zone <small>optional</small></span>
-              <input v-model.trim="environmentDraft.timezoneId" aria-label="Time zone" type="text" maxlength="100" placeholder="System default · Europe/Kyiv" spellcheck="false" @input="environmentState = 'idle'" />
-              <small>Use an IANA ID to reproduce local dates and daylight-saving transitions.</small>
+              <span>{{ t('environment.identity.timezone') }} <small>{{ t('environment.identity.optional') }}</small></span>
+              <input v-model.trim="environmentDraft.timezoneId" :aria-label="t('environment.identity.timezone')" type="text" maxlength="100" :placeholder="t('environment.identity.timezonePlaceholder')" spellcheck="false" @input="environmentState = 'idle'" />
+              <small>{{ t('environment.identity.timezoneHelp') }}</small>
             </label>
           </div>
           <label class="environment-user-agent">
-            <span>Custom user agent <small>optional</small></span>
-            <input v-model="environmentDraft.userAgent" type="text" maxlength="512" placeholder="Use Chromium default" spellcheck="false" @input="environmentState = 'idle'" />
-            <small>Reload to send it on the main document request.</small>
+            <span>{{ t('environment.identity.userAgent') }} <small>{{ t('environment.identity.optional') }}</small></span>
+            <input v-model="environmentDraft.userAgent" type="text" maxlength="512" :placeholder="t('environment.identity.userAgentPlaceholder')" spellcheck="false" @input="environmentState = 'idle'" />
+            <small>{{ t('environment.identity.userAgentHelp') }}</small>
           </label>
           <label class="environment-location-toggle">
             <input v-model="environmentLocationEnabled" type="checkbox" @change="environmentState = 'idle'" />
-            <span><strong>Override geolocation</strong><small>The website still needs location permission.</small></span>
+            <span><strong>{{ t('environment.identity.geolocation') }}</strong><small>{{ t('environment.identity.geolocationHelp') }}</small></span>
           </label>
           <div v-if="environmentLocationEnabled" class="environment-location-fields">
-            <label>Latitude<input v-model.number="environmentLatitude" type="number" min="-90" max="90" step="0.000001" required @input="environmentState = 'idle'" /></label>
-            <label>Longitude<input v-model.number="environmentLongitude" type="number" min="-180" max="180" step="0.000001" required @input="environmentState = 'idle'" /></label>
-            <label>Accuracy, m<input v-model.number="environmentAccuracy" type="number" min="0" max="100000" step="1" required @input="environmentState = 'idle'" /></label>
+            <label>{{ t('environment.identity.latitude') }}<input v-model.number="environmentLatitude" type="number" min="-90" max="90" step="0.000001" required @input="environmentState = 'idle'" /></label>
+            <label>{{ t('environment.identity.longitude') }}<input v-model.number="environmentLongitude" type="number" min="-180" max="180" step="0.000001" required @input="environmentState = 'idle'" /></label>
+            <label>{{ t('environment.identity.accuracy') }}<input v-model.number="environmentAccuracy" type="number" min="0" max="100000" step="1" required @input="environmentState = 'idle'" /></label>
           </div>
         </section>
         <section v-if="activeEmulation?.viewport || activeEmulation?.extraHttpHeaderNames?.length" class="environment-managed" aria-labelledby="environment-managed-title">
           <div class="environment-section-heading">
-            <div><h3 id="environment-managed-title">Other active emulation</h3><p>Applying this form preserves these separately managed conditions.</p></div>
+            <div><h3 id="environment-managed-title">{{ t('environment.other.heading') }}</h3><p>{{ t('environment.other.description') }}</p></div>
           </div>
           <button v-if="activeEmulation?.viewport" type="button" @click="toggleResponsivePreview">
             <IconDevices aria-hidden="true" />
-            <span><strong>{{ activeEmulation.viewport.width }}×{{ activeEmulation.viewport.height }} viewport</strong><small>Open Responsive preview</small></span>
+            <span><strong>{{ activeEmulation.viewport.width }}×{{ activeEmulation.viewport.height }} {{ t('environment.other.viewport') }}</strong><small>{{ t('environment.other.openResponsive') }}</small></span>
           </button>
           <div v-if="activeEmulation?.extraHttpHeaderNames?.length" class="environment-header-names">
             <IconRoute aria-hidden="true" />
-            <span><strong>{{ activeEmulation.extraHttpHeaderNames.length }} agent-set request {{ activeEmulation.extraHttpHeaderNames.length === 1 ? 'header' : 'headers' }}</strong><small>{{ activeEmulation.extraHttpHeaderNames.join(', ') }} · values stay hidden</small></span>
+            <span><strong>{{ activeEmulation.extraHttpHeaderNames.length }} {{ t('environment.other.agentRequest') }} {{ activeEmulation.extraHttpHeaderNames.length === 1 ? t('environment.other.header') : t('environment.other.headers') }}</strong><small>{{ activeEmulation.extraHttpHeaderNames.join(', ') }} {{ t('environment.other.hidden') }}</small></span>
           </div>
         </section>
         <output class="environment-status" :class="{ error: environmentState === 'error' || !environmentSettingsDraft, applied: environmentState === 'applied' }" aria-live="polite">
           <IconError v-if="environmentState === 'error' || !environmentSettingsDraft" aria-hidden="true" />
           <IconCheck v-else-if="environmentState === 'applied'" aria-hidden="true" />
           <IconSpeed v-else aria-hidden="true" />
-          <span><strong>{{ environmentState === 'applying' ? 'Applying conditions…' : environmentState === 'applied' ? 'Environment applied' : !environmentSettingsDraft ? 'Check the entered values' : `${activeEnvironmentOverrideCount} active ${activeEnvironmentOverrideCount === 1 ? 'condition' : 'conditions'}` }}</strong><small>{{ environmentError || 'Apply without reload for live CSS and connection changes, or reload without cache to retest page startup.' }}</small></span>
+          <span><strong>{{ environmentState === 'applying' ? t('environment.applyingConditions') : environmentState === 'applied' ? t('environment.applied') : !environmentSettingsDraft ? t('environment.checkValues') : t(activeEnvironmentOverrideCount === 1 ? 'environment.activeCondition' : 'environment.activeConditions', { count: localNumber(activeEnvironmentOverrideCount) }) }}</strong><small>{{ environmentError || t('environment.applyHelp') }}</small></span>
         </output>
-        <p class="responsive-preview-caveat"><IconInfo aria-hidden="true" /> Throttling is an approximation relative to this computer. Use a physical device and field data before drawing production conclusions.</p>
+        <p class="responsive-preview-caveat"><IconInfo aria-hidden="true" /> {{ t('environment.limitation') }}</p>
         <footer>
-          <button type="button" :disabled="environmentState === 'applying'" @click="resetEnvironment">Reset environment</button>
+          <button type="button" :disabled="environmentState === 'applying'" @click="resetEnvironment">{{ t('environment.reset') }}</button>
           <div>
-            <button type="submit" :disabled="!environmentSettingsDraft || environmentState === 'applying'">Apply</button>
+            <button type="submit" :disabled="!environmentSettingsDraft || environmentState === 'applying'">{{ t('environment.apply') }}</button>
             <button class="primary" type="button" :disabled="!environmentSettingsDraft || environmentState === 'applying'" @click="applyEnvironment(true)">
               <IconProgress v-if="environmentState === 'applying'" class="state-spinner" aria-hidden="true" />
               <IconRefresh v-else aria-hidden="true" />
-              {{ environmentState === 'applying' ? 'Applying…' : 'Apply & reload' }}
+              {{ environmentState === 'applying' ? t('environment.applying') : t('environment.applyReload') }}
             </button>
           </div>
         </footer>
       </form>
     </section>
-    <section
-      v-if="qualityAuditPanelOpen"
-      class="accessibility-panel quality-audit-panel"
-      data-shell-docked-panel
-      role="dialog"
-      aria-modal="false"
-      aria-labelledby="quality-audit-panel-title"
-      :aria-busy="qualityAuditState === 'running'"
-    >
-      <header>
-        <div>
-          <span class="eyebrow">Local evidence review</span>
-          <h2 id="quality-audit-panel-title">Quality audit</h2>
-        </div>
-        <div class="panel-header-actions">
-          <PanelDockPicker v-model="panelDock" label="Dock quality audit" />
-          <button class="panel-close" type="button" aria-label="Close quality audit" @click="qualityAuditPanelOpen = false"><IconClose aria-hidden="true" /></button>
-        </div>
-      </header>
-      <div v-if="qualityAuditState === 'running'" class="accessibility-audit-loading" role="status">
-        <IconProgress class="state-spinner" aria-hidden="true" />
-        <strong>Checking six quality categories…</strong>
-        <span>Bronom combines bounded local evidence without uploading page content or inventing a score.</span>
-      </div>
-      <div v-else-if="qualityAuditState === 'error'" class="accessibility-audit-error" role="alert">
-        <IconError aria-hidden="true" />
-        <strong>Quality audit could not finish</strong>
-        <span>{{ qualityAuditError }}</span>
-        <button type="button" @click="runQualityAudit">Try again</button>
-      </div>
-      <template v-else-if="qualityAuditReport">
-        <div class="quality-audit-summary" :class="qualityAuditReport.status">
-          <IconCheck v-if="qualityAuditReport.status === 'pass'" aria-hidden="true" />
-          <IconWarning v-else-if="qualityAuditReport.status === 'warning'" aria-hidden="true" />
-          <IconError v-else aria-hidden="true" />
-          <span>
-            <strong>{{ qualityAuditReport.status === 'pass' ? 'No automated blockers found' : qualityAuditReport.status === 'warning' ? 'Review the warnings' : 'Quality issues need attention' }}</strong>
-            <small>{{ qualityAuditReport.totals.errors }} errors · {{ qualityAuditReport.totals.warnings }} warnings · {{ qualityAuditReport.totals.info }} informational</small>
-          </span>
-        </div>
-        <div class="quality-audit-content">
-          <section class="quality-audit-categories" aria-label="Quality categories">
-            <article v-for="category in qualityAuditReport.categories" :key="category.id" :class="category.status">
-              <header>
-                <strong>{{ category.label }}</strong>
-                <span>{{ category.status.replace('-', ' ') }}</span>
-              </header>
-              <p>{{ category.summary }}</p>
-              <ul>
-                <li v-for="item in category.evidence" :key="item">{{ item }}</li>
-              </ul>
-            </article>
-          </section>
-          <section v-if="qualityAuditReport.findings.length" class="quality-audit-findings" aria-labelledby="quality-audit-findings-title">
-            <h3 id="quality-audit-findings-title">Findings</h3>
-            <article v-for="(finding, index) in qualityAuditReport.findings" :key="`${finding.category}-${finding.code}-${index}`" :class="finding.severity">
-              <header><span>{{ finding.severity }}</span><strong>{{ finding.code }}</strong><small>{{ finding.category }}</small></header>
-              <p>{{ finding.message }}</p>
-            </article>
-            <p v-if="qualityAuditReport.truncated" class="quality-audit-truncated">Only the first 40 findings are shown and copied; category totals remain complete.</p>
-          </section>
-          <details class="quality-audit-caveats">
-            <summary>Scope and limitations</summary>
-            <ul><li v-for="caveat in qualityAuditReport.caveats" :key="caveat">{{ caveat }}</li></ul>
-          </details>
-        </div>
-        <footer>
-          <span>{{ qualityAuditReport.categories.length }} categories · {{ new Date(qualityAuditReport.auditedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }}</span>
-          <div>
-            <button type="button" @click="copyQualityAudit"><IconCheck v-if="qualityAuditCopied" aria-hidden="true" /><IconCopy v-else aria-hidden="true" /> {{ qualityAuditCopied ? 'Copied' : 'Copy report' }}</button>
-            <button type="button" @click="runQualityAudit"><IconRefresh aria-hidden="true" /> Run again</button>
-          </div>
-        </footer>
-      </template>
-    </section>
-    <section
-      v-if="accessibilityPanelOpen"
-      class="accessibility-panel"
-      data-shell-docked-panel
-      role="dialog"
-      aria-modal="false"
-      aria-labelledby="accessibility-panel-title"
-      :aria-busy="accessibilityAuditState === 'running'"
-    >
-      <header>
-        <div>
-          <span class="eyebrow">Local WCAG check</span>
-          <h2 id="accessibility-panel-title">Accessibility</h2>
-        </div>
-        <div class="panel-header-actions">
-          <PanelDockPicker v-model="panelDock" label="Dock accessibility audit" />
-          <button class="panel-close" type="button" aria-label="Close accessibility audit" @click="accessibilityPanelOpen = false"><IconClose aria-hidden="true" /></button>
-        </div>
-      </header>
-      <div v-if="accessibilityAuditState === 'running'" class="accessibility-audit-loading" role="status">
-        <IconProgress class="state-spinner" aria-hidden="true" />
-        <strong>Checking the rendered page…</strong>
-        <span>The audit runs locally and does not send page data to a service.</span>
-      </div>
-      <div v-else-if="accessibilityAuditState === 'error'" class="accessibility-audit-error" role="alert">
-        <IconError aria-hidden="true" />
-        <strong>Audit could not finish</strong>
-        <span>{{ accessibilityAuditError }}</span>
-        <button type="button" @click="runAccessibilityAudit">Try again</button>
-      </div>
-      <template v-else-if="accessibilityAudit">
-        <div class="accessibility-audit-summary">
-          <article>
-            <strong>{{ accessibilityAudit.violationCount }}</strong>
-            <span>{{ accessibilityAudit.violationCount === 1 ? 'violation' : 'violations' }}</span>
-          </article>
-          <article class="critical">
-            <strong>{{ accessibilityImpactCount('critical') }}</strong>
-            <span>critical</span>
-          </article>
-          <article class="serious">
-            <strong>{{ accessibilityImpactCount('serious') }}</strong>
-            <span>serious</span>
-          </article>
-          <article>
-            <strong>{{ accessibilityAudit.needsReviewCount }}</strong>
-            <span>review</span>
-          </article>
-        </div>
-        <div v-if="!accessibilityAudit.violationCount" class="accessibility-audit-empty">
-          <IconCheck aria-hidden="true" />
-          <strong>No automated WCAG A/AA violations found</strong>
-          <span>Manual keyboard and assistive-technology testing is still needed.</span>
-        </div>
-        <div v-else class="accessibility-violations">
-          <article v-for="violation in accessibilityAudit.violations" :key="violation.id" class="accessibility-violation">
-            <header>
-              <span class="accessibility-impact" :class="violation.impact">{{ violation.impact }}</span>
-              <strong>{{ violation.help }}</strong>
-              <small>{{ violation.id }} · {{ violation.nodeCount }} {{ violation.nodeCount === 1 ? 'element' : 'elements' }}</small>
-            </header>
-            <p>{{ violation.description }}</p>
-            <ul>
-              <li v-for="(node, nodeIndex) in violation.nodes" :key="`${violation.id}-${nodeIndex}`">
-                <code>{{ node.targets.join(' → ') }}</code>
-                <span>{{ node.failureSummary }}</span>
-              </li>
-            </ul>
-            <button v-if="violation.helpUrl" type="button" @click="openSupport(violation.helpUrl)">Rule guidance ↗</button>
-          </article>
-        </div>
-        <footer>
-          <span>{{ accessibilityAudit.engine.name }} {{ accessibilityAudit.engine.version }} · {{ accessibilityAudit.standard }}</span>
-          <button type="button" @click="runAccessibilityAudit"><IconRefresh aria-hidden="true" /> Run again</button>
-        </footer>
-      </template>
-    </section>
-    <section
-      v-if="performancePanelOpen"
-      class="accessibility-panel performance-panel"
-      data-shell-docked-panel
-      role="dialog"
-      aria-modal="false"
-      aria-labelledby="performance-panel-title"
-      :aria-busy="performanceState === 'running'"
-    >
-      <header>
-        <div>
-          <span class="eyebrow">Current visit</span>
-          <h2 id="performance-panel-title">Page performance</h2>
-        </div>
-        <div class="panel-header-actions">
-          <PanelDockPicker v-model="panelDock" label="Dock performance report" />
-          <button class="panel-close" type="button" aria-label="Close performance report" @click="performancePanelOpen = false"><IconClose aria-hidden="true" /></button>
-        </div>
-      </header>
-      <div v-if="performanceState === 'running'" class="accessibility-audit-loading" role="status">
-        <IconProgress class="state-spinner" aria-hidden="true" />
-        <strong>Collecting local page metrics…</strong>
-        <span>The measurement stays in Bronom and does not upload page data.</span>
-      </div>
-      <div v-else-if="performanceState === 'error'" class="accessibility-audit-error" role="alert">
-        <IconError aria-hidden="true" />
-        <strong>Performance report could not finish</strong>
-        <span>{{ performanceError }}</span>
-        <button type="button" @click="runPerformanceReport()">Try again</button>
-      </div>
-      <template v-else-if="performanceReport">
-        <div v-if="performanceReport.baseline" class="performance-baseline-status" :class="{ warning: performanceReport.comparison && (!performanceReport.comparison.sameUrl || !performanceReport.comparison.sameEnvironment) }">
-          <IconWarning v-if="performanceReport.comparison && (!performanceReport.comparison.sameUrl || !performanceReport.comparison.sameEnvironment)" aria-hidden="true" />
-          <IconDifference v-else aria-hidden="true" />
-          <span>
-            <strong>{{ performanceReport.comparison ? `Compared with baseline from ${performanceBaselineTime()}` : `Baseline saved at ${performanceBaselineTime()}` }}</strong>
-            <small v-if="performanceReport.comparison && !performanceReport.comparison.sameUrl">The page URL changed since the baseline.</small>
-            <small v-else-if="performanceReport.comparison && !performanceReport.comparison.sameEnvironment">Viewport or browser conditions changed since the baseline.</small>
-            <small v-else-if="performanceReport.comparison">Same page and browser conditions.</small>
-            <small v-else>Measure again after your change to see deltas.</small>
-          </span>
-        </div>
-        <div class="performance-vitals">
-          <article
-            v-for="name in (['LCP', 'INP', 'CLS'] as BrowserPerformanceMetricName[])"
-            :key="name"
-            :class="performanceMetric(name)?.rating || 'unavailable'"
-          >
-            <header>
-              <strong>{{ name }}</strong>
-              <span>{{ performanceMetric(name)?.rating?.replace('-', ' ') || 'not observed' }}</span>
-            </header>
-            <output>{{ formatPerformanceMetric(performanceMetric(name)) }}</output>
-            <small v-if="name === 'LCP'">Good ≤ 2.5 s</small>
-            <small v-else-if="name === 'INP'">Good ≤ 200 ms</small>
-            <small v-else>Good ≤ 0.1</small>
-            <small
-              v-if="performanceComparisonMetric(name)?.direction !== 'unavailable' && performanceComparisonMetric(name)"
-              class="performance-delta"
-              :class="performanceComparisonMetric(name)?.direction"
-            >{{ formatPerformanceDelta(performanceComparisonMetric(name)) }}</small>
-          </article>
-        </div>
-        <div class="performance-details">
-          <section>
-            <h3>Loading</h3>
-            <dl>
-              <div><dt>TTFB</dt><dd>{{ formatPerformanceMetric(performanceMetric('TTFB')) }}<small v-if="performanceComparisonMetric('TTFB')?.direction !== 'unavailable'" class="performance-inline-delta" :class="performanceComparisonMetric('TTFB')?.direction">{{ formatPerformanceDelta(performanceComparisonMetric('TTFB')) }}</small></dd></div>
-              <div><dt>First contentful paint</dt><dd>{{ formatPerformanceMetric(performanceMetric('FCP')) }}<small v-if="performanceComparisonMetric('FCP')?.direction !== 'unavailable'" class="performance-inline-delta" :class="performanceComparisonMetric('FCP')?.direction">{{ formatPerformanceDelta(performanceComparisonMetric('FCP')) }}</small></dd></div>
-              <div><dt>DOM content loaded</dt><dd>{{ performanceReport.navigation?.domContentLoadedMs == null ? 'Unavailable' : `${Math.round(performanceReport.navigation.domContentLoadedMs)} ms` }}</dd></div>
-              <div><dt>Load event</dt><dd>{{ performanceReport.navigation?.loadMs == null ? 'Unavailable' : `${Math.round(performanceReport.navigation.loadMs)} ms` }}<small v-if="performanceComparisonMetric('LOAD')?.direction !== 'unavailable'" class="performance-inline-delta" :class="performanceComparisonMetric('LOAD')?.direction">{{ formatPerformanceDelta(performanceComparisonMetric('LOAD')) }}</small></dd></div>
-            </dl>
-          </section>
-          <section>
-            <h3>Page work</h3>
-            <dl>
-              <div><dt>Resources</dt><dd>{{ performanceReport.resources.count }}</dd></div>
-              <div><dt>Transferred</dt><dd>{{ formatBytes(performanceReport.resources.transferBytes ?? 0) }}<small v-if="performanceComparisonMetric('TRANSFER')?.direction !== 'unavailable'" class="performance-inline-delta" :class="performanceComparisonMetric('TRANSFER')?.direction">{{ formatPerformanceDelta(performanceComparisonMetric('TRANSFER')) }}</small></dd></div>
-              <div><dt>Long tasks</dt><dd>{{ performanceReport.longTasks.supported ? performanceReport.longTasks.count : 'Unsupported' }}</dd></div>
-              <div><dt>Observed blocking time</dt><dd>{{ performanceReport.longTasks.supported ? `${Math.round(performanceReport.longTasks.blockingTimeMs ?? 0)} ms` : 'Unavailable' }}<small v-if="performanceComparisonMetric('LONG_TASK_BLOCKING')?.direction !== 'unavailable'" class="performance-inline-delta" :class="performanceComparisonMetric('LONG_TASK_BLOCKING')?.direction">{{ formatPerformanceDelta(performanceComparisonMetric('LONG_TASK_BLOCKING')) }}</small></dd></div>
-            </dl>
-          </section>
-          <section>
-            <h3>Responsiveness</h3>
-            <dl>
-              <div><dt>Long animation frames</dt><dd>{{ performanceReport.longAnimationFrames.supported ? performanceReport.longAnimationFrames.count : 'Unsupported' }}</dd></div>
-              <div><dt>Blocking duration</dt><dd>{{ performanceReport.longAnimationFrames.supported ? `${Math.round(performanceReport.longAnimationFrames.blockingDurationMs ?? 0)} ms` : 'Unavailable' }}<small v-if="performanceComparisonMetric('LOAF_BLOCKING')?.direction !== 'unavailable'" class="performance-inline-delta" :class="performanceComparisonMetric('LOAF_BLOCKING')?.direction">{{ formatPerformanceDelta(performanceComparisonMetric('LOAF_BLOCKING')) }}</small></dd></div>
-              <div><dt>Longest frame</dt><dd>{{ performanceReport.longAnimationFrames.supported ? `${Math.round(performanceReport.longAnimationFrames.longestDurationMs ?? 0)} ms` : 'Unavailable' }}</dd></div>
-              <div><dt>Style &amp; layout</dt><dd>{{ performanceReport.longAnimationFrames.supported ? `${Math.round(performanceReport.longAnimationFrames.styleAndLayoutDurationMs ?? 0)} ms` : 'Unavailable' }}</dd></div>
-            </dl>
-            <div v-if="performanceReport.longAnimationFrames.contributors.length" class="performance-contributors">
-              <h4>Top script contributors</h4>
-              <ol>
-                <li v-for="(contributor, index) in performanceReport.longAnimationFrames.contributors" :key="`${performanceContributorSource(contributor)}-${index}`">
-                  <span><strong>{{ performanceContributorTitle(contributor) }}</strong><small>{{ performanceContributorSource(contributor) }} · {{ contributor.count }} {{ contributor.count === 1 ? 'frame' : 'frames' }}</small></span>
-                  <output>{{ Math.round(contributor.totalDurationMs) }} ms<small v-if="contributor.forcedStyleAndLayoutDurationMs">{{ Math.round(contributor.forcedStyleAndLayoutDurationMs) }} ms forced layout</small></output>
-                </li>
-              </ol>
-              <p v-if="performanceReport.longAnimationFrames.truncated" class="performance-attribution-note">Showing the highest-cost bounded contributors and frames.</p>
-            </div>
-            <p v-else-if="performanceReport.longAnimationFrames.supported && performanceReport.longAnimationFrames.count" class="performance-hint"><IconInfo aria-hidden="true" /> Long frames were observed, but Chromium did not attribute them to a same-origin main-thread script.</p>
-          </section>
-          <section v-if="performanceReport.layoutShifts.supported">
-            <h3>Layout shifts</h3>
-            <dl>
-              <div><dt>Unexpected shifts</dt><dd>{{ performanceReport.layoutShifts.count }}</dd></div>
-              <div><dt>Observed score sum</dt><dd>{{ (performanceReport.layoutShifts.scoreSum ?? 0).toFixed(3) }}</dd></div>
-              <div><dt>After recent input</dt><dd>{{ performanceReport.layoutShifts.recentInputCount }} excluded</dd></div>
-            </dl>
-            <div v-if="performanceReport.layoutShifts.entries.length" class="performance-contributors performance-layout-shifts">
-              <h4>Largest unexpected shifts</h4>
-              <ol>
-                <li v-for="(entry, index) in performanceReport.layoutShifts.entries" :key="`${entry.startTimeMs}-${index}`">
-                  <span><strong>{{ entry.sources[0] || 'Affected element unavailable' }}</strong><small>{{ Math.round(entry.startTimeMs) }} ms after navigation<span v-if="entry.sources.length > 1"> · {{ entry.sources.length }} affected elements</span></small></span>
-                  <output>{{ entry.value.toFixed(3) }}</output>
-                </li>
-              </ol>
-              <p v-if="performanceReport.layoutShifts.truncated" class="performance-attribution-note">Showing the highest-scoring bounded shifts.</p>
-            </div>
-            <p v-else class="performance-hint"><IconCheck aria-hidden="true" /> No unexpected layout shift was observed in this visit.</p>
-          </section>
-          <section v-if="performanceReport.userTimings.count">
-            <h3>User timing</h3>
-            <div class="performance-contributors performance-user-timings">
-              <ol>
-                <li v-for="(entry, index) in performanceReport.userTimings.entries" :key="`${entry.type}-${entry.startTimeMs}-${index}`">
-                  <span><strong>{{ entry.name }}</strong><small>{{ entry.type }} · {{ Math.round(entry.startTimeMs) }} ms after navigation</small></span>
-                  <output>{{ entry.type === 'measure' ? `${Math.round(entry.durationMs)} ms` : 'mark' }}</output>
-                </li>
-              </ol>
-              <p v-if="performanceReport.userTimings.truncated" class="performance-attribution-note">Showing the {{ performanceReport.userTimings.entries.length }} most recent of {{ performanceReport.userTimings.count }} marks and measures.</p>
-            </div>
-          </section>
-          <p v-if="!performanceMetric('INP')" class="performance-hint"><IconInfo aria-hidden="true" /> Interact with the page, then measure again to collect INP.</p>
-          <details>
-            <summary>How to interpret this report</summary>
-            <ul>
-              <li v-for="caveat in performanceReport.caveats" :key="caveat">{{ caveat }}</li>
-            </ul>
-          </details>
-        </div>
-        <footer>
-          <span>{{ performanceReport.engine.name }} {{ performanceReport.engine.version }} · local sample</span>
-          <div>
-            <button v-if="performanceReport.baseline" type="button" @click="runPerformanceReport('clear-baseline')">Clear baseline</button>
-            <button type="button" @click="runPerformanceReport('set-baseline')"><IconDifference aria-hidden="true" /> {{ performanceReport.baseline ? 'Replace baseline' : 'Save baseline' }}</button>
-            <button type="button" @click="runPerformanceReport('measure')"><IconRefresh aria-hidden="true" /> Measure again</button>
-          </div>
-        </footer>
-      </template>
-    </section>
-    <section
-      v-if="designOverviewPanelOpen"
-      class="accessibility-panel design-overview-panel"
-      data-shell-docked-panel
-      role="dialog"
-      aria-modal="false"
-      aria-labelledby="design-overview-panel-title"
-      :aria-busy="designOverviewState === 'loading'"
-    >
-      <header>
-        <div>
-          <span class="eyebrow">Current rendering</span>
-          <h2 id="design-overview-panel-title">Design overview</h2>
-        </div>
-        <div class="panel-header-actions">
-          <PanelDockPicker v-model="panelDock" label="Dock design overview" />
-          <button class="panel-close" type="button" aria-label="Close design overview" @click="designOverviewPanelOpen = false"><IconClose aria-hidden="true" /></button>
-        </div>
-      </header>
-      <div v-if="designOverviewState === 'loading'" class="accessibility-audit-loading" role="status">
-        <IconProgress class="state-spinner" aria-hidden="true" />
-        <strong>Reading computed page styles…</strong>
-        <span>Page text, form values, CSS source, IDs, and class names stay out of the report.</span>
-      </div>
-      <div v-else-if="designOverviewState === 'error'" class="accessibility-audit-error" role="alert">
-        <IconError aria-hidden="true" />
-        <strong>Design overview could not finish</strong>
-        <span>{{ designOverviewError }}</span>
-        <button type="button" @click="runDesignOverview">Try again</button>
-      </div>
-      <template v-else-if="designOverviewReport">
-        <div class="design-overview-summary">
-          <article><span>Visible elements</span><strong>{{ designOverviewReport.summary.visibleElements }}</strong></article>
-          <article><span>Colors</span><strong>{{ designOverviewReport.summary.textColorCount + designOverviewReport.summary.backgroundColorCount + designOverviewReport.summary.borderColorCount }}</strong></article>
-          <article><span>Font combinations</span><strong>{{ designOverviewReport.summary.fontCombinationCount }}</strong></article>
-          <article :class="{ warning: designOverviewReport.summary.contrastIssueCount }"><span>Likely contrast issues</span><strong>{{ designOverviewReport.summary.contrastIssueCount }}</strong></article>
-        </div>
-        <div class="design-overview-details">
-          <section>
-            <h3>Computed colors</h3>
-            <div class="design-color-groups">
-              <div v-for="kind in (['text', 'background', 'border'] as const)" :key="kind">
-                <h4>{{ kind }}</h4>
-                <ul v-if="designOverviewReport.colors[kind].length" class="design-color-list">
-                  <li v-for="color in designOverviewReport.colors[kind]" :key="`${kind}-${color.value}`">
-                    <span class="design-color-swatch" :style="{ backgroundColor: color.value }" aria-hidden="true"></span>
-                    <code>{{ color.value }}</code>
-                    <small>{{ color.count }}×</small>
-                  </li>
-                </ul>
-                <p v-else>No visible {{ kind }} colors observed.</p>
-              </div>
-            </div>
-          </section>
-          <section>
-            <h3>Typography</h3>
-            <div v-if="designOverviewReport.fonts.length" class="design-font-list" role="list">
-              <article v-for="font in designOverviewReport.fonts" :key="`${font.family}-${font.sizePx}-${font.weight}-${font.lineHeight}`" role="listitem">
-                <strong>{{ font.family || 'Browser default' }}</strong>
-                <span>{{ font.sizePx == null ? 'unknown size' : `${font.sizePx}px` }} · weight {{ font.weight || 'normal' }} · line {{ font.lineHeight || 'normal' }}</span>
-                <small>{{ font.count }} {{ font.count === 1 ? 'element' : 'elements' }}</small>
-              </article>
-            </div>
-            <p v-else>No visible font combinations observed.</p>
-          </section>
-          <section>
-            <h3>Likely text contrast issues</h3>
-            <div v-if="designOverviewReport.contrastIssues.length" class="design-contrast-list" role="list">
-              <article v-for="issue in designOverviewReport.contrastIssues" :key="`${issue.selector}-${issue.ratio}`" role="listitem">
-                <header><code>{{ issue.selector }}</code><strong>{{ issue.ratio }}:1</strong></header>
-                <span>{{ issue.foreground }} on {{ issue.background }} · needs {{ issue.requiredRatio }}:1</span>
-                <small>{{ issue.fontSizePx == null ? 'unknown size' : `${issue.fontSizePx}px` }} · weight {{ issue.fontWeight }}{{ issue.largeText ? ' · large text' : '' }}</small>
-              </article>
-            </div>
-            <p v-else>No likely failures were found in the bounded solid-background sample.</p>
-          </section>
-          <section v-if="designOverviewReport.mediaQueries.length">
-            <h3>Media queries</h3>
-            <ul class="design-media-list">
-              <li v-for="media in designOverviewReport.mediaQueries" :key="media.query"><code>{{ media.query }}</code><small>{{ media.count }}×</small></li>
-            </ul>
-          </section>
-          <details>
-            <summary>Scope and limitations</summary>
-            <ul><li v-for="caveat in designOverviewReport.caveats" :key="caveat">{{ caveat }}</li></ul>
-          </details>
-        </div>
-        <footer>
-          <span>{{ designOverviewReport.summary.elementsScanned }} elements sampled · {{ debugTimestamp(designOverviewReport.capturedAt) }}</span>
-          <button type="button" @click="runDesignOverview"><IconRefresh aria-hidden="true" /> Capture again</button>
-        </footer>
-      </template>
-    </section>
-    <section
-      v-if="pageMetadataPanelOpen"
-      class="accessibility-panel page-metadata-panel"
-      data-shell-docked-panel
-      role="dialog"
-      aria-modal="false"
-      aria-labelledby="page-metadata-panel-title"
-      :aria-busy="pageMetadataState === 'loading'"
-    >
-      <header>
-        <div>
-          <span class="eyebrow">Current rendered document</span>
-          <h2 id="page-metadata-panel-title">Page metadata</h2>
-        </div>
-        <div class="panel-header-actions">
-          <PanelDockPicker v-model="panelDock" label="Dock page metadata" />
-          <button class="panel-close" type="button" aria-label="Close page metadata" @click="pageMetadataPanelOpen = false"><IconClose aria-hidden="true" /></button>
-        </div>
-      </header>
-      <div v-if="pageMetadataState === 'loading'" class="accessibility-audit-loading" role="status">
-        <IconProgress class="state-spinner" aria-hidden="true" />
-        <strong>Inspecting search and social metadata…</strong>
-        <span>Only allowlisted metadata and structured-data types are collected.</span>
-      </div>
-      <div v-else-if="pageMetadataState === 'error'" class="accessibility-audit-error" role="alert">
-        <IconError aria-hidden="true" />
-        <strong>Page metadata could not be inspected</strong>
-        <span>{{ pageMetadataError }}</span>
-        <button type="button" @click="runPageMetadata">Try again</button>
-      </div>
-      <template v-else-if="pageMetadataReport">
-        <div class="page-metadata-summary">
-          <article><span>Actionable findings</span><strong>{{ pageMetadataReport.issues.filter((issue) => issue.severity !== 'info').length }}</strong></article>
-          <article><span>H1 headings</span><strong>{{ pageMetadataReport.document.headingCounts.h1 }}</strong></article>
-          <article><span>Open Graph fields</span><strong>{{ pageMetadataReport.openGraph.propertyCount }}</strong></article>
-          <article :class="{ warning: pageMetadataReport.structuredData.invalidBlockCount }"><span>Structured data types</span><strong>{{ pageMetadataReport.structuredData.types.length }}</strong></article>
-        </div>
-        <div class="page-metadata-details">
-          <section v-if="pageMetadataReport.issues.length">
-            <h3>Findings</h3>
-            <div class="page-metadata-issues" role="list">
-              <article v-for="issue in pageMetadataReport.issues" :key="`${issue.code}-${issue.message}`" :class="issue.severity" role="listitem">
-                <IconError v-if="issue.severity === 'error'" aria-hidden="true" />
-                <IconWarning v-else-if="issue.severity === 'warning'" aria-hidden="true" />
-                <IconInfo v-else aria-hidden="true" />
-                <div><strong>{{ issue.code.replaceAll('-', ' ') }}</strong><span>{{ issue.message }}</span></div>
-              </article>
-            </div>
-          </section>
-          <section>
-            <h3>Search result inputs</h3>
-            <article class="search-preview" aria-label="Approximate search result preview">
-              <small>{{ pageMetadataReport.document.canonicalUrls[0] || pageMetadataReport.url }}</small>
-              <strong>{{ pageMetadataReport.title || 'Untitled page' }}</strong>
-              <p>{{ pageMetadataReport.document.description || 'No meta description. A search engine may select page content for the snippet.' }}</p>
-            </article>
-            <dl class="page-metadata-grid">
-              <div class="wide"><dt>Canonical</dt><dd>{{ pageMetadataReport.document.canonicalUrls[0] || 'Not declared' }}</dd></div>
-              <div><dt>Language</dt><dd>{{ pageMetadataReport.document.language || 'Not declared' }}</dd></div>
-              <div><dt>Charset</dt><dd>{{ pageMetadataReport.document.charset || 'Unavailable' }}</dd></div>
-              <div><dt>Robots</dt><dd>{{ pageMetadataReport.document.robots || 'Default indexing behavior' }}</dd></div>
-              <div><dt>Viewport</dt><dd>{{ pageMetadataReport.document.viewport || 'Not declared' }}</dd></div>
-              <div><dt>Theme color</dt><dd>{{ pageMetadataReport.document.themeColor || 'Not declared' }}</dd></div>
-              <div><dt>Manifest</dt><dd>{{ pageMetadataReport.document.manifestUrl || 'Not linked' }}</dd></div>
-              <div class="wide"><dt>Heading counts</dt><dd>H1 {{ pageMetadataReport.document.headingCounts.h1 }} · H2 {{ pageMetadataReport.document.headingCounts.h2 }} · H3 {{ pageMetadataReport.document.headingCounts.h3 }} · H4–H6 {{ pageMetadataReport.document.headingCounts.h4 + pageMetadataReport.document.headingCounts.h5 + pageMetadataReport.document.headingCounts.h6 }}</dd></div>
-            </dl>
-          </section>
-          <section>
-            <h3>Social cards</h3>
-            <div class="social-metadata-cards">
-              <article>
-                <header><strong>Open Graph</strong><small>{{ pageMetadataReport.openGraph.propertyCount }} properties</small></header>
-                <dl>
-                  <div><dt>Title</dt><dd>{{ pageMetadataReport.openGraph.title || 'Not declared' }}</dd></div>
-                  <div><dt>Type</dt><dd>{{ pageMetadataReport.openGraph.type || 'Not declared' }}</dd></div>
-                  <div><dt>URL</dt><dd>{{ pageMetadataReport.openGraph.url || 'Not declared' }}</dd></div>
-                  <div><dt>Description</dt><dd>{{ pageMetadataReport.openGraph.description || 'Not declared' }}</dd></div>
-                  <div><dt>Image</dt><dd>{{ pageMetadataReport.openGraph.images[0]?.url || 'Not declared' }}</dd></div>
-                  <div><dt>Image alt</dt><dd>{{ pageMetadataReport.openGraph.images[0]?.alt || 'Not declared' }}</dd></div>
-                </dl>
-              </article>
-              <article>
-                <header><strong>Twitter card</strong><small>{{ pageMetadataReport.twitter.propertyCount }} properties</small></header>
-                <dl>
-                  <div><dt>Card</dt><dd>{{ pageMetadataReport.twitter.card || 'Not declared' }}</dd></div>
-                  <div><dt>Title</dt><dd>{{ pageMetadataReport.twitter.title || 'Falls back to Open Graph/title' }}</dd></div>
-                  <div><dt>Description</dt><dd>{{ pageMetadataReport.twitter.description || 'Falls back to Open Graph/description' }}</dd></div>
-                  <div><dt>Image</dt><dd>{{ pageMetadataReport.twitter.images[0]?.url || 'Not declared' }}</dd></div>
-                </dl>
-              </article>
-            </div>
-          </section>
-          <section>
-            <h3>Structured data</h3>
-            <div v-if="pageMetadataReport.structuredData.types.length" class="metadata-type-list" aria-label="Structured data types">
-              <span v-for="type in pageMetadataReport.structuredData.types" :key="type">{{ type }}</span>
-            </div>
-            <p v-else>No JSON-LD types were found.</p>
-            <div v-if="pageMetadataReport.structuredData.blocks.some((block) => !block.valid)" class="metadata-json-errors">
-              <div v-for="block in pageMetadataReport.structuredData.blocks.filter((item) => !item.valid)" :key="block.index"><strong>Block {{ block.index + 1 }}</strong><span>{{ block.error }}</span></div>
-            </div>
-          </section>
-          <section v-if="pageMetadataReport.alternateLinks.length || pageMetadataReport.icons.length">
-            <h3>Linked metadata</h3>
-            <details v-if="pageMetadataReport.alternateLinks.length">
-              <summary>{{ pageMetadataReport.alternateLinks.length }} language {{ pageMetadataReport.alternateLinks.length === 1 ? 'alternate' : 'alternates' }}</summary>
-              <ul><li v-for="alternate in pageMetadataReport.alternateLinks" :key="`${alternate.language}-${alternate.url}`"><strong>{{ alternate.language }}</strong><code>{{ alternate.url }}</code></li></ul>
-            </details>
-            <details v-if="pageMetadataReport.icons.length">
-              <summary>{{ pageMetadataReport.icons.length }} linked {{ pageMetadataReport.icons.length === 1 ? 'icon' : 'icons' }}</summary>
-              <ul><li v-for="icon in pageMetadataReport.icons" :key="`${icon.rel}-${icon.url}`"><strong>{{ icon.sizes || icon.type || icon.rel }}</strong><code>{{ icon.url }}</code></li></ul>
-            </details>
-          </section>
-          <details>
-            <summary>Scope and limitations</summary>
-            <ul><li v-for="caveat in pageMetadataReport.caveats" :key="caveat">{{ caveat }}</li></ul>
-          </details>
-        </div>
-        <footer>
-          <span>Rendered DOM · {{ debugTimestamp(pageMetadataReport.capturedAt) }}</span>
-          <button type="button" @click="runPageMetadata"><IconRefresh aria-hidden="true" /> Inspect again</button>
-        </footer>
-      </template>
-    </section>
-    <section
-      v-if="securityPanelOpen"
-      class="accessibility-panel security-panel"
-      data-shell-docked-panel
-      role="dialog"
-      aria-modal="false"
-      aria-labelledby="security-panel-title"
-      :aria-busy="securityReportState === 'loading'"
-    >
-      <header>
-        <div>
-          <span class="eyebrow">Current main document</span>
-          <h2 id="security-panel-title">Connection security</h2>
-        </div>
-        <div class="panel-header-actions">
-          <PanelDockPicker v-model="panelDock" label="Dock security report" />
-          <button class="panel-close" type="button" aria-label="Close security report" @click="securityPanelOpen = false"><IconClose aria-hidden="true" /></button>
-        </div>
-      </header>
-      <div v-if="securityReportState === 'loading'" class="accessibility-audit-loading" role="status">
-        <IconProgress class="state-spinner" aria-hidden="true" />
-        <strong>Inspecting the current connection…</strong>
-        <span>Bronom reads transport metadata already observed by Chromium.</span>
-      </div>
-      <div v-else-if="securityReportState === 'error'" class="accessibility-audit-error" role="alert">
-        <IconError aria-hidden="true" />
-        <strong>Security report could not finish</strong>
-        <span>{{ securityReportError }}</span>
-        <button type="button" @click="runSecurityReport">Try again</button>
-      </div>
-      <template v-else-if="securityReport">
-        <div class="security-overview" :class="securityReport.state">
-          <IconShieldLock aria-hidden="true" />
-          <div>
-            <strong v-if="securityReport.state === 'secure'">This connection is secure</strong>
-            <strong v-else-if="securityReport.state === 'insecure' || securityReport.state === 'insecure-broken'">This connection is not secure</strong>
-            <strong v-else>Connection security is {{ securityReport.state }}</strong>
-            <span>{{ securityReport.origin || securityReport.url }}</span>
-          </div>
-          <span class="security-state">{{ securityReport.state }}</span>
-        </div>
-        <div class="security-details">
-          <section>
-            <h3>Connection</h3>
-            <dl>
-              <div><dt>Encrypted transport</dt><dd>{{ securityReport.secureTransport ? 'Yes' : 'No' }}</dd></div>
-              <div><dt>Protocol</dt><dd>{{ securityReport.connection?.protocol || 'Unavailable' }}</dd></div>
-              <div><dt>Cipher</dt><dd>{{ securityReport.connection?.cipher || 'Unavailable' }}</dd></div>
-              <div><dt>Key exchange</dt><dd>{{ securityReport.connection?.keyExchangeGroup || securityReport.connection?.keyExchange || 'Unavailable' }}</dd></div>
-              <div><dt>Certificate transparency</dt><dd>{{ securityReport.connection?.certificateTransparencyCompliance || 'Unavailable' }}</dd></div>
-              <div><dt>Encrypted ClientHello</dt><dd>{{ securityReport.connection?.encryptedClientHello == null ? 'Unavailable' : securityReport.connection.encryptedClientHello ? 'Yes' : 'No' }}</dd></div>
-            </dl>
-          </section>
-          <section v-if="securityReport.certificate">
-            <h3>Certificate</h3>
-            <dl>
-              <div class="wide"><dt>Subject</dt><dd>{{ securityReport.certificate.subjectName || 'Unavailable' }}</dd></div>
-              <div class="wide"><dt>Issuer</dt><dd>{{ securityReport.certificate.issuer || 'Unavailable' }}</dd></div>
-              <div><dt>Valid from</dt><dd>{{ formatSecurityDate(securityReport.certificate.validFrom) }}</dd></div>
-              <div><dt>Valid until</dt><dd>{{ formatSecurityDate(securityReport.certificate.validTo) }}</dd></div>
-              <div><dt>Validity</dt><dd :class="{ warning: !securityReport.certificate.valid }">{{ securityReport.certificate.expired ? 'Expired' : securityReport.certificate.notYetValid ? 'Not yet valid' : securityReport.certificate.valid ? 'Currently valid' : 'Unavailable' }}</dd></div>
-              <div><dt>Expires in</dt><dd>{{ securityReport.certificate.validTo ? `${securityReport.certificate.daysUntilExpiry} days` : 'Unavailable' }}</dd></div>
-            </dl>
-            <details v-if="securityReport.certificate.sanCount">
-              <summary>{{ securityReport.certificate.sanCount }} certificate {{ securityReport.certificate.sanCount === 1 ? 'name' : 'names' }}</summary>
-              <ul><li v-for="name in securityReport.certificate.sanList" :key="name">{{ name }}</li></ul>
-              <small v-if="securityReport.certificate.sanCount > securityReport.certificate.sanList.length">Only the first {{ securityReport.certificate.sanList.length }} names are shown.</small>
-            </details>
-          </section>
-          <section v-else class="security-no-certificate">
-            <IconInfo aria-hidden="true" />
-            <div><strong>No TLS certificate details available</strong><span>This is expected for HTTP, local, cached, failed, or still-loading documents.</span></div>
-          </section>
-          <details class="security-caveats">
-            <summary>What this report does not prove</summary>
-            <ul><li v-for="caveat in securityReport.caveats" :key="caveat">{{ caveat }}</li></ul>
-          </details>
-        </div>
-        <footer>
-          <span>Main document · checked {{ debugTimestamp(securityReport.checkedAt) }}</span>
-          <button type="button" @click="runSecurityReport"><IconRefresh aria-hidden="true" /> Inspect again</button>
-        </footer>
-      </template>
-    </section>
-    <section
-      v-if="coveragePanelOpen"
-      class="accessibility-panel coverage-panel"
-      data-shell-docked-panel
-      role="dialog"
-      aria-modal="false"
-      aria-labelledby="coverage-panel-title"
-      :aria-busy="coverageState === 'loading'"
-    >
-      <header>
-        <div>
-          <span class="eyebrow">Current workflow</span>
-          <h2 id="coverage-panel-title">Code coverage</h2>
-        </div>
-        <div class="panel-header-actions">
-          <PanelDockPicker v-model="panelDock" label="Dock code coverage" />
-          <button class="panel-close" type="button" aria-label="Close code coverage" @click="coveragePanelOpen = false"><IconClose aria-hidden="true" /></button>
-        </div>
-      </header>
-      <div v-if="coverageState === 'loading'" class="accessibility-audit-loading" role="status">
-        <IconProgress class="state-spinner" aria-hidden="true" />
-        <strong>Updating code coverage…</strong>
-        <span>Instrumentation and source analysis stay inside Bronom.</span>
-      </div>
-      <div v-else-if="coverageState === 'error'" class="accessibility-audit-error" role="alert">
-        <IconError aria-hidden="true" />
-        <strong>Code coverage needs attention</strong>
-        <span>{{ coverageError }}</span>
-        <button type="button" @click="manageCodeCoverage('get')">Try again</button>
-      </div>
-      <div v-else-if="coverageResult?.status === 'recording'" class="coverage-recording" role="status">
-        <IconRecord aria-hidden="true" />
-        <strong>Coverage is recording</strong>
-        <span>Use the page paths you want to measure, then stop to calculate used and unused bytes.</span>
-        <small>{{ coverageResult.recording?.mode }} mode · started {{ debugTimestamp(coverageResult.recording?.startedAt || '') }}</small>
-        <button class="primary" type="button" @click="manageCodeCoverage('stop')"><IconStop aria-hidden="true" /> Stop and show results</button>
-      </div>
-      <template v-else-if="coverageResult?.report">
-        <div class="coverage-summary">
-          <article>
-            <span>Used</span>
-            <strong>{{ coverageResult.report.usedPercent }}%</strong>
-            <small>{{ formatBytes(coverageResult.report.usedBytes) }}</small>
-          </article>
-          <article>
-            <span>Unused</span>
-            <strong>{{ formatBytes(coverageResult.report.unusedBytes) }}</strong>
-            <small>of {{ formatBytes(coverageResult.report.totalBytes) }}</small>
-          </article>
-          <article>
-            <span>Resources</span>
-            <strong>{{ coverageResult.report.resources.length }}</strong>
-            <small>{{ coverageResult.report.javascript.resourceCount }} JS · {{ coverageResult.report.css.resourceCount }} CSS</small>
-          </article>
-        </div>
-        <div class="coverage-resource-list" role="list" aria-label="Code coverage resources">
-          <article v-for="resource in coverageResult.report.resources" :key="`${resource.type}:${resource.url}`" role="listitem">
-            <div>
-              <span class="coverage-type">{{ resource.type === 'javascript' ? 'JS' : 'CSS' }}</span>
-              <strong :title="resource.url">{{ resource.url }}</strong>
-              <small>{{ formatBytes(resource.unusedBytes) }} unused of {{ formatBytes(resource.totalBytes) }}</small>
-            </div>
-            <output>{{ resource.usedPercent }}%</output>
-            <div class="coverage-bar" aria-hidden="true"><span :style="{ width: `${resource.usedPercent}%` }" /></div>
-          </article>
-          <div v-if="!coverageResult.report.resources.length" class="network-monitor-empty compact">
-            <IconCode aria-hidden="true" />
-            <strong>No measurable JavaScript or CSS</strong>
-            <span>Reload a web page after starting coverage, then exercise it before stopping.</span>
-          </div>
-        </div>
-        <details class="coverage-caveats">
-          <summary>How to interpret this report</summary>
-          <ul><li v-for="caveat in coverageResult.report.caveats" :key="caveat">{{ caveat }}</li></ul>
-        </details>
-        <footer>
-          <span>{{ coverageResult.report.mode }} mode<span v-if="coverageResult.report.truncated"> · bounded result</span></span>
-          <div>
-            <button type="button" @click="manageCodeCoverage('clear')"><IconDelete aria-hidden="true" /> Clear</button>
-            <button class="primary" type="button" @click="manageCodeCoverage('start', true)"><IconRefresh aria-hidden="true" /> Record again</button>
-          </div>
-        </footer>
-      </template>
-      <div v-else class="coverage-empty">
-        <IconCode aria-hidden="true" />
-        <strong>Find unused JavaScript and CSS</strong>
-        <span>Start before loading or exercising the page. Bronom reports byte totals without exposing source code.</span>
-        <label>
-          <span>Precision</span>
-          <select v-model="coverageMode">
-            <option value="function">Function · lower overhead</option>
-            <option value="block">Block · more precise</option>
-          </select>
-        </label>
-        <div>
-          <button type="button" @click="manageCodeCoverage('start', false)"><IconPlay aria-hidden="true" /> Start now</button>
-          <button class="primary" type="button" @click="manageCodeCoverage('start', true)"><IconRefresh aria-hidden="true" /> Start and reload</button>
-        </div>
-      </div>
-    </section>
-    <section
-      v-if="cpuProfilePanelOpen"
-      class="accessibility-panel coverage-panel"
-      data-shell-docked-panel
-      role="dialog"
-      aria-modal="false"
-      aria-labelledby="cpu-profile-panel-title"
-      :aria-busy="cpuProfileState === 'loading'"
-    >
-      <header>
-        <div>
-          <span class="eyebrow">Runtime diagnostics</span>
-          <h2 id="cpu-profile-panel-title">JavaScript CPU profile</h2>
-        </div>
-        <div class="panel-header-actions">
-          <PanelDockPicker v-model="panelDock" label="Dock JavaScript CPU profile" />
-          <button class="panel-close" type="button" aria-label="Close JavaScript CPU profile" @click="cpuProfilePanelOpen = false"><IconClose aria-hidden="true" /></button>
-        </div>
-      </header>
-      <div v-if="cpuProfileState === 'loading'" class="accessibility-audit-loading" role="status">
-        <IconProgress class="state-spinner" aria-hidden="true" />
-        <strong>Updating JavaScript CPU profile…</strong>
-        <span>Only bounded function timing and sanitized locations leave the profiler.</span>
-      </div>
-      <div v-else-if="cpuProfileState === 'error'" class="accessibility-audit-error" role="alert">
-        <IconError aria-hidden="true" />
-        <strong>JavaScript CPU profile needs attention</strong>
-        <span>{{ cpuProfileError }}</span>
-        <button type="button" @click="manageCpuProfile('get')">Try again</button>
-      </div>
-      <div v-else-if="cpuProfileResult?.status === 'recording'" class="coverage-recording" role="status">
-        <IconRecord aria-hidden="true" />
-        <strong>CPU activity is recording</strong>
-        <span>Exercise the slow interaction once, then stop to rank functions by direct self time.</span>
-        <small>Started {{ debugTimestamp(cpuProfileResult.recording?.startedAt || '') }}</small>
-        <button class="primary" type="button" @click="manageCpuProfile('stop')"><IconStop aria-hidden="true" /> Stop and show hotspots</button>
-      </div>
-      <template v-else-if="cpuProfileResult?.report">
-        <div class="coverage-summary">
-          <article>
-            <span>Profile time</span>
-            <strong>{{ Math.round(cpuProfileResult.report.durationMs) }} ms</strong>
-            <small>{{ cpuProfileResult.report.sampleCount }} samples</small>
-          </article>
-          <article>
-            <span>Sampled time</span>
-            <strong>{{ Math.round(cpuProfileResult.report.sampledTimeMs) }} ms</strong>
-            <small>JavaScript self time</small>
-          </article>
-          <article>
-            <span>Hot functions</span>
-            <strong>{{ cpuProfileResult.report.hotspots.length }}</strong>
-            <small v-if="cpuProfileResult.report.truncated">Top bounded results</small>
-            <small v-else>Ranked by self time</small>
-          </article>
-        </div>
-        <div class="coverage-resource-list" role="list" aria-label="JavaScript CPU hotspots">
-          <article v-for="hotspot in cpuProfileResult.report.hotspots" :key="`${hotspot.functionName}:${hotspot.url}:${hotspot.lineNumber}:${hotspot.columnNumber}`" role="listitem">
-            <div>
-              <span class="coverage-type">JS</span>
-              <strong>{{ hotspot.functionName }}</strong>
-              <small v-if="hotspot.url" :title="hotspot.url">{{ hotspot.url }}<template v-if="hotspot.lineNumber">:{{ hotspot.lineNumber }}</template></small>
-              <small v-else>Browser or anonymous runtime work</small>
-              <small>{{ hotspot.selfTimeMs }} ms self · {{ hotspot.samples }} {{ hotspot.samples === 1 ? 'sample' : 'samples' }}</small>
-            </div>
-            <output>{{ hotspot.selfPercent }}%</output>
-            <div class="coverage-bar" aria-hidden="true"><span :style="{ width: `${hotspot.selfPercent}%` }" /></div>
-          </article>
-          <div v-if="!cpuProfileResult.report.hotspots.length" class="network-monitor-empty compact">
-            <IconMonitoring aria-hidden="true" />
-            <strong>No JavaScript hotspot was sampled</strong>
-            <span>Record a longer or CPU-heavy interaction and try again.</span>
-          </div>
-        </div>
-        <details class="coverage-caveats">
-          <summary>How to interpret this profile</summary>
-          <ul><li v-for="caveat in cpuProfileResult.report.caveats" :key="caveat">{{ caveat }}</li></ul>
-        </details>
-        <footer>
-          <span>Started on {{ cpuProfileResult.report.startedUrl }}<span v-if="cpuProfileResult.report.currentUrl !== cpuProfileResult.report.startedUrl"> · page changed</span></span>
-          <div>
-            <button type="button" @click="manageCpuProfile('clear')"><IconDelete aria-hidden="true" /> Clear</button>
-            <button class="primary" type="button" @click="manageCpuProfile('start')"><IconRecord aria-hidden="true" /> Record again</button>
-          </div>
-        </footer>
-      </template>
-      <div v-else class="coverage-empty">
-        <IconMonitoring aria-hidden="true" />
-        <strong>Find hot JavaScript functions</strong>
-        <span>Start recording, reproduce one slow interaction, then stop. Bronom reports sampled self time without source code or page content.</span>
-        <div>
-          <button class="primary" type="button" @click="manageCpuProfile('start')"><IconRecord aria-hidden="true" /> Start recording</button>
-        </div>
-      </div>
-    </section>
-    <section
-      v-if="memoryPanelOpen"
-      class="accessibility-panel memory-panel"
-      data-shell-docked-panel
-      role="dialog"
-      aria-modal="false"
-      aria-labelledby="memory-panel-title"
-      :aria-busy="memoryState === 'running'"
-    >
-      <header>
-        <div>
-          <span class="eyebrow">Local diagnostics</span>
-          <h2 id="memory-panel-title">Page memory</h2>
-        </div>
-        <div class="panel-header-actions">
-          <PanelDockPicker v-model="panelDock" label="Dock memory report" />
-          <button class="panel-close" type="button" aria-label="Close memory report" @click="memoryPanelOpen = false"><IconClose aria-hidden="true" /></button>
-        </div>
-      </header>
-      <div v-if="memoryState === 'running'" class="accessibility-audit-loading" role="status">
-        <IconProgress class="state-spinner" aria-hidden="true" />
-        <strong>Collecting local memory counters…</strong>
-        <span>The measurement stays in Bronom and never includes page content.</span>
-      </div>
-      <div v-else-if="memoryState === 'error'" class="accessibility-audit-error" role="alert">
-        <IconError aria-hidden="true" />
-        <strong>Memory report could not finish</strong>
-        <span>{{ memoryError }}</span>
-        <button type="button" @click="runMemoryReport()">Try again</button>
-      </div>
-      <template v-else-if="memoryReport?.current">
-        <div class="memory-summary">
-          <article>
-            <span>JS heap used</span>
-            <strong>{{ formatBytes(memoryReport.current.jsHeapUsedBytes) }}</strong>
-            <small v-if="memoryReport.delta" :class="memoryDeltaClass(memoryReport.delta.jsHeapUsedBytes)">{{ formatSignedBytes(memoryReport.delta.jsHeapUsedBytes) }} from baseline</small>
-            <small v-else>No baseline yet</small>
-          </article>
-          <article>
-            <span>DOM nodes</span>
-            <strong>{{ memoryReport.current.nodes }}</strong>
-            <small v-if="memoryReport.delta" :class="memoryDeltaClass(memoryReport.delta.nodes)">{{ formatSignedCount(memoryReport.delta.nodes) }} from baseline</small>
-            <small v-else>No baseline yet</small>
-          </article>
-          <article>
-            <span>Event listeners</span>
-            <strong>{{ memoryReport.current.eventListeners }}</strong>
-            <small v-if="memoryReport.delta" :class="memoryDeltaClass(memoryReport.delta.eventListeners)">{{ formatSignedCount(memoryReport.delta.eventListeners) }} from baseline</small>
-            <small v-else>No baseline yet</small>
-          </article>
-          <article>
-            <span>Documents</span>
-            <strong>{{ memoryReport.current.documents }}</strong>
-            <small v-if="memoryReport.delta" :class="memoryDeltaClass(memoryReport.delta.documents)">{{ formatSignedCount(memoryReport.delta.documents) }} from baseline</small>
-            <small v-else>No baseline yet</small>
-          </article>
-        </div>
-        <div class="memory-details">
-          <dl>
-            <div><dt>Heap capacity</dt><dd>{{ formatBytes(memoryReport.current.jsHeapTotalBytes) }}</dd></div>
-            <div><dt>Embedder heap</dt><dd>{{ formatBytes(memoryReport.current.embedderHeapUsedBytes) }}</dd></div>
-            <div><dt>Backing storage</dt><dd>{{ formatBytes(memoryReport.current.backingStorageBytes) }}</dd></div>
-            <div><dt>Layout objects</dt><dd>{{ memoryReport.current.layoutObjects }}</dd></div>
-            <div><dt>Frames</dt><dd>{{ memoryReport.current.frames }}</dd></div>
-            <div><dt>Sample</dt><dd>{{ memoryReport.forcedGarbageCollection ? 'After forced GC' : 'Current state' }}</dd></div>
-          </dl>
-          <p class="memory-hint"><IconInfo aria-hidden="true" /> Growth is a clue, not proof of a leak. Repeat the same interaction and compare post-GC samples.</p>
-          <section class="memory-allocation-section" aria-labelledby="memory-allocation-title">
-            <div class="memory-allocation-heading">
-              <div>
-                <span class="eyebrow">JavaScript allocation sampling</span>
-                <h3 id="memory-allocation-title">Find retained allocations by function</h3>
-              </div>
-              <button
-                v-if="memoryReport.allocationProfile"
-                type="button"
-                @click="manageMemoryAllocation('clear')"
-              ><IconDelete aria-hidden="true" /> Clear profile</button>
-            </div>
-            <div v-if="memoryReport.allocationStatus === 'recording'" class="coverage-recording memory-allocation-recording" role="status">
-              <IconRecord aria-hidden="true" />
-              <strong>Allocation sampling is recording</strong>
-              <span>Repeat the memory-heavy interaction, then stop to rank functions by sampled live bytes.</span>
-              <small>Started {{ debugTimestamp(memoryReport.allocationRecording?.startedAt || '') }}</small>
-              <button class="primary" type="button" @click="manageMemoryAllocation('stop')"><IconStop aria-hidden="true" /> Stop and show allocations</button>
-            </div>
-            <template v-else-if="memoryReport.allocationProfile">
-              <div class="coverage-summary memory-allocation-summary">
-                <article>
-                  <span>Sampled live bytes</span>
-                  <strong>{{ formatBytes(memoryReport.allocationProfile.sampledBytes) }}</strong>
-                  <small>{{ memoryReport.allocationProfile.sampleCount }} samples</small>
-                </article>
-                <article>
-                  <span>Hot functions</span>
-                  <strong>{{ memoryReport.allocationProfile.hotspots.length }}</strong>
-                  <small v-if="memoryReport.allocationProfile.truncated">Top bounded results</small>
-                  <small v-else>Ranked by retained bytes</small>
-                </article>
-                <article>
-                  <span>Top location</span>
-                  <strong>{{ memoryReport.allocationProfile.hotspots[0]?.selfPercent ?? 0 }}%</strong>
-                  <small>of sampled live bytes</small>
-                </article>
-              </div>
-              <div class="coverage-resource-list memory-allocation-list" role="list" aria-label="JavaScript allocation hotspots">
-                <article v-for="hotspot in memoryReport.allocationProfile.hotspots" :key="`${hotspot.functionName}:${hotspot.url}:${hotspot.lineNumber}:${hotspot.columnNumber}`" role="listitem">
-                  <div>
-                    <span class="coverage-type">JS</span>
-                    <strong>{{ hotspot.functionName }}</strong>
-                    <small v-if="hotspot.url" :title="hotspot.url">{{ hotspot.url }}<template v-if="hotspot.lineNumber">:{{ hotspot.lineNumber }}</template></small>
-                    <small v-else>Browser or anonymous runtime allocation</small>
-                    <small>{{ formatBytes(hotspot.selfBytes) }} sampled live · {{ hotspot.samples }} {{ hotspot.samples === 1 ? 'sample' : 'samples' }}</small>
-                  </div>
-                  <output>{{ hotspot.selfPercent }}%</output>
-                  <div class="coverage-bar" aria-hidden="true"><span :style="{ width: `${hotspot.selfPercent}%` }" /></div>
-                </article>
-                <div v-if="!memoryReport.allocationProfile.hotspots.length" class="network-monitor-empty compact">
-                  <IconMemory aria-hidden="true" />
-                  <strong>No retained allocation hotspot was sampled</strong>
-                  <span>Record a longer memory-heavy interaction and try again.</span>
-                </div>
-              </div>
-              <details class="coverage-caveats">
-                <summary>How to interpret allocation sampling</summary>
-                <ul><li v-for="caveat in memoryReport.allocationProfile.caveats" :key="caveat">{{ caveat }}</li></ul>
-              </details>
-              <div class="memory-allocation-actions">
-                <button class="primary" type="button" @click="manageMemoryAllocation('start')"><IconRecord aria-hidden="true" /> Record again</button>
-              </div>
-            </template>
-            <div v-else class="memory-allocation-empty">
-              <IconMemory aria-hidden="true" />
-              <div>
-                <strong>Locate functions retaining JavaScript memory</strong>
-                <span>Start sampling, reproduce one interaction, then stop. Object values and page content never leave the profiler.</span>
-              </div>
-              <button class="primary" type="button" @click="manageMemoryAllocation('start')"><IconRecord aria-hidden="true" /> Start sampling</button>
-            </div>
-          </section>
-        </div>
-      </template>
-      <div v-else class="accessibility-audit-empty">
-        <IconMemory aria-hidden="true" />
-        <strong>Baseline cleared</strong>
-        <span>Set a new baseline before reproducing the interaction you want to inspect.</span>
-      </div>
-      <footer>
-        <span>{{ memoryReport?.baseline ? 'Runtime baseline active' : 'No baseline' }}</span>
-        <div class="memory-actions">
-          <button v-if="memoryReport?.baseline" type="button" @click="clearMemoryBaseline"><IconDelete aria-hidden="true" /> Clear</button>
-          <button type="button" @click="runMemoryReport('set-baseline', true)"><IconKeep aria-hidden="true" /> Set baseline</button>
-          <button type="button" @click="runMemoryReport('measure', true)"><IconRefresh aria-hidden="true" /> GC &amp; measure</button>
-        </div>
-      </footer>
-    </section>
-    <section
-      v-if="consolePanelOpen"
-      class="accessibility-panel console-panel"
-      data-shell-docked-panel
-      role="dialog"
-      aria-modal="false"
-      aria-labelledby="console-panel-title"
-      :aria-busy="consoleState === 'loading'"
-    >
-      <header>
-        <div>
-          <span class="eyebrow">Current website</span>
-          <h2 id="console-panel-title">Console</h2>
-        </div>
-        <div class="panel-header-actions">
-          <PanelDockPicker v-model="panelDock" label="Dock Console" />
-          <button class="panel-close" type="button" aria-label="Close Console" @click="consolePanelOpen = false"><IconClose aria-hidden="true" /></button>
-        </div>
-      </header>
-      <div class="console-tools">
-        <label class="network-monitor-search">
-          <IconSearch aria-hidden="true" />
-          <input v-model="consoleSearch" type="search" aria-label="Filter Console messages" placeholder="Filter messages or sources" spellcheck="false" />
-        </label>
-        <label class="console-level-filter">
-          <span>Level</span>
-          <select v-model="consoleLevel" aria-label="Filter Console by level">
-            <option value="all">All levels</option>
-            <option value="error">Errors ({{ consoleMessageCounts.error }})</option>
-            <option value="warning">Warnings ({{ consoleMessageCounts.warning }})</option>
-            <option value="info">Info ({{ consoleMessageCounts.info }})</option>
-            <option value="verbose">Verbose ({{ consoleMessageCounts.verbose }})</option>
-          </select>
-        </label>
-        <label class="preserve-logs-toggle" title="Keep bounded Console and Network evidence when this tab loads another page">
-          <input type="checkbox" :checked="activeTab?.preserveDiagnosticLogs" @change="updateDiagnosticLogPreservation" />
-          Preserve logs
-        </label>
-      </div>
-      <p v-if="consoleError" class="network-monitor-error" role="alert">{{ consoleError }}</p>
-      <div v-if="consoleState === 'loading' && !consoleMessages.length" class="network-monitor-empty" role="status">
-        <IconProgress class="state-spinner" aria-hidden="true" />
-        <strong>Reading the bounded Console log…</strong>
-      </div>
-      <div v-else class="console-messages" role="log" aria-live="polite" aria-label="Sanitized Console messages">
-        <article
-          v-for="(message, index) in filteredConsoleMessages"
-          :key="`${message.timestamp}-${index}`"
-          class="console-message"
-          :class="browserConsoleLevel(message.level)"
-        >
-          <header>
-            <span>{{ browserConsoleLevel(message.level) }}</span>
-            <small
-              v-if="(message.repeatCount ?? 1) > 1"
-              class="console-repeat"
-              :aria-label="`${message.repeatCount} repeated Console events`"
-              :title="message.firstTimestamp ? `Repeated since ${debugTimestamp(message.firstTimestamp)}` : undefined"
-            >×{{ message.repeatCount }}</small>
-            <small v-if="message.handled" class="console-handled">handled later</small>
-            <time :datetime="message.timestamp">{{ debugTimestamp(message.timestamp) }}</time>
-            <button
-              type="button"
-              class="console-message-copy"
-              aria-label="Copy Console entry"
-              @click="copyConsoleEntry(message)"
-            >
-              <IconCheck v-if="consoleCopiedEntryKey === consoleEntryKey(message)" aria-hidden="true" />
-              <IconCopy v-else aria-hidden="true" />
-              {{ consoleCopiedEntryKey === consoleEntryKey(message) ? 'Copied' : 'Copy' }}
-            </button>
-          </header>
-          <code>{{ message.message }}</code>
-          <small v-if="message.sourceId">{{ networkSourceLocation(message.sourceId, message.lineNumber, message.columnNumber) }}</small>
-          <details v-if="message.stack?.length" class="console-stack">
-            <summary>Call stack <span>{{ message.stack.length }}{{ message.stackTruncated ? '+' : '' }}</span></summary>
-            <ol>
-              <li v-for="(frame, frameIndex) in message.stack" :key="`${frame.url || 'inline'}:${frame.lineNumber}:${frame.columnNumber}:${frameIndex}`">
-                <span v-if="frame.async" class="console-async">async</span>
-                <strong>{{ frame.functionName || '(anonymous)' }}</strong>
-                <code>{{ networkSourceLocation(frame.url, frame.lineNumber, frame.columnNumber) }}</code>
-              </li>
-            </ol>
-            <p v-if="message.stackTruncated">Only the first 20 sanitized frames are shown.</p>
-          </details>
-        </article>
-        <div v-if="!filteredConsoleMessages.length" class="network-monitor-empty compact">
-          <IconTerminal aria-hidden="true" />
-          <strong>{{ consoleMessages.length ? 'No messages match these filters' : 'No Console messages captured yet' }}</strong>
-          <span>{{ consoleMessages.length ? 'Change the text or level filter.' : 'Use the website or reload it; new messages appear automatically.' }}</span>
-        </div>
-      </div>
-      <footer>
-        <span>{{ filteredConsoleMessages.length }} of {{ consoleMessages.length }} entries · {{ filteredConsoleEventCount }} of {{ consoleEventCount }} events · newest first · sanitized</span>
-        <div class="console-actions">
-          <button type="button" @click="refreshConsole(true)"><IconDelete aria-hidden="true" /> Clear</button>
-          <button type="button" @click="refreshConsole()"><IconRefresh aria-hidden="true" /> Refresh</button>
-          <button type="button" :disabled="!consoleMessages.length" @click="copyAllConsole">
-            <IconCheck v-if="consoleCopied === 'all'" aria-hidden="true" />
-            <IconCopy v-else aria-hidden="true" />
-            {{ consoleCopied === 'all' ? 'Copied all' : 'Copy all' }}
-          </button>
-          <button type="button" class="primary" :disabled="!filteredConsoleMessages.length" @click="copyFilteredConsole">
-            <IconCheck v-if="consoleCopied === 'filtered'" aria-hidden="true" />
-            <IconCopy v-else aria-hidden="true" />
-            {{ consoleCopied === 'filtered' ? 'Copied filtered' : 'Copy filtered' }}
-          </button>
-        </div>
-      </footer>
-    </section>
-    <section
-      v-if="networkMonitorOpen"
-      class="accessibility-panel network-monitor-panel"
-      data-shell-docked-panel
-      role="dialog"
-      aria-modal="false"
-      aria-labelledby="network-monitor-title"
-      :aria-busy="networkMonitorState === 'loading'"
-    >
-      <header>
-        <div>
-          <span class="eyebrow">Current website</span>
-          <h2 id="network-monitor-title">Network</h2>
-        </div>
-        <div class="network-monitor-header-actions">
-          <PanelDockPicker v-model="panelDock" label="Dock network monitor" />
-          <button
-            type="button"
-            :class="{ active: networkContentSearchOpen }"
-            aria-label="Search request content"
-            title="Search headers, payloads, and responses"
-            @click="toggleNetworkContentSearch"
-          ><IconSearch aria-hidden="true" /></button>
-          <button type="button" aria-label="Refresh network requests" title="Refresh" @click="refreshNetworkMonitor()"><IconRefresh aria-hidden="true" /></button>
-          <button class="panel-close" type="button" aria-label="Close network monitor" @click="networkMonitorOpen = false"><IconClose aria-hidden="true" /></button>
-        </div>
-      </header>
-      <section class="request-conditions" aria-labelledby="request-conditions-title">
-        <button
-          class="request-conditions-toggle"
-          type="button"
-          :aria-expanded="requestConditionsExpanded"
-          aria-controls="request-conditions-content"
-          @click="requestConditionsExpanded = !requestConditionsExpanded"
-        >
-          <span class="request-conditions-toggle-copy">
-            <IconRoute aria-hidden="true" />
-            <span><strong id="request-conditions-title">Request conditions</strong><small>Block, mock, throttle, and prioritize requests</small></span>
-          </span>
-          <span class="request-conditions-toggle-meta">
-            <span v-if="networkRoutes.length" class="request-conditions-count">{{ networkRoutes.length }} active</span>
-            <IconKeyboardArrowDown v-if="requestConditionsExpanded" aria-hidden="true" />
-            <IconKeyboardArrowRight v-else aria-hidden="true" />
-          </span>
-        </button>
-        <div v-if="requestConditionsExpanded" id="request-conditions-content" class="request-conditions-content">
-          <p v-if="networkRouteError" class="network-monitor-error" role="alert">{{ networkRouteError }}</p>
-          <div v-if="networkRouteState === 'loading' && !networkRoutes.length" class="request-conditions-empty" role="status">
-            <IconProgress class="state-spinner" aria-hidden="true" />
-            Reading temporary conditions…
-          </div>
-          <div v-else-if="networkRoutes.length" class="request-condition-list" aria-label="Active request conditions">
-            <article v-for="(route, index) in networkRoutes" :key="route.id" class="request-condition-item">
-              <span class="request-condition-order" :title="index === 0 ? 'First matching condition wins' : `Priority ${index + 1}`">{{ index + 1 }}</span>
-              <span class="request-condition-copy">
-                <strong :title="route.urlPattern">{{ route.urlPattern }}</strong>
-                <small>
-                  {{ route.method || 'Any method' }} ·
-                  <template v-if="route.behavior === 'abort'">Fail as {{ route.abort }}</template>
-                  <template v-else-if="route.behavior === 'fulfill'">Respond {{ route.response?.status }} · {{ route.response?.bodyBytes || 0 }} B body</template>
-                  <template v-else>Throttle as {{ networkEmulationLabel(route.throttle || 'slow-4g') }}</template>
-                  <template v-if="route.remainingMatches !== undefined"> · {{ route.remainingMatches }} {{ route.remainingMatches === 1 ? 'match' : 'matches' }} left</template>
-                  <template v-else> · until removed</template>
-                </small>
-              </span>
-              <span class="request-condition-controls">
-                <button
-                  type="button"
-                  :aria-label="`Move request condition ${route.urlPattern} up`"
-                  title="Move up"
-                  :disabled="networkRouteState === 'saving' || index === 0"
-                  @click="moveNetworkRoute(route.id, 'up')"
-                ><IconKeyboardArrowUp aria-hidden="true" /></button>
-                <button
-                  type="button"
-                  :aria-label="`Move request condition ${route.urlPattern} down`"
-                  title="Move down"
-                  :disabled="networkRouteState === 'saving' || index === networkRoutes.length - 1"
-                  @click="moveNetworkRoute(route.id, 'down')"
-                ><IconKeyboardArrowDown aria-hidden="true" /></button>
-                <button
-                  type="button"
-                  :aria-label="`Remove request condition ${route.urlPattern}`"
-                  title="Remove condition"
-                  :disabled="networkRouteState === 'saving'"
-                  @click="removeNetworkRoute(route.id)"
-                ><IconDelete aria-hidden="true" /></button>
-              </span>
-            </article>
-          </div>
-          <div v-else class="request-conditions-empty">
-            <IconRoute aria-hidden="true" />
-            <span><strong>No request conditions</strong><small>Add one to test loading and API failure states.</small></span>
-          </div>
-          <form class="request-condition-form" aria-label="Add temporary request condition" @submit.prevent="addNetworkRouteFromDraft">
-            <h3>Add temporary condition</h3>
-            <label class="request-condition-pattern">
-              <span>URL pattern</span>
-              <input v-model="networkRoutePattern" type="text" required maxlength="2048" placeholder="https://api.example.com/v1/*" spellcheck="false" />
-            </label>
-            <div class="request-condition-form-row">
-              <label v-if="networkRouteMode !== 'throttle'">
-                <span>Method</span>
-                <select v-model="networkRouteMethod">
-                  <option value="">Any</option>
-                  <option>GET</option>
-                  <option>POST</option>
-                  <option>PUT</option>
-                  <option>PATCH</option>
-                  <option>DELETE</option>
-                  <option>OPTIONS</option>
-                </select>
-              </label>
-              <label>
-                <span>Behavior</span>
-                <select v-model="networkRouteMode">
-                  <option value="abort">Block / fail</option>
-                  <option value="fulfill">Mock response</option>
-                  <option value="throttle">Throttle request</option>
-                </select>
-              </label>
-              <label v-if="networkRouteMode !== 'throttle'">
-                <span>Matches</span>
-                <input v-model.number="networkRouteTimes" type="number" min="1" max="100" step="1" required />
-              </label>
-              <label v-else>
-                <span>Network profile</span>
-                <select v-model="networkRouteThrottle" aria-label="Network profile">
-                  <option value="fast-4g">Fast 4G</option>
-                  <option value="slow-4g">Slow 4G</option>
-                  <option value="slow-3g">Slow 3G</option>
-                </select>
-              </label>
-            </div>
-            <label v-if="networkRouteMode === 'abort'">
-              <span>Failure reason</span>
-              <select v-model="networkRouteAbort">
-                <option v-for="reason in BROWSER_NETWORK_ABORT_REASONS" :key="reason" :value="reason">{{ reason }}</option>
-              </select>
-            </label>
-            <template v-else-if="networkRouteMode === 'fulfill'">
-              <label>
-                <span>HTTP status</span>
-                <input v-model.number="networkRouteStatus" type="number" min="100" max="599" step="1" required />
-              </label>
-              <label>
-                <span>Response headers <small>JSON object with string values</small></span>
-                <textarea v-model="networkRouteHeaders" rows="3" placeholder='{"content-type":"application/json"}' spellcheck="false" />
-              </label>
-              <label>
-                <span>Response body <small>up to 512 KiB</small></span>
-                <textarea v-model="networkRouteBody" rows="4" placeholder='{"ok":false}' spellcheck="false" />
-              </label>
-            </template>
-            <div class="request-condition-form-actions">
-              <p><IconInfo aria-hidden="true" /> First match wins. Block and mock rules expire after their match count; throttles stay active until removed. Every condition is discarded when the tab or Bronom closes.</p>
-              <button
-                type="submit"
-                class="primary"
-                :disabled="networkRouteState === 'saving' || !networkRoutePattern.trim()"
-              >
-                <IconProgress v-if="networkRouteState === 'saving'" class="state-spinner" aria-hidden="true" />
-                <IconAdd v-else aria-hidden="true" />
-                {{ networkRouteState === 'saving' ? 'Adding…' : 'Add condition' }}
-              </button>
-            </div>
-          </form>
-          <div v-if="networkRoutes.length" class="request-conditions-actions">
-            <span>Mock bodies and header values are never shown again after creation.</span>
-            <button type="button" :disabled="networkRouteState === 'saving'" @click="clearActiveNetworkRoutes"><IconDelete aria-hidden="true" /> Remove all</button>
-          </div>
-        </div>
-      </section>
-      <div class="network-monitor-tools">
-        <label class="network-monitor-search">
-          <IconSearch aria-hidden="true" />
-          <input
-            v-model="networkSearch"
-            type="search"
-            aria-label="Filter network requests"
-            placeholder="Filter requests · method:POST status-code:500"
-            title="Combine free text with domain:, is:running, larger-than:, method:, resource-type:, scheme:, status-code:, or url: filters"
-            spellcheck="false"
-          />
-        </label>
-        <div class="network-sort-controls">
-          <label>
-            <span>Sort</span>
-            <select :value="networkSortBy" aria-label="Sort network requests" @change="setNetworkSortBy">
-              <option v-for="option in networkSortOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-            </select>
-          </label>
-          <button
-            type="button"
-            :aria-label="`Sort network requests ${networkSortDirection === 'asc' ? 'ascending' : 'descending'}`"
-            :title="networkSortDirection === 'asc' ? 'Ascending' : 'Descending'"
-            @click="toggleNetworkSortDirection"
-          >
-            <IconKeyboardArrowUp v-if="networkSortDirection === 'asc'" aria-hidden="true" />
-            <IconKeyboardArrowDown v-else aria-hidden="true" />
-          </button>
-        </div>
-        <label class="network-failures-toggle">
-          <input v-model="networkFailuresOnly" type="checkbox" />
-          Failures only
-          <span v-if="networkFailureCount">{{ networkFailureCount }}</span>
-        </label>
-        <label class="preserve-logs-toggle" title="Keep bounded Network and Console evidence when this tab loads another page">
-          <input type="checkbox" :checked="activeTab?.preserveDiagnosticLogs" @change="updateDiagnosticLogPreservation" />
-          Preserve logs
-        </label>
-      </div>
-      <div class="network-resource-filters" role="group" aria-label="Filter requests by resource type">
-        <button
-          v-for="filter in networkResourceFilters"
-          :key="filter.value || 'all'"
-          type="button"
-          :class="{ active: networkResourceFilter === filter.value }"
-          :aria-pressed="networkResourceFilter === filter.value"
-          @click="networkResourceFilter = filter.value"
-        >{{ filter.label }}</button>
-      </div>
-      <section v-if="networkContentSearchOpen" class="network-content-search" aria-label="Search request content">
-        <form @submit.prevent="runNetworkContentSearch">
-          <label>
-            <IconSearch aria-hidden="true" />
-            <input
-              ref="networkContentSearchInput"
-              v-model="networkContentSearchQuery"
-              type="search"
-              aria-label="Search headers, payloads, responses, WebSocket text, and event streams"
-              placeholder="Search headers, payloads, responses, WebSocket text, and event streams"
-              maxlength="200"
-              spellcheck="false"
-            />
-          </label>
-          <label class="network-content-search-case">
-            <input v-model="networkContentSearchCaseSensitive" type="checkbox" />
-            Match case
-          </label>
-          <button type="submit" class="primary" :disabled="networkContentSearchState === 'searching' || !networkContentSearchQuery.trim()">
-            <IconProgress v-if="networkContentSearchState === 'searching'" class="state-spinner" aria-hidden="true" />
-            <IconSearch v-else aria-hidden="true" />
-            {{ networkContentSearchState === 'searching' ? 'Searching…' : 'Search' }}
-          </button>
-          <button type="button" aria-label="Close request content search" @click="closeNetworkContentSearch"><IconClose aria-hidden="true" /></button>
-        </form>
-        <p v-if="networkContentSearchError" class="network-content-search-error" role="alert">{{ networkContentSearchError }}</p>
-        <template v-if="networkContentSearchResult">
-          <header>
-            <strong>{{ networkContentSearchResult.resultCount }} matching {{ networkContentSearchResult.resultCount === 1 ? 'field' : 'fields' }} in {{ networkContentSearchResult.matchingRequestCount }} {{ networkContentSearchResult.matchingRequestCount === 1 ? 'request' : 'requests' }}</strong>
-            <span>{{ networkContentSearchResult.searchedRequestCount }} of {{ networkContentSearchResult.availableRequestCount }} requests searched<template v-if="networkContentSearchResult.truncated"> · bounded</template></span>
-          </header>
-          <div v-if="networkContentSearchResult.matches.length" class="network-content-search-results">
-            <button
-              v-for="(match, index) in networkContentSearchResult.matches"
-              :key="`${match.requestId}:${match.field}:${match.label}:${index}`"
-              type="button"
-              :aria-label="`Inspect matching request ${index + 1}: ${match.label}`"
-              @click="selectNetworkSearchMatch(match)"
-            >
-              <span>
-                <strong>{{ match.label }}</strong>
-                <small>{{ match.method }} · {{ match.status ?? 'No status' }} · {{ networkResourceCategory(match.resourceType) }} · {{ networkRequestName(match) }}<template v-if="match.occurrenceCount > 1"> · {{ match.occurrenceCount }} matches</template></small>
-              </span>
-              <code>{{ match.snippet }}</code>
-            </button>
-          </div>
-          <div v-else class="network-content-search-empty">No sanitized request content matched “{{ networkContentSearchResult.query }}”.</div>
-          <footer>
-            Known secret fields, binary bodies, and multipart bodies are omitted. Review arbitrary text before sharing.
-          </footer>
-        </template>
-      </section>
-      <p v-if="networkMonitorError" class="network-monitor-error" role="alert">{{ networkMonitorError }}</p>
-      <div v-if="networkMonitorState === 'loading' && !networkRequests.length" class="network-monitor-empty" role="status">
-        <IconProgress class="state-spinner" aria-hidden="true" />
-        <strong>Reading the bounded request log…</strong>
-      </div>
-      <div v-else class="network-monitor-workspace">
-        <div class="network-request-list" role="listbox" aria-label="Network requests">
-          <button
-            v-for="request in filteredNetworkRequests"
-            :key="request.id"
-            type="button"
-            role="option"
-            :aria-selected="networkSelectedRequestId === request.id"
-            :data-request-id="request.id"
-            :class="{
-              selected: networkSelectedRequestId === request.id,
-              failed: isNetworkRequestFailure(request)
-            }"
-            @click="selectNetworkRequest(request)"
-          >
-            <span class="network-request-primary">
-              <span class="network-request-status">{{ networkRequestStatus(request) }}</span>
-              <strong :title="request.url">{{ networkRequestName(request) }}</strong>
-              <small
-                v-if="request.responseSource && request.responseSource !== 'network'"
-                class="network-request-source"
-                :title="networkRequestSourceSummary(request)"
-              >{{ networkResponseSourceLabel(request.responseSource) }}</small>
-            </span>
-            <span class="network-request-meta">
-              <span>{{ request.method }}</span>
-              <span>{{ networkResourceCategory(request.resourceType) }}</span>
-              <span>{{ request.responseSizeBytes !== undefined ? formatBytes(request.responseSizeBytes) : '—' }}</span>
-              <span>{{ networkRequestDuration(request) }}</span>
-            </span>
-            <span
-              v-if="networkWaterfallRange"
-              class="network-request-waterfall"
-              role="img"
-              :aria-label="networkWaterfallLabel(request)"
-              :title="networkWaterfallLabel(request)"
-            >
-              <i
-                :class="{ pending: request.durationMs === undefined && !request.completedAt }"
-                :style="networkWaterfallStyle(request)"
-              />
-            </span>
-          </button>
-          <div v-if="!filteredNetworkRequests.length" class="network-monitor-empty compact">
-            <IconNetworkCheck aria-hidden="true" />
-            <strong>{{ networkRequests.length ? 'No requests match these filters' : 'No requests captured yet' }}</strong>
-            <span>{{ networkRequests.length ? 'Change the text, type, or failure filter.' : 'Use the website, then refresh this monitor.' }}</span>
-          </div>
-        </div>
-        <div class="network-request-details" aria-live="polite">
-          <div v-if="networkRequestDetailsLoading" class="network-monitor-empty compact" role="status">
-            <IconProgress class="state-spinner" aria-hidden="true" />
-            <strong>Reading request details…</strong>
-          </div>
-          <template v-else-if="networkRequestDetails">
-            <header class="network-detail-heading">
-              <span>{{ networkRequestDetails.method }}</span>
-              <strong>{{ networkRequestStatus(networkRequestDetails) }}</strong>
-              <small>{{ networkRequestDetails.response.protocol || networkRequestDetails.resourceType }}</small>
-            </header>
-            <code class="network-detail-url">{{ networkRequestDetails.url }}</code>
-            <details v-if="networkRequestDetails.responseSource" class="network-response-origin" open>
-              <summary>
-                Response source
-                <span>{{ networkRequestSourceSummary(networkRequestDetails) }}</span>
-              </summary>
-              <dl>
-                <template v-if="networkRequestDetails.serviceWorkerResponseSource">
-                  <dt>Worker response</dt>
-                  <dd>{{ serviceWorkerResponseSourceLabel(networkRequestDetails.serviceWorkerResponseSource) }}</dd>
-                </template>
-                <template v-if="networkRequestDetails.cacheStorageCacheName">
-                  <dt>Cache Storage name</dt>
-                  <dd><code>{{ networkRequestDetails.cacheStorageCacheName }}</code></dd>
-                </template>
-              </dl>
-              <p v-if="networkRequestDetails.responseSource === 'network'">Chromium reported a direct network response.</p>
-            </details>
-            <div class="network-detail-actions">
-              <span>
-                {{ canFormatNetworkRequestCopy(networkRequestDetails)
-                  ? 'Sanitized current-request evidence · review commands before sharing or running'
-                  : 'Sanitized current-request evidence' }}
-              </span>
-              <div class="network-detail-copy-actions">
-                <button
-                  v-if="networkRequestDetails.resourceType.toLowerCase() === 'xhr'"
-                  type="button"
-                  :class="{
-                    danger: networkReplayState === 'confirming',
-                    complete: networkReplayState === 'replayed'
-                  }"
-                  :disabled="networkReplayState === 'replaying'"
-                  :title="networkReplayRequiresConfirmation(networkRequestDetails.method)
-                    ? 'This method can repeat writes or other side effects and requires a second click.'
-                    : 'Replay this XHR with its original request details inside Chromium.'"
-                  @click="replaySelectedNetworkRequest"
-                >
-                  <IconProgress v-if="networkReplayState === 'replaying'" class="state-spinner" aria-hidden="true" />
-                  <IconCheck v-else-if="networkReplayState === 'replayed'" aria-hidden="true" />
-                  <IconWarning v-else-if="networkReplayState === 'confirming'" aria-hidden="true" />
-                  <IconReplay v-else aria-hidden="true" />
-                  {{ networkReplayState === 'confirming'
-                    ? `Confirm replay ${networkRequestDetails.method.toUpperCase()}`
-                    : networkReplayState === 'replaying'
-                      ? 'Replaying…'
-                      : networkReplayState === 'replayed'
-                        ? 'Replayed XHR'
-                        : 'Replay XHR' }}
-                </button>
-                <button type="button" @click="copySanitizedNetworkDetails('json')">
-                  <IconCheck v-if="networkDetailsCopied === 'json'" aria-hidden="true" />
-                  <IconCode v-else aria-hidden="true" />
-                  {{ networkDetailsCopied === 'json' ? 'Copied JSON' : 'Copy JSON' }}
-                </button>
-                <button
-                  v-if="canFormatNetworkRequestCopy(networkRequestDetails)"
-                  type="button"
-                  @click="copySanitizedNetworkDetails('curl')"
-                >
-                  <IconCheck v-if="networkDetailsCopied === 'curl'" aria-hidden="true" />
-                  <IconTerminal v-else aria-hidden="true" />
-                  {{ networkDetailsCopied === 'curl' ? 'Copied cURL' : 'Copy sanitized cURL' }}
-                </button>
-                <button
-                  v-if="canFormatNetworkRequestCopy(networkRequestDetails)"
-                  type="button"
-                  @click="copySanitizedNetworkDetails('fetch')"
-                >
-                  <IconCheck v-if="networkDetailsCopied === 'fetch'" aria-hidden="true" />
-                  <IconCopy v-else aria-hidden="true" />
-                  {{ networkDetailsCopied === 'fetch' ? 'Copied fetch' : 'Copy sanitized fetch' }}
-                </button>
-              </div>
-            </div>
-            <p
-              v-if="networkReplayMessage"
-              class="network-replay-feedback"
-              :class="networkReplayState"
-              :role="networkReplayState === 'error' ? 'alert' : 'status'"
-            >{{ networkReplayMessage }}</p>
-            <details v-if="networkRequestDetails.initiator" open>
-              <summary>Initiator <span>{{ networkInitiatorLabel(networkRequestDetails.initiator.type) }}</span></summary>
-              <div class="network-initiator-details">
-                <p v-if="networkRequestDetails.initiator.redirectedFrom">
-                  <strong>Redirected from</strong>
-                  <code>{{ networkRequestDetails.initiator.redirectedFrom }}</code>
-                </p>
-                <p v-if="networkRequestDetails.initiator.url">
-                  <strong>Source</strong>
-                  <code>{{ networkSourceLocation(networkRequestDetails.initiator.url, networkRequestDetails.initiator.lineNumber, networkRequestDetails.initiator.columnNumber) }}</code>
-                </p>
-                <ol v-if="networkRequestDetails.initiator.stack?.length" class="network-initiator-stack">
-                  <li v-for="(frame, index) in networkRequestDetails.initiator.stack" :key="`${frame.url || 'inline'}:${frame.lineNumber}:${frame.columnNumber}:${index}`">
-                    <strong>{{ frame.functionName || '(anonymous)' }}</strong>
-                    <code>{{ networkSourceLocation(frame.url, frame.lineNumber, frame.columnNumber) }}</code>
-                  </li>
-                </ol>
-                <p v-if="networkRequestDetails.initiator.stackTruncated">Only the first 12 sanitized frames are shown.</p>
-                <p v-if="!networkRequestDetails.initiator.url && !networkRequestDetails.initiator.redirectedFrom && !networkRequestDetails.initiator.stack?.length">Chromium identified the initiator type without exposing a source location.</p>
-              </div>
-            </details>
-            <details v-if="networkRequestDetails.relationships" open>
-              <summary>
-                Request relationships
-                <span>{{ networkRelationshipCount(networkRequestDetails) }} related</span>
-              </summary>
-              <div class="network-relationship-details">
-                <section v-if="networkRequestDetails.relationships.triggeredBy">
-                  <header>
-                    <strong>Triggered by</strong>
-                    <span>Reported by Chromium</span>
-                  </header>
-                  <button
-                    type="button"
-                    :aria-label="`Inspect triggering request ${networkRequestName(networkRequestDetails.relationships.triggeredBy)}`"
-                    @click="selectRelatedNetworkRequest(networkRequestDetails.relationships.triggeredBy)"
-                  >
-                    <span>
-                      <strong>{{ networkRequestName(networkRequestDetails.relationships.triggeredBy) }}</strong>
-                      <small>{{ networkRequestDetails.relationships.triggeredBy.method }} · {{ networkRequestDetails.relationships.triggeredBy.resourceType }}</small>
-                    </span>
-                    <code>{{ networkRequestStatus(networkRequestDetails.relationships.triggeredBy) }}</code>
-                  </button>
-                </section>
-                <section v-if="networkRequestDetails.relationships.redirectChain.length > 1">
-                  <header>
-                    <strong>Redirect chain</strong>
-                    <span>{{ networkRequestDetails.relationships.redirectChain.length }} retained hops</span>
-                  </header>
-                  <button
-                    v-for="(related, index) in networkRequestDetails.relationships.redirectChain"
-                    :key="related.id"
-                    type="button"
-                    :disabled="related.id === networkRequestDetails.id"
-                    :aria-current="related.id === networkRequestDetails.id ? 'true' : undefined"
-                    :aria-label="related.id === networkRequestDetails.id
-                      ? `Current request ${networkRequestName(related)}`
-                      : `Inspect redirect hop ${index + 1} ${networkRequestName(related)}`"
-                    @click="selectRelatedNetworkRequest(related)"
-                  >
-                    <i>{{ index + 1 }}</i>
-                    <span>
-                      <strong>{{ networkRequestName(related) }}</strong>
-                      <small>{{ related.id === networkRequestDetails.id ? 'Current request' : `${related.method} · ${related.resourceType}` }}</small>
-                    </span>
-                    <code>{{ networkRequestStatus(related) }}</code>
-                  </button>
-                </section>
-                <section v-if="networkRequestDetails.relationships.dependents.length">
-                  <header>
-                    <strong>Triggered requests</strong>
-                    <span>{{ networkRequestDetails.relationships.dependents.length }} direct</span>
-                  </header>
-                  <button
-                    v-for="related in networkRequestDetails.relationships.dependents"
-                    :key="related.id"
-                    type="button"
-                    :aria-label="`Inspect triggered request ${networkRequestName(related)}`"
-                    @click="selectRelatedNetworkRequest(related)"
-                  >
-                    <span>
-                      <strong>{{ networkRequestName(related) }}</strong>
-                      <small>{{ related.method }} · {{ related.resourceType }}</small>
-                    </span>
-                    <code>{{ networkRequestStatus(related) }}</code>
-                  </button>
-                </section>
-                <p v-if="networkRequestDetails.relationships.truncated">Only a bounded window of retained relationships is shown.</p>
-              </div>
-            </details>
-            <details v-if="networkRequestDetails.webSocket" open>
-              <summary>
-                Messages
-                <span>{{ networkRequestDetails.webSocket.messages.length }}{{ networkRequestDetails.webSocket.droppedMessages ? ` + ${networkRequestDetails.webSocket.droppedMessages} older` : '' }}</span>
-              </summary>
-              <div class="network-websocket-summary">
-                <span :class="networkRequestDetails.webSocket.open ? 'open' : 'closed'">{{ networkRequestDetails.webSocket.open ? 'Connection open' : 'Connection closed' }}</span>
-                <small>Text is sanitized; binary payloads are omitted.</small>
-              </div>
-              <div v-if="networkRequestDetails.webSocket.messages.length" class="network-websocket-messages">
-                <article
-                  v-for="(message, index) in networkRequestDetails.webSocket.messages"
-                  :key="`${message.timestamp}:${message.direction}:${index}`"
-                  :class="[message.direction, message.kind]"
-                >
-                  <header>
-                    <span>{{ message.direction }}</span>
-                    <strong>{{ message.kind }}</strong>
-                    <small>{{ debugTimestamp(message.timestamp) }}</small>
-                    <code>{{ formatBytes(message.sizeBytes) }}</code>
-                  </header>
-                  <pre v-if="message.text">{{ message.text }}</pre>
-                  <p v-else>Payload omitted for {{ message.kind }}<template v-if="message.opcode !== undefined"> (opcode {{ message.opcode }})</template>.</p>
-                </article>
-              </div>
-              <p v-else>No messages captured yet.</p>
-              <p v-if="networkRequestDetails.webSocket.droppedMessages">{{ networkRequestDetails.webSocket.droppedMessages }} older messages were removed from the bounded diagnostic buffer.</p>
-            </details>
-            <details v-if="networkRequestDetails.eventSource" open>
-              <summary>
-                Event stream
-                <span>{{ networkRequestDetails.eventSource.messages.length }}{{ networkRequestDetails.eventSource.droppedMessages ? ` + ${networkRequestDetails.eventSource.droppedMessages} older` : '' }}</span>
-              </summary>
-              <div class="network-websocket-summary">
-                <span :class="networkRequestDetails.eventSource.open ? 'open' : 'closed'">{{ networkRequestDetails.eventSource.open ? 'Stream open' : 'Stream closed' }}</span>
-                <small>Event names, IDs, and data are sanitized and bounded.</small>
-              </div>
-              <div v-if="networkRequestDetails.eventSource.messages.length" class="network-websocket-messages network-eventsource-messages">
-                <article
-                  v-for="(message, index) in networkRequestDetails.eventSource.messages"
-                  :key="`${message.timestamp}:${message.eventName}:${message.eventId || ''}:${index}`"
-                  class="received text"
-                >
-                  <header>
-                    <span>event</span>
-                    <strong>{{ message.eventName }}</strong>
-                    <small :title="message.eventId ? `Event ID: ${message.eventId}` : undefined">{{ message.eventId ? `${message.eventId} · ` : '' }}{{ debugTimestamp(message.timestamp) }}</small>
-                    <code>{{ formatBytes(message.sizeBytes) }}</code>
-                  </header>
-                  <pre v-if="message.data">{{ message.data }}</pre>
-                  <p v-else>Empty event data.</p>
-                  <p v-if="message.truncated || message.redacted">{{ [message.truncated ? 'truncated' : '', message.redacted ? 'sanitized' : ''].filter(Boolean).join(' · ') }}</p>
-                </article>
-              </div>
-              <p v-else>No events captured yet.</p>
-              <p v-if="networkRequestDetails.eventSource.droppedMessages">{{ networkRequestDetails.eventSource.droppedMessages }} older events were removed from the bounded diagnostic buffer.</p>
-            </details>
-            <details v-if="networkRequestDetails.timing || networkRequestDetails.response.serverTiming?.length" open>
-              <summary>Timing <span>{{ networkRequestDetails.timing?.totalMs !== undefined ? formatNetworkMilliseconds(networkRequestDetails.timing.totalMs) : `${networkRequestDetails.response.serverTiming?.length || 0} server metrics` }}</span></summary>
-              <div v-if="networkRequestDetails.timing" class="network-timing-list">
-                <div
-                  v-for="phase in networkTimingRows(networkRequestDetails.timing)"
-                  :key="phase.key"
-                  :class="{ subphase: phase.subphase, total: phase.key === 'total' }"
-                >
-                  <span>{{ phase.label }}</span>
-                  <span class="network-timing-bar" aria-hidden="true"><i :style="{ width: `${networkTimingPercent(phase.value, networkRequestDetails.timing)}%` }" /></span>
-                  <strong>{{ formatNetworkMilliseconds(phase.value) }}</strong>
-                </div>
-              </div>
-              <p v-if="networkRequestDetails.timing">Connection setup sub-phases overlap “Before request sent” and are not added to the total twice.</p>
-              <div v-if="networkRequestDetails.response.serverTiming?.length" class="network-server-timing">
-                <header>
-                  <strong>Server timing</strong>
-                  <span>Reported by the response</span>
-                </header>
-                <div v-for="(metric, index) in networkRequestDetails.response.serverTiming" :key="`${metric.name}:${index}`">
-                  <span>
-                    <strong>{{ metric.name }}</strong>
-                    <small v-if="metric.description">{{ metric.description }}</small>
-                  </span>
-                  <code>{{ metric.durationMs !== undefined ? formatNetworkMilliseconds(metric.durationMs) : 'No duration' }}</code>
-                </div>
-                <p>Server-defined metrics can overlap and do not need to add up to TTFB.</p>
-              </div>
-            </details>
-            <details open>
-              <summary>Request headers <span>{{ Object.keys(networkRequestDetails.request.headers).length }}</span></summary>
-              <dl v-if="Object.keys(networkRequestDetails.request.headers).length" class="network-header-list">
-                <template v-for="(value, name) in networkRequestDetails.request.headers" :key="name">
-                  <dt>{{ name }}</dt><dd>{{ Array.isArray(value) ? value.join('\n') : value }}</dd>
-                </template>
-              </dl>
-              <p v-else>No request headers captured.</p>
-            </details>
-            <details v-if="networkRequestDetails.request.body">
-              <summary>Request body <span v-if="networkRequestDetails.request.body.redacted">sanitized</span></summary>
-              <pre>{{ networkRequestDetails.request.body.text }}</pre>
-            </details>
-            <details open>
-              <summary>Response headers <span>{{ Object.keys(networkRequestDetails.response.headers).length }}</span></summary>
-              <dl v-if="Object.keys(networkRequestDetails.response.headers).length" class="network-header-list">
-                <template v-for="(value, name) in networkRequestDetails.response.headers" :key="name">
-                  <dt>{{ name }}</dt><dd>{{ Array.isArray(value) ? value.join('\n') : value }}</dd>
-                </template>
-              </dl>
-              <p v-else>No response headers captured.</p>
-            </details>
-            <details>
-              <summary>Response body <span v-if="networkRequestDetails.response.body.redacted">sanitized</span></summary>
-              <pre v-if="networkRequestDetails.response.body.available">{{ networkRequestDetails.response.body.text }}</pre>
-              <p v-else>{{ networkRequestDetails.response.body.reason }}</p>
-            </details>
-            <p class="network-detail-safety"><IconInfo aria-hidden="true" /> Security headers, credential fields, fragments, binary bodies, and multipart bodies are protected.</p>
-          </template>
-          <div v-else class="network-monitor-empty compact">
-            <IconNetworkCheck aria-hidden="true" />
-            <strong>Select a request</strong>
-            <span>Inspect bounded, sanitized request and response details.</span>
-          </div>
-        </div>
-      </div>
-      <footer>
-        <span>{{ filteredNetworkRequests.length }} of {{ networkRequests.length }} requests · {{ formatBytes(networkResponseBytes) }} captured</span>
-        <div class="network-monitor-actions">
-          <button type="button" :disabled="!networkRequests.length" @click="refreshNetworkMonitor(true)"><IconDelete aria-hidden="true" /> Clear</button>
-          <button type="button" :disabled="!filteredNetworkRequests.length" @click="copySanitizedNetworkHar">
-            <IconCheck v-if="networkHarCopied" aria-hidden="true" />
-            <IconCopy v-else aria-hidden="true" />
-            {{ networkHarCopied ? 'Copied' : 'Copy sanitized HAR' }}
-          </button>
-          <button
-            type="button"
-            class="primary"
-            :title="networkHarExport?.path"
-            :disabled="!filteredNetworkRequests.length || networkHarSaveState === 'saving'"
-            @click="saveSanitizedNetworkHar"
-          >
-            <IconProgress v-if="networkHarSaveState === 'saving'" class="state-spinner" aria-hidden="true" />
-            <IconDownloadDone v-else-if="networkHarSaveState === 'saved'" aria-hidden="true" />
-            <IconDownload v-else aria-hidden="true" />
-            {{ networkHarSaveState === 'saving' ? 'Saving…' : networkHarSaveState === 'saved' ? 'Saved' : 'Save sanitized HAR' }}
-          </button>
-        </div>
-      </footer>
-    </section>
-    <section
-      v-if="inspectorIssuesOpen"
-      class="accessibility-panel inspector-issues-panel"
-      data-shell-docked-panel
-      role="dialog"
-      aria-modal="false"
-      aria-labelledby="inspector-issues-title"
-      :aria-busy="inspectorIssuesState === 'loading'"
-    >
-      <header>
-        <div>
-          <span class="eyebrow">Chromium diagnostics</span>
-          <h2 id="inspector-issues-title">Issues</h2>
-        </div>
-        <div class="panel-header-actions">
-          <PanelDockPicker v-model="panelDock" label="Dock browser issues" />
-          <button class="panel-close" type="button" aria-label="Close browser issues" @click="inspectorIssuesOpen = false"><IconClose aria-hidden="true" /></button>
-        </div>
-      </header>
-      <div v-if="inspectorIssuesState === 'loading'" class="accessibility-audit-loading" role="status">
-        <IconProgress class="state-spinner" aria-hidden="true" />
-        <strong>Checking browser-detected issues…</strong>
-        <span>Cookie values and raw browser payloads stay protected.</span>
-      </div>
-      <div v-else-if="inspectorIssuesState === 'error'" class="accessibility-audit-error" role="alert">
-        <IconError aria-hidden="true" />
-        <strong>Issues could not be loaded</strong>
-        <span>{{ inspectorIssuesError }}</span>
-        <button type="button" @click="refreshInspectorIssues">Try again</button>
-      </div>
-      <template v-else-if="inspectorIssuesReport">
-        <div class="inspector-issues-summary">
-          <article class="error"><strong>{{ inspectorIssuesReport.errorCount }}</strong><span>page errors</span></article>
-          <article class="warning"><strong>{{ inspectorIssuesReport.warningCount }}</strong><span>warnings</span></article>
-          <article><strong>{{ inspectorIssuesReport.infoCount }}</strong><span>improvements</span></article>
-        </div>
-        <div v-if="!inspectorIssuesReport.issues.length" class="accessibility-audit-empty inspector-issues-empty">
-          <IconCheck aria-hidden="true" />
-          <strong>No browser issues captured</strong>
-          <span>Reload and reproduce the problem to include diagnostics emitted during page startup.</span>
-        </div>
-        <div v-else class="inspector-issues-list">
-          <article v-for="issue in inspectorIssuesReport.issues" :key="issue.id" class="inspector-issue" :class="issue.severity">
-            <header>
-              <span class="inspector-issue-icon" aria-hidden="true"><IconError v-if="issue.severity === 'error'" /><IconWarning v-else-if="issue.severity === 'warning'" /><IconInfo v-else /></span>
-              <span><strong>{{ issue.title }}</strong><small>{{ issue.code }}</small></span>
-            </header>
-            <ul v-if="issue.reasons.length" class="inspector-issue-reasons">
-              <li v-for="reason in issue.reasons" :key="reason"><code>{{ reason }}</code></li>
-            </ul>
-            <div v-if="issue.affectedUrls.length" class="inspector-issue-urls">
-              <span>Affected resources</span>
-              <code v-for="url in issue.affectedUrls" :key="url">{{ url }}</code>
-            </div>
-            <small v-if="issue.source" class="inspector-issue-source">{{ issue.source.url }}<template v-if="issue.source.lineNumber">:{{ issue.source.lineNumber }}<template v-if="issue.source.columnNumber">:{{ issue.source.columnNumber }}</template></template></small>
-          </article>
-          <p v-if="inspectorIssuesReport.truncated" class="inspector-issues-truncated"><IconInfo aria-hidden="true" /> Showing the newest 200 issues.</p>
-          <details class="debug-report-caveats">
-            <summary>Sharing and scope</summary>
-            <ul><li v-for="caveat in inspectorIssuesReport.caveats" :key="caveat">{{ caveat }}</li></ul>
-          </details>
-        </div>
-        <footer>
-          <span>{{ inspectorIssuesReport.issueCount }} {{ inspectorIssuesReport.issueCount === 1 ? 'issue' : 'issues' }} · review before sharing</span>
-          <div class="debug-report-actions">
-            <button type="button" @click="clearInspectorIssues"><IconDelete aria-hidden="true" /> Clear</button>
-            <button type="button" @click="refreshInspectorIssues"><IconRefresh aria-hidden="true" /> Refresh</button>
-            <button type="button" class="primary" :disabled="!inspectorIssuesReport.issueCount" @click="copyInspectorIssues">
-              <IconCheck v-if="inspectorIssuesCopied" aria-hidden="true" />
-              <IconDownload v-else aria-hidden="true" />
-              {{ inspectorIssuesCopied ? 'Copied' : 'Copy issues' }}
-            </button>
-          </div>
-        </footer>
-      </template>
-    </section>
-    <section
-      v-if="debugReportPanelOpen"
-      class="accessibility-panel debug-report-panel"
-      data-shell-docked-panel
-      role="dialog"
-      aria-modal="false"
-      aria-labelledby="debug-report-panel-title"
-      :aria-busy="debugReportState === 'running'"
-    >
-      <header>
-        <div>
-          <span class="eyebrow">Console &amp; network</span>
-          <h2 id="debug-report-panel-title">Debug report</h2>
-        </div>
-        <div class="panel-header-actions">
-          <PanelDockPicker v-model="panelDock" label="Dock debug report" />
-          <button class="panel-close" type="button" aria-label="Close debug report" @click="debugReportPanelOpen = false"><IconClose aria-hidden="true" /></button>
-        </div>
-      </header>
-      <div v-if="debugReportState === 'running'" class="accessibility-audit-loading" role="status">
-        <IconProgress class="state-spinner" aria-hidden="true" />
-        <strong>Collecting bounded debug evidence…</strong>
-        <span>Request bodies and headers are not included in this report.</span>
-      </div>
-      <div v-else-if="debugReportState === 'error'" class="accessibility-audit-error" role="alert">
-        <IconError aria-hidden="true" />
-        <strong>Debug report could not finish</strong>
-        <span>{{ debugReportError }}</span>
-        <button type="button" @click="runDebugReport">Try again</button>
-      </div>
-      <template v-else-if="debugReport">
-        <div class="debug-report-summary">
-          <article class="error"><strong>{{ debugReport.summary.consoleErrors }}</strong><span>console errors</span></article>
-          <article class="warning"><strong>{{ debugReport.summary.consoleWarnings }}</strong><span>warnings</span></article>
-          <article class="error"><strong>{{ debugReport.summary.failedRequests }}</strong><span>failed requests</span></article>
-          <article><strong>{{ debugReport.summary.networkRequests }}</strong><span>requests seen</span></article>
-        </div>
-        <div v-if="!debugReport.console.length && !debugReport.network.length" class="accessibility-audit-empty debug-report-empty">
-          <IconCheck aria-hidden="true" />
-          <strong>No console messages or failed requests captured</strong>
-          <span>Reproduce the issue, then refresh this report. Successful-request totals still appear above.</span>
-        </div>
-        <div v-else class="debug-report-evidence">
-          <section v-if="debugReport.console.length" aria-labelledby="debug-report-console-title">
-            <h3 id="debug-report-console-title">Recent console <span>{{ debugReport.console.length }}</span></h3>
-            <article v-for="(message, index) in debugReport.console" :key="`${message.timestamp}-${index}`" class="debug-console-entry" :class="message.level">
-              <header>
-                <span>{{ message.level }}</span>
-                <time :datetime="message.timestamp">{{ debugTimestamp(message.timestamp) }}</time>
-              </header>
-              <code>{{ message.message }}</code>
-              <small v-if="message.sourceId">{{ message.sourceId }}<template v-if="message.lineNumber">:{{ message.lineNumber }}</template></small>
-            </article>
-          </section>
-          <section v-if="debugReport.network.length" aria-labelledby="debug-report-network-title">
-            <h3 id="debug-report-network-title">Failed requests <span>{{ debugReport.network.length }}</span></h3>
-            <article v-for="request in debugReport.network" :key="request.id" class="debug-network-entry">
-              <header>
-                <span class="method">{{ request.method }}</span>
-                <strong>{{ debugRequestStatus(request) }}</strong>
-                <time :datetime="request.startedAt">{{ debugTimestamp(request.startedAt) }}</time>
-              </header>
-              <code>{{ request.url }}</code>
-              <small>{{ request.resourceType }}<template v-if="request.durationMs !== undefined"> · {{ request.durationMs }} ms</template><template v-if="request.responseSizeBytes !== undefined"> · {{ formatBytes(request.responseSizeBytes) }}</template></small>
-            </article>
-          </section>
-          <details class="debug-report-caveats">
-            <summary>Sharing and scope</summary>
-            <ul><li v-for="caveat in debugReport.caveats" :key="caveat">{{ caveat }}</li></ul>
-          </details>
-        </div>
-        <footer>
-          <div class="debug-report-footer-context">
-            <span>Generated {{ debugTimestamp(debugReport.generatedAt) }} · review before sharing</span>
-            <label class="preserve-logs-toggle" title="Keep bounded Network and Console evidence when this tab loads another page">
-              <input type="checkbox" :checked="activeTab?.preserveDiagnosticLogs" @change="updateDiagnosticLogPreservation" />
-              Preserve logs across page loads
-            </label>
-          </div>
-          <div class="debug-report-actions">
-            <button type="button" @click="runDebugReport"><IconRefresh aria-hidden="true" /> Refresh</button>
-            <button type="button" class="primary" @click="copyDebugReport">
-              <IconCheck v-if="debugReportCopied" aria-hidden="true" />
-              <IconBugReport v-else aria-hidden="true" />
-              {{ debugReportCopied ? 'Copied' : 'Copy report' }}
-            </button>
-          </div>
-        </footer>
-      </template>
-    </section>
-    <section
-      v-if="reproPanelOpen"
-      class="accessibility-panel debug-report-panel repro-panel"
-      data-shell-docked-panel
-      role="dialog"
-      aria-modal="false"
-      aria-labelledby="repro-panel-title"
-      :aria-busy="reproState === 'loading'"
-    >
-      <header>
-        <div>
-          <span class="eyebrow">Privacy-safe timeline</span>
-          <h2 id="repro-panel-title">Repro recorder</h2>
-        </div>
-        <div class="panel-header-actions">
-          <PanelDockPicker v-model="panelDock" label="Dock repro recorder" />
-          <button class="panel-close" type="button" aria-label="Close repro recorder" @click="reproPanelOpen = false"><IconClose aria-hidden="true" /></button>
-        </div>
-      </header>
-      <div v-if="reproState === 'loading' && !reproRecording" class="accessibility-audit-loading" role="status">
-        <IconProgress class="state-spinner" aria-hidden="true" />
-        <strong>Loading reproduction steps…</strong>
-      </div>
-      <div v-else-if="reproState === 'error'" class="accessibility-audit-error" role="alert">
-        <IconError aria-hidden="true" />
-        <strong>Repro recorder needs attention</strong>
-        <span>{{ reproError }}</span>
-        <button type="button" @click="manageRepro('get')">Try again</button>
-      </div>
-      <template v-else-if="reproRecording">
-        <div class="repro-safety" :class="{ recording: reproRecording.active }">
-          <IconRecord aria-hidden="true" />
-          <div>
-            <strong>{{ reproRecording.active ? 'Recording accepted human actions' : reproRecording.stepCount ? 'Recording stopped' : 'Ready to record' }}</strong>
-            <span>Typed values, clipboard contents, uploads, screenshots, and page HTML are never recorded.</span>
-          </div>
-        </div>
-        <div v-if="!reproRecording.steps.length" class="accessibility-audit-empty debug-report-empty">
-          <IconRecord aria-hidden="true" />
-          <strong>Show the issue once</strong>
-          <span>Start recording, reproduce the problem in this tab, then stop and copy a compact timeline into agent chat.</span>
-          <button class="primary" type="button" :disabled="reproState === 'loading'" @click="startReproRecording"><IconRecord aria-hidden="true" /> Start recording</button>
-        </div>
-        <div v-else class="repro-timeline" aria-label="Recorded reproduction steps">
-          <article v-for="step in reproRecording.steps" :key="step.index" class="repro-step" :class="step.kind">
-            <span class="repro-step-index">{{ step.index }}</span>
-            <div>
-              <header><strong>{{ step.kind }}</strong><time>{{ formatReproElapsed(step.elapsedMs) }}</time></header>
-              <p>{{ step.description }}</p>
-              <code v-if="step.target">{{ step.target.selector }}</code>
-              <small v-else-if="step.url">{{ step.url }}</small>
-            </div>
-          </article>
-          <p v-if="reproRecording.truncated" class="inspector-issues-truncated"><IconInfo aria-hidden="true" /> Timeline reached its 200-step limit.</p>
-          <details class="debug-report-caveats">
-            <summary>Privacy and scope</summary>
-            <ul><li v-for="caveat in reproRecording.caveats" :key="caveat">{{ caveat }}</li></ul>
-          </details>
-        </div>
-        <footer>
-          <span>{{ reproRecording.stepCount }} {{ reproRecording.stepCount === 1 ? 'step' : 'steps' }} · review before sharing</span>
-          <div class="debug-report-actions">
-            <button type="button" :disabled="reproState === 'loading' || !reproRecording.stepCount" @click="clearReproRecording"><IconDelete aria-hidden="true" /> Clear</button>
-            <button v-if="reproRecording.active" class="primary" type="button" :disabled="reproState === 'loading'" @click="stopReproRecording"><IconStop aria-hidden="true" /> Stop</button>
-            <button v-else-if="reproRecording.stepCount" type="button" :disabled="reproState === 'loading'" @click="startReproRecording"><IconRecord aria-hidden="true" /> Record again</button>
-            <button v-if="reproRecording.stepCount && !reproRecording.active" type="button" @click="copyReproRecording">
-              <IconCheck v-if="reproCopied" aria-hidden="true" />
-              <IconBugReport v-else aria-hidden="true" />
-              {{ reproCopied ? 'Copied' : 'Copy timeline' }}
-            </button>
-            <button v-if="reproRecording.stepCount && !reproRecording.active" class="primary" type="button" @click="copyReproPlaywright">
-              <IconCheck v-if="reproPlaywrightCopied" aria-hidden="true" />
-              <IconCode v-else aria-hidden="true" />
-              {{ reproPlaywrightCopied ? 'Copied Playwright' : 'Copy Playwright' }}
-            </button>
-          </div>
-        </footer>
-      </template>
-    </section>
-    <section
-      v-if="domChangesPanelOpen"
-      class="accessibility-panel debug-report-panel repro-panel dom-changes-panel"
-      data-shell-docked-panel
-      role="dialog"
-      aria-modal="false"
-      aria-labelledby="dom-changes-panel-title"
-      :aria-busy="domChangesState === 'loading'"
-    >
-      <header>
-        <div>
-          <span class="eyebrow">Structural evidence</span>
-          <h2 id="dom-changes-panel-title">DOM changes</h2>
-        </div>
-        <div class="panel-header-actions">
-          <PanelDockPicker v-model="panelDock" label="Dock DOM changes" />
-          <button class="panel-close" type="button" aria-label="Close DOM changes" @click="domChangesPanelOpen = false"><IconClose aria-hidden="true" /></button>
-        </div>
-      </header>
-      <div v-if="domChangesState === 'loading' && !domChangesReport" class="accessibility-audit-loading" role="status">
-        <IconProgress class="state-spinner" aria-hidden="true" />
-        <strong>Loading DOM changes…</strong>
-      </div>
-      <div v-else-if="domChangesState === 'error'" class="accessibility-audit-error" role="alert">
-        <IconError aria-hidden="true" />
-        <strong>DOM changes need attention</strong>
-        <span>{{ domChangesError }}</span>
-        <button type="button" @click="manageDomChanges('get')">Try again</button>
-      </div>
-      <template v-else-if="domChangesReport">
-        <div class="repro-safety" :class="{ recording: domChangesReport.active }">
-          <IconAccountTree aria-hidden="true" />
-          <div>
-            <strong>{{ domChangesReport.active ? 'Recording structural page changes' : domChangesReport.startedAt ? 'Recording stopped' : 'Ready to record' }}</strong>
-            <span>Text, HTML, attribute values, IDs, classes, and form values are never recorded.</span>
-          </div>
-        </div>
-        <div v-if="!domChangesReport.startedAt" class="accessibility-audit-empty debug-report-empty">
-          <IconAccountTree aria-hidden="true" />
-          <strong>Reveal what an action changed</strong>
-          <span>Start recording, interact with the live page, then stop and copy the bounded structural report into agent chat.</span>
-          <button class="primary" type="button" :disabled="domChangesState === 'loading'" @click="manageDomChanges('start')"><IconRecord aria-hidden="true" /> Start recording</button>
-        </div>
-        <div v-else-if="!domChangesReport.entries.length" class="accessibility-audit-empty debug-report-empty">
-          <IconAccountTree aria-hidden="true" />
-          <strong>{{ domChangesReport.active ? 'Waiting for a page change' : 'No structural changes recorded' }}</strong>
-          <span>{{ domChangesReport.active ? 'Use the website beside this panel; changes will appear here automatically.' : 'Record again and perform the interaction whose result is unclear.' }}</span>
-        </div>
-        <div v-else class="repro-timeline" aria-label="Recorded DOM changes">
-          <article v-for="entry in domChangesReport.entries" :key="entry.index" class="repro-step" :class="entry.kind">
-            <span class="repro-step-index">{{ entry.index }}</span>
-            <div>
-              <header><strong>{{ entry.kind }}</strong><time>{{ formatReproElapsed(entry.elapsedMs) }}</time></header>
-              <p>{{ domChangeDescription(entry) }}</p>
-              <code>{{ entry.target }}</code>
-              <small v-if="entry.addedTags?.length">Added tags: {{ entry.addedTags.join(', ') }}</small>
-              <small v-if="entry.removedTags?.length">Removed tags: {{ entry.removedTags.join(', ') }}</small>
-            </div>
-          </article>
-          <p v-if="domChangesReport.truncated" class="inspector-issues-truncated"><IconInfo aria-hidden="true" /> The 200-entry limit was reached; {{ domChangesReport.droppedChanges }} later changes were counted but omitted.</p>
-          <details class="debug-report-caveats">
-            <summary>Privacy and scope</summary>
-            <ul><li v-for="caveat in domChangesReport.caveats" :key="caveat">{{ caveat }}</li></ul>
-          </details>
-        </div>
-        <footer>
-          <span>{{ domChangesReport.changeCount }} {{ domChangesReport.changeCount === 1 ? 'mutation' : 'mutations' }} · {{ domChangesReport.entries.length }} grouped {{ domChangesReport.entries.length === 1 ? 'entry' : 'entries' }}</span>
-          <div class="debug-report-actions">
-            <button type="button" :disabled="domChangesState === 'loading' || !domChangesReport.startedAt" @click="manageDomChanges('clear')"><IconDelete aria-hidden="true" /> Clear</button>
-            <button v-if="domChangesReport.active" class="primary" type="button" :disabled="domChangesState === 'loading'" @click="manageDomChanges('stop')"><IconStop aria-hidden="true" /> Stop</button>
-            <button v-else-if="domChangesReport.startedAt" type="button" :disabled="domChangesState === 'loading'" @click="manageDomChanges('start')"><IconRecord aria-hidden="true" /> Record again</button>
-            <button v-if="domChangesReport.entries.length && !domChangesReport.active" class="primary" type="button" @click="copyDomChanges">
-              <IconCheck v-if="domChangesCopied" aria-hidden="true" />
-              <IconAccountTree v-else aria-hidden="true" />
-              {{ domChangesCopied ? 'Copied' : 'Copy report' }}
-            </button>
-          </div>
-        </footer>
-      </template>
-    </section>
-    <section
-      v-if="visualComparePanelOpen"
-      class="accessibility-panel debug-report-panel visual-compare-panel"
-      data-shell-docked-panel
-      role="dialog"
-      aria-modal="false"
-      aria-labelledby="visual-compare-panel-title"
-      :aria-busy="visualCompareState === 'loading'"
-    >
-      <header>
-        <div>
-          <span class="eyebrow">Before and after</span>
-          <h2 id="visual-compare-panel-title">Visual compare</h2>
-        </div>
-        <div class="panel-header-actions">
-          <PanelDockPicker v-model="panelDock" label="Dock visual compare" />
-          <button class="panel-close" type="button" aria-label="Close visual compare" @click="visualComparePanelOpen = false"><IconClose aria-hidden="true" /></button>
-        </div>
-      </header>
-      <div v-if="visualCompareState === 'loading'" class="accessibility-audit-loading" role="status">
-        <IconProgress class="state-spinner" aria-hidden="true" />
-        <strong>Capturing the visible page…</strong>
-      </div>
-      <div v-else-if="visualCompareState === 'error'" class="accessibility-audit-error" role="alert">
-        <IconError aria-hidden="true" />
-        <strong>Visual comparison needs attention</strong>
-        <span>{{ visualCompareError }}</span>
-        <button type="button" @click="manageVisualCompare('get')">Return to baseline</button>
-      </div>
-      <template v-else-if="visualCompareReport">
-        <div v-if="visualCompareReport.status === 'empty'" class="accessibility-audit-empty debug-report-empty">
-          <IconDifference aria-hidden="true" />
-          <strong>Capture the page before a change</strong>
-          <span>Bronom keeps one temporary viewport baseline for this tab. Make the change, then compare the current page.</span>
-          <button class="primary" type="button" @click="manageVisualCompare('set-baseline')"><IconScreenshotRegion aria-hidden="true" /> Set baseline</button>
-        </div>
-        <div v-else class="visual-compare-content">
-          <div class="visual-compare-summary" :class="{ identical: visualCompareReport.identical, changed: visualCompareReport.status === 'compared' && !visualCompareReport.identical }">
-            <IconCheck v-if="visualCompareReport.status === 'compared' && visualCompareReport.identical" aria-hidden="true" />
-            <IconDifference v-else aria-hidden="true" />
-            <div>
-              <strong v-if="visualCompareReport.status === 'baseline'">Baseline ready</strong>
-              <strong v-else-if="visualCompareReport.identical">No changed pixels</strong>
-              <strong v-else>{{ visualCompareReport.changedPercent }}% of pixels changed</strong>
-              <span v-if="visualCompareReport.baseline">{{ visualCompareReport.baseline.width }}×{{ visualCompareReport.baseline.height }} · {{ debugTimestamp(visualCompareReport.baseline.capturedAt) }}</span>
-            </div>
-          </div>
-          <img
-            v-if="visualCompareReport.status === 'compared' && visualCompareReport.diffPngDataUrl"
-            class="visual-compare-image"
-            :src="visualCompareReport.diffPngDataUrl"
-            alt="Visual difference: changed pixels are white and unchanged pixels are dimmed"
-          />
-          <dl v-if="visualCompareReport.status === 'compared'" class="visual-compare-metrics">
-            <div><dt>Changed pixels</dt><dd>{{ visualCompareReport.changedPixels?.toLocaleString() }}</dd></div>
-            <div><dt>Total pixels</dt><dd>{{ visualCompareReport.totalPixels?.toLocaleString() }}</dd></div>
-            <div><dt>Threshold</dt><dd>{{ visualCompareReport.threshold }} / 255</dd></div>
-            <div><dt>Changed area</dt><dd>{{ visualCompareReport.diffBounds ? `${visualCompareReport.diffBounds.x}, ${visualCompareReport.diffBounds.y} · ${visualCompareReport.diffBounds.width}×${visualCompareReport.diffBounds.height}` : 'None' }}</dd></div>
-          </dl>
-          <details class="debug-report-caveats">
-            <summary>Accuracy and privacy</summary>
-            <ul><li v-for="caveat in visualCompareReport.caveats" :key="caveat">{{ caveat }}</li></ul>
-          </details>
-        </div>
-        <footer v-if="visualCompareReport.status !== 'empty'">
-          <span>Viewport-only · stored in memory</span>
-          <div class="debug-report-actions">
-            <button type="button" @click="manageVisualCompare('clear')"><IconDelete aria-hidden="true" /> Clear</button>
-            <button type="button" @click="manageVisualCompare('set-baseline')"><IconScreenshotRegion aria-hidden="true" /> New baseline</button>
-            <button class="primary" type="button" @click="manageVisualCompare('compare')"><IconDifference aria-hidden="true" /> Compare now</button>
-            <button v-if="visualCompareReport.status === 'compared'" type="button" @click="copyVisualDiff">
-              <IconCheck v-if="visualCompareCopied" aria-hidden="true" />
-              <IconDifference v-else aria-hidden="true" />
-              {{ visualCompareCopied ? 'Copied' : 'Copy diff PNG' }}
-            </button>
-          </div>
-        </footer>
-      </template>
-    </section>
+    <DiagnosticsPanels
+      v-model:dock="panelDock"
+      :active-tab="activeTab"
+      :locale="resolvedLocale"
+      :controller="diagnosticsController"
+      :open-support="openSupport"
+    />
+    <ConsolePanelContainer
+      ref="consolePanel"
+      v-model:open="consolePanelOpen"
+      v-model:dock="panelDock"
+      :active-tab="activeTab"
+      :locale="resolvedLocale"
+      :copy-text="copyAppText"
+      :accept-browser-state="browserStore.acceptAuthoritativeState"
+      :keeps-separate-panel-open="keepsSeparatePanelOpen"
+    />
+    <NetworkPanel
+      ref="networkPanel"
+      v-model:open="networkMonitorOpen"
+      v-model:dock="panelDock"
+      :active-tab="activeTab"
+      :locale="resolvedLocale"
+      :copy-text="copyAppText"
+      :accept-browser-state="browserStore.acceptAuthoritativeState"
+      :keeps-separate-panel-open="keepsSeparatePanelOpen"
+    />
     <section v-if="tabSearchOpen" class="tab-search-panel" data-shell-side-panel role="dialog" aria-modal="false" aria-labelledby="tab-search-title">
       <header>
         <div>
-          <span class="eyebrow">Browser workspace</span>
-          <h2 id="tab-search-title">Tabs</h2>
+          <span class="eyebrow">{{ t('tabSearch.kicker') }}</span>
+          <h2 id="tab-search-title">{{ t('tabSearch.heading') }}</h2>
         </div>
-        <span class="tab-search-count">{{ regularTabs.length }} open<template v-if="state.savedTabGroups.length"> · {{ state.savedTabGroups.length }} saved</template><template v-if="state.closedTabs.length"> · {{ state.closedTabs.length }} closed</template></span>
-        <button class="panel-close" type="button" aria-label="Close tab search" @click="tabSearchOpen = false"><IconClose aria-hidden="true" /></button>
+        <span class="tab-search-count">{{ t('tabSearch.countOpen', { count: localNumber(regularTabs.length) }) }}{{ state.savedTabGroups.length ? ` ${t('tabSearch.countSaved', { count: localNumber(state.savedTabGroups.length) })}` : '' }}{{ state.closedTabs.length ? ` ${t('tabSearch.countClosed', { count: localNumber(state.closedTabs.length) })}` : '' }}</span>
+        <button class="panel-close" type="button" :aria-label="t('tabSearch.close')" @click="tabSearchOpen = false"><IconClose aria-hidden="true" /></button>
       </header>
       <div v-if="regularTabs.length || state.closedTabs.length || state.savedTabGroups.length" class="tab-search-field">
         <IconSearch aria-hidden="true" />
@@ -9610,34 +5447,34 @@ onBeforeUnmount(() => {
           ref="tabSearchInput"
           v-model="tabSearchQuery"
           type="search"
-          aria-label="Search tabs"
+          :aria-label="t('tabSearch.search')"
           aria-controls="tab-search-results"
           aria-describedby="tab-search-status"
           autocomplete="off"
           spellcheck="false"
-          placeholder="Search titles and addresses"
+          :placeholder="t('tabSearch.placeholder')"
           @keydown="handleTabSearchKeydown"
         />
         <kbd>⌃/⌘ ⇧ A</kbd>
       </div>
       <span id="tab-search-status" class="sr-only" role="status" aria-live="polite">
-        {{ tabSearchResults.length }} matching {{ tabSearchResults.length === 1 ? 'item' : 'items' }}.<template v-if="selectedTabSearchResult"> Selected {{ tabSearchResultLabel(selectedTabSearchResult) }}.</template>
+        {{ t('tabSearch.matches', { count: localNumber(tabSearchResults.length) }, tabSearchResults.length) }}<template v-if="selectedTabSearchResult"> {{ t('tabSearch.selected', { item: tabSearchResultLabel(selectedTabSearchResult) }) }}</template>
       </span>
       <div v-if="!regularTabs.length && !state.closedTabs.length && !state.savedTabGroups.length" class="tab-search-empty">
         <IconTabSearch aria-hidden="true" />
-        <strong>No website tabs open</strong>
-        <span>Home stays available as application navigation.</span>
-        <button type="button" @click="runBrowserShortcut('new-tab')">Open a new tab</button>
+        <strong>{{ t('tabSearch.empty') }}</strong>
+        <span>{{ t('tabSearch.homeAvailable') }}</span>
+        <button type="button" @click="runBrowserShortcut('new-tab')">{{ t('tabSearch.newTab') }}</button>
       </div>
       <div v-else-if="!tabSearchResults.length" class="tab-search-empty compact">
         <IconSearch aria-hidden="true" />
-        <strong>No matching tabs</strong>
-        <span>Try another title or address.</span>
+        <strong>{{ t('tabSearch.noMatches') }}</strong>
+        <span>{{ t('tabSearch.tryAnother') }}</span>
       </div>
       <div v-else id="tab-search-results" class="tab-search-list">
         <section v-if="filteredSavedTabGroups.length" class="tab-search-section saved-groups" aria-labelledby="saved-groups-title">
-          <h3 id="saved-groups-title">Archived workspaces <span>{{ filteredSavedTabGroups.length }}</span></h3>
-          <div role="list" aria-label="Archived workspaces">
+          <h3 id="saved-groups-title">{{ t('tabSearch.archived') }} <span>{{ localNumber(filteredSavedTabGroups.length) }}</span></h3>
+          <div role="list" :aria-label="t('tabSearch.archivedAria')">
             <article
               v-for="group in filteredSavedTabGroups"
               :id="`tab-search-saved-${group.id}`"
@@ -9651,18 +5488,18 @@ onBeforeUnmount(() => {
                 <span class="tab-search-site-icon saved" :style="tabGroupColorStyle(group.color)" aria-hidden="true"><IconFolderOpen /></span>
                 <span class="tab-search-copy">
                   <strong>{{ group.name }}</strong>
-                  <span>{{ group.tabs.length }} saved {{ group.tabs.length === 1 ? 'tab' : 'tabs' }}</span>
+                  <span>{{ t('tabSearch.savedTabs', { count: localNumber(group.tabs.length) }, group.tabs.length) }}</span>
                   <small>{{ group.tabs.slice(0, 3).map((tab) => tab.title || tab.url).join(' · ') }}</small>
                 </span>
               </button>
-              <button class="tab-search-restore" type="button" :aria-label="`Restore archived workspace ${group.name}`" title="Restore workspace" @click="restoreSavedTabGroup(group)"><IconRestore aria-hidden="true" /></button>
-              <button class="tab-search-close" type="button" :aria-label="`Delete archived workspace ${group.name}`" title="Delete archived workspace" @click="deleteSavedTabGroup($event, group)"><IconDelete aria-hidden="true" /></button>
+              <button class="tab-search-restore" type="button" :aria-label="t('tabSearch.restoreWorkspaceAria', { name: group.name })" :title="t('tabSearch.restoreWorkspace')" @click="restoreSavedTabGroup(group)"><IconRestore aria-hidden="true" /></button>
+              <button class="tab-search-close" type="button" :aria-label="t('tabSearch.deleteWorkspaceAria', { name: group.name })" :title="t('tabSearch.deleteWorkspace')" @click="deleteSavedTabGroup($event, group)"><IconDelete aria-hidden="true" /></button>
             </article>
           </div>
         </section>
         <section v-if="filteredTabs.length" class="tab-search-section" aria-labelledby="open-tabs-title">
-          <h3 id="open-tabs-title">Open tabs <span>{{ filteredTabs.length }}</span></h3>
-          <div role="list" aria-label="Open tabs">
+          <h3 id="open-tabs-title">{{ t('tabSearch.openTabs') }} <span>{{ localNumber(filteredTabs.length) }}</span></h3>
+          <div role="list" :aria-label="t('tabSearch.openTabs')">
             <article
               v-for="tab in filteredTabs"
               :id="`tab-search-open-${tab.id}`"
@@ -9680,8 +5517,8 @@ onBeforeUnmount(() => {
                   <IconLanguage v-else />
                 </span>
                 <span class="tab-search-copy">
-                  <strong>{{ tab.title || 'New tab' }}</strong>
-                  <span>{{ tab.url === 'about:blank' ? 'Blank page' : tab.url }}</span>
+                  <strong>{{ tab.title || t('tabSearch.newTabTitle') }}</strong>
+                  <span>{{ tab.url === 'about:blank' ? t('tabSearch.blankPage') : tab.url }}</span>
                   <small v-if="tabSearchMeta(tab)">{{ tabSearchMeta(tab) }}</small>
                 </span>
               </button>
@@ -9689,18 +5526,18 @@ onBeforeUnmount(() => {
                 class="tab-search-pin"
                 :class="{ active: tab.pinned }"
                 type="button"
-                :aria-label="`${tab.pinned ? 'Unpin' : 'Pin'} ${tab.title || 'New tab'}`"
-                :title="tab.pinned ? 'Unpin tab' : 'Pin tab'"
+                :aria-label="tab.pinned ? t('tabSearch.unpinAria', { title: tab.title || t('tabSearch.newTabTitle') }) : t('tabSearch.pinAria', { title: tab.title || t('tabSearch.newTabTitle') })"
+                :title="tab.pinned ? t('tabSearch.unpin') : t('tabSearch.pin')"
                 :aria-pressed="tab.pinned"
                 @click="togglePinnedSearchTab($event, tab)"
               ><IconKeep aria-hidden="true" /></button>
-              <button class="tab-search-close" type="button" :aria-label="`Close ${tab.title || 'New tab'}`" title="Close tab" :disabled="state.allHumanInteractionLocked" data-lock-protected-tab-close @click="closeSearchTab($event, tab.id)"><IconClose aria-hidden="true" /></button>
+              <button class="tab-search-close" type="button" :aria-label="t('tabSearch.closeTabAria', { title: tab.title || t('tabSearch.newTabTitle') })" :title="t('tabSearch.closeTab')" :disabled="state.allHumanInteractionLocked" data-lock-protected-tab-close @click="closeSearchTab($event, tab.id)"><IconClose aria-hidden="true" /></button>
             </article>
           </div>
         </section>
         <section v-if="filteredClosedTabs.length" class="tab-search-section recently-closed" aria-labelledby="closed-tabs-title">
-          <h3 id="closed-tabs-title">Recently closed <span>{{ filteredClosedTabs.length }}</span></h3>
-          <div role="list" aria-label="Recently closed tabs">
+          <h3 id="closed-tabs-title">{{ t('tabSearch.recentlyClosed') }} <span>{{ localNumber(filteredClosedTabs.length) }}</span></h3>
+          <div role="list" :aria-label="t('accessibility.recentlyClosedTabs')">
             <article
               v-for="tab in filteredClosedTabs"
               :id="`tab-search-closed-${tab.id}`"
@@ -9713,29 +5550,29 @@ onBeforeUnmount(() => {
               <button class="tab-search-open" type="button" :title="tab.url" @click="restoreSearchTab(tab)">
                 <span class="tab-search-site-icon closed" aria-hidden="true"><IconHistory /></span>
                 <span class="tab-search-copy">
-                  <strong>{{ tab.title || 'New tab' }}</strong>
-                  <span>{{ tab.url === 'about:blank' ? 'Blank page' : tab.url }}</span>
+                  <strong>{{ tab.title || t('tabSearch.newTabTitle') }}</strong>
+                  <span>{{ tab.url === 'about:blank' ? t('tabSearch.blankPage') : tab.url }}</span>
                   <small>{{ closedTabMeta(tab) }}</small>
                 </span>
               </button>
-              <button class="tab-search-restore" type="button" :aria-label="`Restore ${tab.title || 'New tab'}`" title="Restore tab" @click="restoreSearchTab(tab)"><IconRestore aria-hidden="true" /></button>
+              <button class="tab-search-restore" type="button" :aria-label="t('tabSearch.restoreAria', { title: tab.title || t('tabSearch.newTabTitle') })" :title="t('tabSearch.restore')" @click="restoreSearchTab(tab)"><IconRestore aria-hidden="true" /></button>
             </article>
           </div>
         </section>
       </div>
-      <footer v-if="tabSearchResults.length"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>Enter</kbd> Open</span><span><kbd>Esc</kbd> Close</span></footer>
+      <footer v-if="tabSearchResults.length"><span><kbd>↑</kbd><kbd>↓</kbd> {{ t('tabSearch.navigate') }}</span><span><kbd>Enter</kbd> {{ t('tabSearch.open') }}</span><span><kbd>Esc</kbd> {{ t('tabSearch.close') }}</span></footer>
     </section>
-    <div v-if="findOpen" class="find-bar" role="search" aria-label="Find in page">
+    <div v-if="findOpen" class="find-bar" role="search" :aria-label="t('find.region')">
       <div class="find-field">
         <IconSearch aria-hidden="true" />
         <input
           ref="findInput"
           v-model="findQuery"
           type="search"
-          aria-label="Find text"
+          :aria-label="t('find.text')"
           autocomplete="off"
           spellcheck="false"
-          placeholder="Find in page"
+          :placeholder="t('find.placeholder')"
           @input="searchInPage(true, true)"
           @keydown.enter.prevent="searchInPage(!$event.shiftKey, false)"
         />
@@ -9746,8 +5583,8 @@ onBeforeUnmount(() => {
       <button
         class="find-action"
         type="button"
-        title="Previous match (Shift+Enter)"
-        aria-label="Previous match"
+        :title="t('find.previousTitle')"
+        :aria-label="t('find.previous')"
         :disabled="!findQuery || !findResult.matches"
         @click="searchInPage(false, false)"
       >
@@ -9756,38 +5593,38 @@ onBeforeUnmount(() => {
       <button
         class="find-action"
         type="button"
-        title="Next match (Enter)"
-        aria-label="Next match"
+        :title="t('find.nextTitle')"
+        :aria-label="t('find.next')"
         :disabled="!findQuery || !findResult.matches"
         @click="searchInPage(true, false)"
       >
         <IconKeyboardArrowDown aria-hidden="true" />
       </button>
-      <button class="find-action" type="button" title="Close (Escape)" aria-label="Close find in page" @click="closeFind"><IconClose aria-hidden="true" /></button>
+      <button class="find-action" type="button" :title="t('find.closeTitle')" :aria-label="t('find.close')" @click="closeFind"><IconClose aria-hidden="true" /></button>
     </div>
-    <div v-if="zoomOpen" class="zoom-bar" role="group" aria-label="Page zoom controls">
-      <span>Page zoom</span>
-      <button type="button" title="Zoom out (Ctrl/Cmd+-)" aria-label="Zoom out" :disabled="(activeTab?.zoomPercent ?? 100) <= 50" @click="setActiveZoom('out')"><IconRemove aria-hidden="true" /></button>
-      <output aria-live="polite">{{ activeTab?.zoomPercent ?? 100 }}%</output>
-      <button type="button" title="Zoom in (Ctrl/Cmd++)" aria-label="Zoom in" :disabled="(activeTab?.zoomPercent ?? 100) >= 300" @click="setActiveZoom('in')"><IconZoomIn aria-hidden="true" /></button>
-      <button class="zoom-reset" type="button" :disabled="(activeTab?.zoomPercent ?? 100) === 100" @click="setActiveZoom('reset')">Reset</button>
-      <button type="button" title="Close (Escape)" aria-label="Close page zoom controls" @click="zoomOpen = false"><IconClose aria-hidden="true" /></button>
+    <div v-if="zoomOpen" class="zoom-bar" role="group" :aria-label="t('zoom.controls')">
+      <span>{{ t('zoom.heading') }}</span>
+      <button type="button" :title="t('zoom.outTitle')" :aria-label="t('zoom.out')" :disabled="(activeTab?.zoomPercent ?? 100) <= 50" @click="setActiveZoom('out')"><IconRemove aria-hidden="true" /></button>
+      <output aria-live="polite">{{ localPercent(activeTab?.zoomPercent ?? 100) }}</output>
+      <button type="button" :title="t('zoom.inTitle')" :aria-label="t('zoom.in')" :disabled="(activeTab?.zoomPercent ?? 100) >= 300" @click="setActiveZoom('in')"><IconZoomIn aria-hidden="true" /></button>
+      <button class="zoom-reset" type="button" :disabled="(activeTab?.zoomPercent ?? 100) === 100" @click="setActiveZoom('reset')">{{ t('zoom.reset') }}</button>
+      <button type="button" :title="t('zoom.closeTitle')" :aria-label="t('zoom.close')" @click="zoomOpen = false"><IconClose aria-hidden="true" /></button>
     </div>
     <section v-if="downloadsOpen" class="downloads-panel" data-shell-side-panel role="dialog" aria-modal="false" aria-labelledby="downloads-title">
       <header>
         <div>
-          <span class="eyebrow">Browser files</span>
-          <h2 id="downloads-title">Downloads</h2>
+          <span class="eyebrow">{{ t('downloads.kicker') }}</span>
+          <h2 id="downloads-title">{{ t('downloads.heading') }}</h2>
         </div>
         <div class="downloads-header-actions">
-          <button type="button" :disabled="!finishedDownloads.length" @click="clearFinishedDownloads">Clear finished</button>
-          <button class="panel-close" type="button" aria-label="Close downloads" @click="downloadsOpen = false"><IconClose aria-hidden="true" /></button>
+          <button type="button" :disabled="!finishedDownloads.length" @click="clearFinishedDownloads">{{ t('downloads.clearFinished') }}</button>
+          <button class="panel-close" type="button" :aria-label="t('downloads.close')" @click="downloadsOpen = false"><IconClose aria-hidden="true" /></button>
         </div>
       </header>
       <div v-if="!downloads.length" class="downloads-empty">
         <IconDownload aria-hidden="true" />
-        <strong>No downloads yet</strong>
-        <span>Files you download will appear here.</span>
+        <strong>{{ t('downloads.empty') }}</strong>
+        <span>{{ t('downloads.emptyDescription') }}</span>
       </div>
       <div v-else class="downloads-list">
         <article v-for="download in downloads" :key="download.id" class="download-item" :class="download.state">
@@ -9799,12 +5636,12 @@ onBeforeUnmount(() => {
           <div class="download-copy">
             <strong :title="download.filename">{{ download.filename }}</strong>
             <span>{{ downloadMeta(download) }}</span>
-            <div v-if="download.state === 'progressing'" class="download-progress" role="progressbar" :aria-label="`Downloading ${download.filename}`" :aria-valuenow="download.totalBytes > 0 ? downloadProgress(download) : undefined" aria-valuemin="0" aria-valuemax="100">
+            <div v-if="download.state === 'progressing'" class="download-progress" role="progressbar" :aria-label="t('downloads.downloading', { filename: download.filename })" :aria-valuenow="download.totalBytes > 0 ? downloadProgress(download) : undefined" aria-valuemin="0" aria-valuemax="100">
               <span :class="{ indeterminate: download.totalBytes <= 0 }" :style="download.totalBytes > 0 ? { width: `${downloadProgress(download)}%` } : undefined" />
             </div>
           </div>
-          <button v-if="download.state === 'progressing'" class="download-action" type="button" :aria-label="`Cancel ${download.filename}`" title="Cancel download" @click="cancelDownload(download.id)"><IconClose aria-hidden="true" /></button>
-          <button v-else-if="download.state === 'completed'" class="download-action" type="button" :aria-label="`Show ${download.filename} in folder`" title="Show in folder" @click="showDownloadInFolder(download.id)"><IconFolderOpen aria-hidden="true" /></button>
+          <button v-if="download.state === 'progressing'" class="download-action" type="button" :aria-label="t('downloads.cancelAria', { filename: download.filename })" :title="t('downloads.cancel')" @click="cancelDownload(download.id)"><IconClose aria-hidden="true" /></button>
+          <button v-else-if="download.state === 'completed'" class="download-action" type="button" :aria-label="t('downloads.showAria', { filename: download.filename })" :title="t('downloads.show')" @click="showDownloadInFolder(download.id)"><IconFolderOpen aria-hidden="true" /></button>
         </article>
       </div>
       <p v-if="downloadActionError" class="downloads-error" role="alert">{{ downloadActionError }}</p>
@@ -9812,32 +5649,32 @@ onBeforeUnmount(() => {
     <section v-if="bookmarksOpen" class="bookmarks-panel" data-shell-docked-panel role="dialog" aria-modal="false" aria-labelledby="bookmarks-title">
       <header>
         <div>
-          <span class="eyebrow">Saved locally</span>
-          <h2 id="bookmarks-title">Bookmarks</h2>
+          <span class="eyebrow">{{ t('bookmarks.kicker') }}</span>
+          <h2 id="bookmarks-title">{{ t('bookmarks.heading') }}</h2>
         </div>
         <div class="bookmarks-header-actions">
-          <PanelDockPicker v-model="panelDock" label="Dock bookmarks" />
+          <PanelDockPicker v-model="panelDock" :label="t('panels.dockNamed', { panel: t('bookmarks.heading') })" />
           <button
             type="button"
             :disabled="!activeWebUrl"
             @click="toggleCurrentBookmark"
-          >{{ currentBookmark ? 'Remove current' : 'Add current' }}</button>
-          <button class="panel-close" type="button" aria-label="Close bookmarks" @click="bookmarksOpen = false"><IconClose aria-hidden="true" /></button>
+          >{{ currentBookmark ? t('bookmarks.removeCurrent') : t('bookmarks.addCurrent') }}</button>
+          <button class="panel-close" type="button" :aria-label="t('bookmarks.close')" @click="bookmarksOpen = false"><IconClose aria-hidden="true" /></button>
         </div>
       </header>
       <div v-if="bookmarks.length" class="bookmark-search-field">
         <IconSearch aria-hidden="true" />
-        <input v-model="bookmarkSearch" type="search" aria-label="Search bookmarks" autocomplete="off" spellcheck="false" placeholder="Search bookmarks" />
+        <input v-model="bookmarkSearch" type="search" :aria-label="t('bookmarks.search')" autocomplete="off" spellcheck="false" :placeholder="t('bookmarks.search')" />
       </div>
       <div v-if="!bookmarks.length" class="bookmarks-empty">
         <IconStarOutline aria-hidden="true" />
-        <strong>No bookmarks yet</strong>
-        <span>Save the current website with Ctrl/Cmd+D.</span>
+        <strong>{{ t('bookmarks.empty') }}</strong>
+        <span>{{ t('bookmarks.emptyDescription') }}</span>
       </div>
       <div v-else-if="!filteredBookmarks.length" class="bookmarks-empty compact">
         <IconSearch aria-hidden="true" />
-        <strong>No matching bookmarks</strong>
-        <span>Try another title or address.</span>
+        <strong>{{ t('bookmarks.noMatches') }}</strong>
+        <span>{{ t('bookmarks.tryAnother') }}</span>
       </div>
       <div v-else class="bookmarks-list">
         <article v-for="bookmark in filteredBookmarks" :key="bookmark.id" class="bookmark-item" :class="{ current: bookmark.id === currentBookmark?.id }">
@@ -9847,7 +5684,7 @@ onBeforeUnmount(() => {
               <input
                 v-if="editingBookmarkId === bookmark.id"
                 v-model="editingBookmarkTitle"
-                :aria-label="`Rename ${bookmark.title}`"
+                :aria-label="t('bookmarks.renameAria', { title: bookmark.title })"
                 maxlength="200"
                 @click.stop
                 @keydown.enter.prevent="commitBookmarkRename(bookmark.id)"
@@ -9857,9 +5694,9 @@ onBeforeUnmount(() => {
               <span>{{ bookmark.url }}</span>
             </span>
           </button>
-          <button v-if="editingBookmarkId === bookmark.id" class="bookmark-action confirm" type="button" :aria-label="`Save name for ${bookmark.title}`" title="Save name" @click="commitBookmarkRename(bookmark.id)"><IconCheck aria-hidden="true" /></button>
-          <button v-else class="bookmark-action" type="button" :aria-label="`Rename ${bookmark.title}`" title="Rename bookmark" @click="beginRenameBookmark(bookmark)"><IconEdit aria-hidden="true" /></button>
-          <button class="bookmark-action danger" type="button" :aria-label="`Remove ${bookmark.title}`" title="Remove bookmark" @click="removeBookmark(bookmark.id)"><IconDelete aria-hidden="true" /></button>
+          <button v-if="editingBookmarkId === bookmark.id" class="bookmark-action confirm" type="button" :aria-label="t('bookmarks.saveAria', { title: bookmark.title })" :title="t('bookmarks.save')" @click="commitBookmarkRename(bookmark.id)"><IconCheck aria-hidden="true" /></button>
+          <button v-else class="bookmark-action" type="button" :aria-label="t('bookmarks.renameAria', { title: bookmark.title })" :title="t('bookmarks.rename')" @click="beginRenameBookmark(bookmark)"><IconEdit aria-hidden="true" /></button>
+          <button class="bookmark-action danger" type="button" :aria-label="t('bookmarks.removeAria', { title: bookmark.title })" :title="t('bookmarks.remove')" @click="removeBookmark(bookmark.id)"><IconDelete aria-hidden="true" /></button>
         </article>
       </div>
       <p v-if="bookmarkError" class="bookmarks-error" role="alert">{{ bookmarkError }}</p>
@@ -9867,27 +5704,27 @@ onBeforeUnmount(() => {
     <section v-if="historyOpen" class="history-panel" data-shell-side-panel role="dialog" aria-modal="false" aria-labelledby="history-title">
       <header>
         <div>
-          <span class="eyebrow">Saved locally</span>
-          <h2 id="history-title">Browsing history</h2>
+          <span class="eyebrow">{{ t('history.kicker') }}</span>
+          <h2 id="history-title">{{ t('history.heading') }}</h2>
         </div>
         <div class="history-header-actions">
-          <button type="button" :disabled="!visitHistory.length" @click="clearVisitHistory">Clear all</button>
-          <button class="panel-close" type="button" aria-label="Close browsing history" @click="historyOpen = false"><IconClose aria-hidden="true" /></button>
+          <button type="button" :disabled="!visitHistory.length" @click="clearVisitHistory">{{ t('history.clearAll') }}</button>
+          <button class="panel-close" type="button" :aria-label="t('history.close')" @click="historyOpen = false"><IconClose aria-hidden="true" /></button>
         </div>
       </header>
       <div v-if="visitHistory.length" class="history-search-field">
         <IconSearch aria-hidden="true" />
-        <input v-model="historySearch" type="search" aria-label="Search browsing history" autocomplete="off" spellcheck="false" placeholder="Search history" />
+        <input v-model="historySearch" type="search" :aria-label="t('history.search')" autocomplete="off" spellcheck="false" :placeholder="t('history.placeholder')" />
       </div>
       <div v-if="!visitHistory.length" class="history-empty">
         <IconHistory aria-hidden="true" />
-        <strong>No browsing history yet</strong>
-        <span>Websites you visit will appear here for up to 90 days.</span>
+        <strong>{{ t('history.empty') }}</strong>
+        <span>{{ t('history.emptyDescription') }}</span>
       </div>
       <div v-else-if="!filteredVisitHistory.length" class="history-empty compact">
         <IconSearch aria-hidden="true" />
-        <strong>No matching visits</strong>
-        <span>Try another title or address.</span>
+        <strong>{{ t('history.noMatches') }}</strong>
+        <span>{{ t('history.tryAnother') }}</span>
       </div>
       <div v-else class="history-list">
         <article v-for="entry in filteredVisitHistory" :key="entry.id" class="history-item">
@@ -9899,286 +5736,31 @@ onBeforeUnmount(() => {
               <small>{{ historyEntryMeta(entry) }}</small>
             </span>
           </button>
-          <button class="history-action danger" type="button" :aria-label="`Remove ${entry.title} from history`" title="Remove from history" @click="removeHistoryEntry(entry.id)"><IconDelete aria-hidden="true" /></button>
+          <button class="history-action danger" type="button" :aria-label="t('history.removeAria', { title: entry.title })" :title="t('history.remove')" @click="removeHistoryEntry(entry.id)"><IconDelete aria-hidden="true" /></button>
         </article>
       </div>
-      <p class="history-retention"><IconPrivacy aria-hidden="true" /> Stored only on this device for up to 90 days.</p>
+      <p class="history-retention"><IconPrivacy aria-hidden="true" /> {{ t('history.retention') }}</p>
       <p v-if="historyError" class="history-error" role="alert">{{ historyError }}</p>
     </section>
-    <section v-if="siteStorageOpen" class="site-storage-panel" data-shell-docked-panel role="dialog" aria-modal="false" aria-labelledby="site-storage-title">
-      <header>
-        <div>
-          <span class="eyebrow">Current website</span>
-          <h2 id="site-storage-title">Site storage · {{ activeHostname }}</h2>
-        </div>
-        <div class="site-storage-header-actions">
-          <PanelDockPicker v-model="panelDock" label="Dock site storage" />
-          <button type="button" :disabled="siteStorageUsageOpen ? siteStorageUsageState === 'loading' : siteStoragePwaOpen ? siteStoragePwaState === 'loading' : siteStorageIndexedDbOpen ? siteStorageIndexedDbState === 'loading' : siteStorageChangesOpen ? siteStorageChangesState === 'loading' : siteStorageState === 'loading'" @click="refreshActiveSiteStorageView"><IconRefresh aria-hidden="true" /> Refresh</button>
-          <button class="panel-close" type="button" aria-label="Close site storage" @click="siteStorageOpen = false"><IconClose aria-hidden="true" /></button>
-        </div>
-      </header>
-      <nav class="site-storage-kinds" aria-label="Storage type">
-        <button type="button" :class="{ active: siteStorageUsageOpen }" :aria-pressed="siteStorageUsageOpen" @click="selectSiteStorageUsage"><IconPieChart aria-hidden="true" /> Overview</button>
-        <button type="button" :class="{ active: !siteStorageUsageOpen && !siteStorageChangesOpen && !siteStorageIndexedDbOpen && !siteStoragePwaOpen && siteStorageKind === 'local-storage' }" :aria-pressed="!siteStorageUsageOpen && !siteStorageChangesOpen && !siteStorageIndexedDbOpen && !siteStoragePwaOpen && siteStorageKind === 'local-storage'" @click="selectSiteStorageKind('local-storage')"><IconDatabase aria-hidden="true" /> Local</button>
-        <button type="button" :class="{ active: !siteStorageUsageOpen && !siteStorageChangesOpen && !siteStorageIndexedDbOpen && !siteStoragePwaOpen && siteStorageKind === 'session-storage' }" :aria-pressed="!siteStorageUsageOpen && !siteStorageChangesOpen && !siteStorageIndexedDbOpen && !siteStoragePwaOpen && siteStorageKind === 'session-storage'" @click="selectSiteStorageKind('session-storage')"><IconDatabase aria-hidden="true" /> Session</button>
-        <button type="button" :class="{ active: !siteStorageUsageOpen && !siteStorageChangesOpen && !siteStorageIndexedDbOpen && !siteStoragePwaOpen && siteStorageKind === 'cookies' }" :aria-pressed="!siteStorageUsageOpen && !siteStorageChangesOpen && !siteStorageIndexedDbOpen && !siteStoragePwaOpen && siteStorageKind === 'cookies'" @click="selectSiteStorageKind('cookies')"><IconCookie aria-hidden="true" /> Cookies</button>
-        <button type="button" :class="{ active: siteStorageIndexedDbOpen }" :aria-pressed="siteStorageIndexedDbOpen" @click="selectSiteStorageIndexedDb"><IconDatabase aria-hidden="true" /> IndexedDB</button>
-        <button type="button" :class="{ active: siteStoragePwaOpen }" :aria-pressed="siteStoragePwaOpen" @click="selectSiteStoragePwa"><IconOffline aria-hidden="true" /> Offline</button>
-        <button type="button" :class="{ active: siteStorageChangesOpen }" :aria-pressed="siteStorageChangesOpen" @click="selectSiteStorageChanges"><IconDifference aria-hidden="true" /> Changes</button>
-      </nav>
-      <section v-if="siteStorageUsageOpen" class="storage-usage-view" :aria-busy="siteStorageUsageState === 'loading'">
-        <div v-if="siteStorageUsageState === 'loading' && !siteStorageUsageReport" class="site-storage-empty">
-          <IconProgress class="state-spinner" aria-hidden="true" /><strong>Measuring storage usage…</strong>
-        </div>
-        <div v-else-if="siteStorageUsageState === 'error'" class="storage-changes-error" role="alert">
-          <IconError aria-hidden="true" /><strong>Storage overview needs attention</strong><span>{{ siteStorageUsageError }}</span>
-        </div>
-        <template v-else-if="siteStorageUsageReport">
-          <div class="storage-usage-summary">
-            <article><span>Used</span><strong>{{ formatBytes(siteStorageUsageReport.usage) }}</strong></article>
-            <article><span>Available</span><strong>{{ formatBytes(siteStorageUsageReport.available) }}</strong></article>
-            <article><span>Quota</span><strong>{{ formatBytes(siteStorageUsageReport.quota) }}</strong></article>
-          </div>
-          <div class="storage-usage-meter" :aria-label="`${formatStorageUsagePercent(siteStorageUsageReport.usagePercent)} of origin quota used`">
-            <div><span :style="{ width: `${siteStorageUsageReport.usage > 0 ? Math.max(0.5, siteStorageUsageReport.usagePercent) : 0}%` }"></span></div>
-            <strong>{{ formatStorageUsagePercent(siteStorageUsageReport.usagePercent) }} used</strong>
-          </div>
-          <div class="storage-usage-toolbar">
-            <span :class="{ fallback: siteStorageUsageReport.source === 'storage-manager' }">{{ siteStorageUsageReport.source === 'chromium-quota' ? 'Chromium quota detail' : 'Storage Manager estimate' }}</span>
-            <span v-if="siteStorageUsageReport.overrideActive" class="storage-usage-override">Quota override active</span>
-            <button type="button" @click="copySiteStorageUsage"><IconCheck v-if="siteStorageUsageCopied" aria-hidden="true" /><IconCopy v-else aria-hidden="true" /> {{ siteStorageUsageCopied ? 'Copied' : 'Copy report' }}</button>
-          </div>
-          <div v-if="siteStorageUsageReport.breakdown.length" class="storage-usage-breakdown">
-            <article v-for="item in siteStorageUsageReport.breakdown" :key="item.storageType">
-              <header><strong>{{ storageUsageTypeLabel(item.storageType) }}</strong><span>{{ formatBytes(item.usage) }}</span></header>
-              <div><span :style="{ width: `${storageUsageShare(item.usage)}%` }"></span></div>
-            </article>
-          </div>
-          <div v-else class="site-storage-empty compact"><IconPieChart aria-hidden="true" /><strong>No category breakdown available</strong><span>The total estimate is still available above.</span></div>
-          <details class="storage-changes-caveats storage-usage-caveats"><summary>Scope and privacy</summary><ul><li v-for="caveat in siteStorageUsageReport.caveats" :key="caveat">{{ caveat }}</li></ul></details>
-          <footer class="storage-usage-footer"><span>{{ siteStorageUsageReport.origin }}</span><span>Read-only aggregate metadata</span></footer>
-        </template>
-      </section>
-      <template v-else-if="!siteStorageChangesOpen && !siteStorageIndexedDbOpen && !siteStoragePwaOpen">
-        <div class="site-storage-tools">
-          <label class="site-storage-search"><IconSearch aria-hidden="true" /><input v-model="siteStorageSearch" type="search" aria-label="Filter site storage" placeholder="Filter keys or values" autocomplete="off" /></label>
-          <button class="site-storage-clear" type="button" :disabled="!siteStorageResult?.itemCount || siteStorageState === 'saving'" @click="clearSiteStorageKind"><IconDelete aria-hidden="true" /> Clear {{ siteStorageKindLabel.toLocaleLowerCase() }}</button>
-        </div>
-        <form class="site-storage-editor" @submit.prevent="saveSiteStorageItem">
-          <input v-model="siteStorageKey" type="text" aria-label="Storage key" maxlength="512" placeholder="Key" autocomplete="off" spellcheck="false" />
-          <textarea v-model="siteStorageValue" aria-label="Storage value" maxlength="262144" rows="2" placeholder="Value" spellcheck="false" />
-          <button type="submit" :disabled="!siteStorageKey.trim() || siteStorageState === 'saving'">{{ siteStorageResult?.items.some((item) => item.key === siteStorageKey) ? 'Update' : 'Add' }}</button>
-        </form>
-        <div class="site-storage-list" :aria-busy="siteStorageState === 'loading'">
-          <div v-if="siteStorageState === 'loading'" class="site-storage-empty"><IconProgress class="state-spinner" aria-hidden="true" /><strong>Reading site storage…</strong></div>
-          <div v-else-if="!siteStorageResult?.itemCount" class="site-storage-empty"><IconDatabase aria-hidden="true" /><strong>No {{ siteStorageKindLabel.toLocaleLowerCase() }}</strong><span>This website has not stored anything in this category.</span></div>
-          <div v-else-if="!filteredSiteStorageItems.length" class="site-storage-empty compact"><IconSearch aria-hidden="true" /><strong>No matching entries</strong></div>
-          <template v-else>
-            <article v-for="(item, index) in filteredSiteStorageItems" :key="`${item.key}-${item.domain ?? ''}-${item.path ?? ''}-${index}`" class="site-storage-item" :class="{ protected: item.protected }">
-              <button class="site-storage-item-main" type="button" :disabled="item.protected" :title="item.protected ? 'HttpOnly cookie value is protected' : 'Edit this entry'" @click="editSiteStorageItem(item)">
-                <strong>{{ item.key }}</strong>
-                <code>{{ item.protected ? 'HttpOnly value protected' : (item.value || '(empty)') }}</code>
-                <small>{{ formatBytes(item.valueBytes) }}<template v-if="item.domain"> · {{ item.domain }}{{ item.path }}</template><template v-if="item.valueTruncated"> · preview truncated</template></small>
-              </button>
-              <button class="site-storage-item-delete" type="button" :disabled="item.protected" :aria-label="item.protected ? `${item.key} is HttpOnly and protected` : `Delete ${item.key}`" :title="item.protected ? 'HttpOnly cookie is protected' : 'Delete entry'" @click="deleteSiteStorageItem(item)"><IconLock v-if="item.protected" aria-hidden="true" /><IconDelete v-else aria-hidden="true" /></button>
-            </article>
-          </template>
-        </div>
-        <footer>
-          <span>{{ siteStorageResult?.itemCount ?? 0 }} {{ (siteStorageResult?.itemCount ?? 0) === 1 ? 'entry' : 'entries' }}</span>
-          <span>{{ siteStorageKind === 'session-storage' ? 'This tab only' : 'Shared by origin in this workspace' }}</span>
-        </footer>
-      </template>
-      <section v-else-if="siteStorageIndexedDbOpen" class="indexeddb-view" :aria-busy="siteStorageIndexedDbState === 'loading'">
-        <div v-if="siteStorageIndexedDbState === 'loading' && !siteStorageIndexedDbReport" class="site-storage-empty">
-          <IconProgress class="state-spinner" aria-hidden="true" /><strong>Reading IndexedDB…</strong>
-        </div>
-        <div v-else-if="siteStorageIndexedDbState === 'error'" class="storage-changes-error" role="alert">
-          <IconError aria-hidden="true" /><strong>IndexedDB inspection needs attention</strong><span>{{ siteStorageIndexedDbError }}</span>
-        </div>
-        <div v-else-if="!siteStorageIndexedDbReport?.databases.length" class="site-storage-empty indexeddb-empty">
-          <IconDatabase aria-hidden="true" /><strong>No IndexedDB databases</strong><span>This website has not created a database for its top-level origin.</span>
-        </div>
-        <template v-else-if="siteStorageIndexedDbReport">
-          <div class="indexeddb-selectors">
-            <label>
-              <span>Database</span>
-              <select v-model="siteStorageIndexedDbDatabase" aria-label="IndexedDB database" @change="selectSiteStorageIndexedDbDatabase">
-                <option v-for="database in siteStorageIndexedDbReport.databases" :key="database.name" :value="database.name">{{ database.name }} · v{{ database.version }}</option>
-              </select>
-            </label>
-            <label>
-              <span>Object store</span>
-              <select v-model="siteStorageIndexedDbStore" aria-label="IndexedDB object store" :disabled="!siteStorageIndexedDbReport.selectedDatabase?.objectStores?.length" @change="selectSiteStorageIndexedDbStore">
-                <option v-for="store in siteStorageIndexedDbReport.selectedDatabase?.objectStores ?? []" :key="store.name" :value="store.name">{{ store.name }} · {{ store.entryCount }} {{ store.entryCount === 1 ? 'record' : 'records' }}</option>
-              </select>
-            </label>
-          </div>
-          <div v-if="siteStorageIndexedDbStore" class="indexeddb-tools">
-            <label class="site-storage-search"><IconSearch aria-hidden="true" /><input v-model="siteStorageIndexedDbSearch" type="search" aria-label="Filter IndexedDB records" placeholder="Filter loaded keys or values" autocomplete="off" /></label>
-            <button type="button" :disabled="!siteStorageIndexedDbReport.entries.length" @click="copySiteStorageIndexedDb"><IconCheck v-if="siteStorageIndexedDbCopied" aria-hidden="true" /><IconCopy v-else aria-hidden="true" /> {{ siteStorageIndexedDbCopied ? 'Copied' : 'Copy loaded' }}</button>
-          </div>
-          <div v-if="siteStorageIndexedDbStore" class="indexeddb-schema">
-            <span>Key path <code>{{ JSON.stringify(siteStorageIndexedDbReport.selectedDatabase?.objectStores?.find((store) => store.name === siteStorageIndexedDbStore)?.keyPath ?? null) }}</code></span>
-            <span>{{ siteStorageIndexedDbReport.selectedDatabase?.objectStores?.find((store) => store.name === siteStorageIndexedDbStore)?.autoIncrement ? 'Auto increment' : 'Manual keys' }}</span>
-            <span>{{ siteStorageIndexedDbReport.selectedDatabase?.objectStores?.find((store) => store.name === siteStorageIndexedDbStore)?.indexes.length ?? 0 }} indexes</span>
-          </div>
-          <div v-if="!siteStorageIndexedDbStore" class="site-storage-empty compact"><IconDatabase aria-hidden="true" /><strong>No object stores</strong></div>
-          <div v-else-if="!siteStorageIndexedDbReport.entries.length" class="site-storage-empty compact"><IconDatabase aria-hidden="true" /><strong>No records in this object store</strong></div>
-          <div v-else-if="!filteredSiteStorageIndexedDbEntries.length" class="site-storage-empty compact"><IconSearch aria-hidden="true" /><strong>No matching loaded records</strong></div>
-          <div v-else class="indexeddb-records">
-            <article v-for="(entry, index) in filteredSiteStorageIndexedDbEntries" :key="`${entry.primaryKey}-${index}`" class="indexeddb-record">
-              <header><strong>{{ entry.key }}</strong><span>{{ entry.valueType }}</span></header>
-              <code>{{ entry.valuePreview ?? 'Value omitted' }}</code>
-              <small>Primary key {{ entry.primaryKey }}<template v-if="entry.valuePreviewBytes !== undefined"> · {{ formatBytes(entry.valuePreviewBytes) }} preview</template><template v-if="entry.valueTruncated"> · truncated</template></small>
-            </article>
-          </div>
-          <details class="storage-changes-caveats indexeddb-caveats">
-            <summary>Schema, indexes, and privacy</summary>
-            <div v-for="store in siteStorageIndexedDbReport.selectedDatabase?.objectStores ?? []" :key="store.name" class="indexeddb-store-schema">
-              <strong>{{ store.name }}</strong>
-              <span v-if="store.indexes.length">{{ store.indexes.map((index) => `${index.name}${index.unique ? ' (unique)' : ''}`).join(', ') }}</span>
-              <span v-else>No indexes</span>
-            </div>
-            <ul><li v-for="caveat in siteStorageIndexedDbReport.caveats" :key="caveat">{{ caveat }}</li></ul>
-          </details>
-          <footer class="indexeddb-footer">
-            <span>Records {{ siteStorageIndexedDbOffset + (siteStorageIndexedDbReport.entries.length ? 1 : 0) }}–{{ siteStorageIndexedDbOffset + siteStorageIndexedDbReport.entries.length }}</span>
-            <div>
-              <button type="button" :disabled="siteStorageIndexedDbOffset === 0 || siteStorageIndexedDbState === 'loading'" @click="moveSiteStorageIndexedDbPage(-1)"><IconArrowBack aria-hidden="true" /> Previous</button>
-              <button type="button" :disabled="!siteStorageIndexedDbReport.hasMore || siteStorageIndexedDbState === 'loading'" @click="moveSiteStorageIndexedDbPage(1)">Next <IconArrowForward aria-hidden="true" /></button>
-            </div>
-          </footer>
-        </template>
-      </section>
-      <section v-else-if="siteStoragePwaOpen" class="pwa-view" :aria-busy="siteStoragePwaState === 'loading'">
-        <div v-if="siteStoragePwaState === 'loading' && !siteStoragePwaReport" class="site-storage-empty">
-          <IconProgress class="state-spinner" aria-hidden="true" /><strong>Reading offline app state…</strong>
-        </div>
-        <div v-else-if="siteStoragePwaState === 'error'" class="storage-changes-error" role="alert">
-          <IconError aria-hidden="true" /><strong>Offline inspection needs attention</strong><span>{{ siteStoragePwaError }}</span>
-        </div>
-        <template v-else-if="siteStoragePwaReport">
-          <div class="pwa-summary">
-            <IconOffline aria-hidden="true" />
-            <div><strong>{{ siteStoragePwaReport.controlled ? 'Page controlled by a service worker' : 'Page is not controlled' }}</strong><span>{{ siteStoragePwaReport.registrations.length }} {{ siteStoragePwaReport.registrations.length === 1 ? 'registration' : 'registrations' }} · {{ siteStoragePwaReport.caches.length }} {{ siteStoragePwaReport.caches.length === 1 ? 'cache' : 'caches' }}</span></div>
-            <button type="button" @click="copySiteStoragePwa"><IconCheck v-if="siteStoragePwaCopied" aria-hidden="true" /><IconCopy v-else aria-hidden="true" /> {{ siteStoragePwaCopied ? 'Copied' : 'Copy report' }}</button>
-          </div>
-          <div v-if="siteStoragePwaReport.manifestInspectionError" class="pwa-cache-warning" role="status"><IconWarning aria-hidden="true" /><span>Web app manifest unavailable: {{ siteStoragePwaReport.manifestInspectionError }}</span></div>
-          <article v-if="siteStoragePwaReport.manifest" class="pwa-manifest">
-            <header>
-              <div><IconDashboard aria-hidden="true" /><span><strong>{{ siteStoragePwaReport.manifest.name ?? siteStoragePwaReport.manifest.shortName ?? 'Web app manifest' }}</strong><small>{{ siteStoragePwaReport.manifest.url || 'Embedded manifest' }}</small></span></div>
-              <span>{{ siteStoragePwaReport.manifest.display ?? 'browser' }}</span>
-            </header>
-            <dl>
-              <div v-if="siteStoragePwaReport.manifest.startUrl"><dt>Start URL</dt><dd>{{ siteStoragePwaReport.manifest.startUrl }}</dd></div>
-              <div v-if="siteStoragePwaReport.manifest.scope"><dt>Scope</dt><dd>{{ siteStoragePwaReport.manifest.scope }}</dd></div>
-              <div><dt>Assets</dt><dd>{{ siteStoragePwaReport.manifest.icons.length }} icons · {{ siteStoragePwaReport.manifest.shortcuts.length }} shortcuts</dd></div>
-            </dl>
-            <div v-if="siteStoragePwaReport.manifest.parseErrors.length || siteStoragePwaReport.manifest.installabilityErrors.length" class="pwa-manifest-errors">
-              <strong>Manifest and installability findings</strong>
-              <ul>
-                <li v-for="(error, index) in siteStoragePwaReport.manifest.parseErrors" :key="`manifest-${index}`">{{ error.message }}<template v-if="error.line !== undefined"> · line {{ error.line }}</template></li>
-                <li v-for="error in siteStoragePwaReport.manifest.installabilityErrors" :key="error.errorId">{{ error.errorId }}<template v-if="error.arguments.length"> · {{ error.arguments.map((argument) => `${argument.name}: ${argument.value}`).join(', ') }}</template></li>
-              </ul>
-            </div>
-            <small v-else-if="siteStoragePwaReport.installabilityInspectionAvailable">No installability errors reported by this Chromium build.</small>
-            <small v-else>Installability diagnostics are unavailable in this Chromium build.</small>
-          </article>
-          <div v-else-if="siteStoragePwaReport.manifestInspectionAvailable" class="site-storage-empty compact"><IconDashboard aria-hidden="true" /><strong>No web app manifest detected</strong></div>
-          <div v-if="siteStoragePwaReport.registrations.length" class="pwa-registrations">
-            <article v-for="registration in siteStoragePwaReport.registrations" :key="registration.scope">
-              <strong>{{ registration.scope }}</strong>
-              <code>{{ registration.active?.scriptUrl ?? registration.waiting?.scriptUrl ?? registration.installing?.scriptUrl ?? 'No worker script' }}</code>
-              <small>{{ registration.active?.state ?? registration.waiting?.state ?? registration.installing?.state ?? 'inactive' }} · update via cache: {{ registration.updateViaCache }}</small>
-            </article>
-          </div>
-          <div v-else class="site-storage-empty compact"><IconOffline aria-hidden="true" /><strong>No service-worker registrations</strong></div>
-          <div v-if="siteStoragePwaReport.cacheInspectionError" class="pwa-cache-warning" role="status"><IconWarning aria-hidden="true" /><span>{{ siteStoragePwaReport.cacheInspectionAvailable ? siteStoragePwaReport.cacheInspectionError : `Cache Storage unavailable: ${siteStoragePwaReport.cacheInspectionError}` }}</span></div>
-          <template v-else-if="siteStoragePwaReport.caches.length">
-            <div class="pwa-cache-tools">
-              <label><span>Cache</span><select v-model="siteStoragePwaCache" aria-label="Cache Storage cache" @change="selectSiteStoragePwaCache"><option v-for="cache in siteStoragePwaReport.caches" :key="cache.name" :value="cache.name">{{ cache.name }}</option></select></label>
-              <form @submit.prevent="filterSiteStoragePwa"><label class="site-storage-search"><IconSearch aria-hidden="true" /><input v-model="siteStoragePwaQuery" type="search" aria-label="Filter cached requests" placeholder="Filter request paths" autocomplete="off" /></label><button type="submit">Apply</button></form>
-            </div>
-            <div v-if="siteStoragePwaReport.selectedCache && !siteStoragePwaReport.selectedCache.entries.length" class="site-storage-empty compact"><IconOffline aria-hidden="true" /><strong>No matching cached requests</strong></div>
-            <div v-else-if="siteStoragePwaReport.selectedCache" class="pwa-cache-entries">
-              <article v-for="entry in siteStoragePwaReport.selectedCache.entries" :key="`${entry.requestMethod}-${entry.requestUrl}`">
-                <header><strong>{{ entry.requestMethod }}</strong><span>{{ entry.responseStatus }} {{ entry.responseStatusText }}</span></header>
-                <code>{{ entry.requestUrl }}</code>
-                <small>{{ entry.responseType }}<template v-if="entry.responseTime"> · {{ debugTimestamp(entry.responseTime) }}</template></small>
-              </article>
-            </div>
-          </template>
-          <div v-else-if="siteStoragePwaReport.cacheInspectionAvailable" class="site-storage-empty compact"><IconOffline aria-hidden="true" /><strong>No Cache Storage caches</strong></div>
-          <details class="storage-changes-caveats pwa-caveats"><summary>Scope and privacy</summary><ul><li v-for="caveat in siteStoragePwaReport.caveats" :key="caveat">{{ caveat }}</li></ul></details>
-          <footer v-if="siteStoragePwaReport.selectedCache" class="indexeddb-footer">
-            <span>{{ siteStoragePwaReport.selectedCache.totalEntries }} matching {{ siteStoragePwaReport.selectedCache.totalEntries === 1 ? 'entry' : 'entries' }}</span>
-            <div><button type="button" :disabled="siteStoragePwaOffset === 0 || siteStoragePwaState === 'loading'" @click="moveSiteStoragePwaPage(-1)"><IconArrowBack aria-hidden="true" /> Previous</button><button type="button" :disabled="!siteStoragePwaReport.selectedCache.hasMore || siteStoragePwaState === 'loading'" @click="moveSiteStoragePwaPage(1)">Next <IconArrowForward aria-hidden="true" /></button></div>
-          </footer>
-        </template>
-      </section>
-      <section v-else class="storage-changes-view" :aria-busy="siteStorageChangesState === 'loading'">
-        <div v-if="siteStorageChangesState === 'loading' && !siteStorageChangesReport" class="site-storage-empty">
-          <IconProgress class="state-spinner" aria-hidden="true" /><strong>Reading storage baseline…</strong>
-        </div>
-        <div v-else-if="siteStorageChangesState === 'error'" class="storage-changes-error" role="alert">
-          <IconError aria-hidden="true" /><strong>Storage comparison needs attention</strong><span>{{ siteStorageChangesError }}</span>
-        </div>
-        <template v-else-if="siteStorageChangesReport">
-          <div v-if="siteStorageChangesReport.status === 'empty'" class="site-storage-empty storage-changes-empty">
-            <IconDifference aria-hidden="true" />
-            <strong>See what browser state changes</strong>
-            <span>Set a baseline, perform the action on the website, then compare local storage, session storage, and cookies.</span>
-            <button class="primary" type="button" @click="manageSiteStorageChanges('baseline')"><IconDifference aria-hidden="true" /> Set baseline</button>
-          </div>
-          <template v-else>
-            <div class="storage-changes-summary" :class="{ changed: siteStorageChangesReport.status === 'compared' && siteStorageChangesReport.changeCount, identical: siteStorageChangesReport.status === 'compared' && !siteStorageChangesReport.changeCount }">
-              <IconDifference v-if="siteStorageChangesReport.status === 'baseline'" aria-hidden="true" />
-              <IconCheck v-else-if="!siteStorageChangesReport.changeCount" aria-hidden="true" />
-              <IconWarning v-else aria-hidden="true" />
-              <div>
-                <strong v-if="siteStorageChangesReport.status === 'baseline'">Baseline ready</strong>
-                <strong v-else-if="!siteStorageChangesReport.changeCount">No storage changes</strong>
-                <strong v-else>{{ siteStorageChangesReport.changeCount }} storage {{ siteStorageChangesReport.changeCount === 1 ? 'change' : 'changes' }}</strong>
-                <span>{{ siteStorageChangesReport.status === 'baseline' ? 'Use the website, then compare.' : `${siteStorageChangesReport.counts.added} added · ${siteStorageChangesReport.counts.updated} updated · ${siteStorageChangesReport.counts.removed} removed` }}</span>
-              </div>
-            </div>
-            <div v-if="siteStorageChangesReport.status === 'compared' && siteStorageChangesReport.changes.length" class="storage-changes-list">
-              <button v-for="(change, index) in siteStorageChangesReport.changes" :key="`${change.kind}-${change.key}-${change.domain ?? ''}-${change.path ?? ''}-${index}`" type="button" class="storage-change" :class="change.type" @click="inspectStorageChange(change)">
-                <span class="storage-change-type">{{ change.type }}</span>
-                <span class="storage-change-copy"><strong>{{ change.key }}</strong><small>{{ storageChangeKindLabel(change.kind) }}<template v-if="change.domain"> · {{ change.domain }}{{ change.path }}</template><template v-if="change.protected"> · HttpOnly</template><template v-if="change.attributesChanged"> · attributes changed</template></small></span>
-                <span class="storage-change-bytes">{{ change.beforeValueBytes === undefined ? '—' : formatBytes(change.beforeValueBytes) }} → {{ change.afterValueBytes === undefined ? '—' : formatBytes(change.afterValueBytes) }}</span>
-              </button>
-            </div>
-            <p v-if="siteStorageChangesReport.truncated" class="storage-changes-note"><IconInfo aria-hidden="true" /> The bounded snapshot or 200-change report limit was reached.</p>
-            <details class="storage-changes-caveats">
-              <summary>Scope and privacy</summary>
-              <ul><li v-for="caveat in siteStorageChangesReport.caveats" :key="caveat">{{ caveat }}</li></ul>
-            </details>
-            <footer class="storage-changes-footer">
-              <span>Baseline {{ siteStorageChangesReport.baselineAt ? debugTimestamp(siteStorageChangesReport.baselineAt) : 'not set' }}</span>
-              <div>
-                <button type="button" @click="manageSiteStorageChanges('clear')"><IconDelete aria-hidden="true" /> Clear</button>
-                <button type="button" @click="manageSiteStorageChanges('baseline')"><IconRefresh aria-hidden="true" /> New baseline</button>
-                <button v-if="siteStorageChangesReport.status === 'compared'" type="button" @click="copySiteStorageChanges"><IconCheck v-if="siteStorageChangesCopied" aria-hidden="true" /><IconCopy v-else aria-hidden="true" /> {{ siteStorageChangesCopied ? 'Copied' : 'Copy report' }}</button>
-                <button class="primary" type="button" :disabled="siteStorageChangesState === 'loading'" @click="manageSiteStorageChanges('compare')"><IconDifference aria-hidden="true" /> Compare now</button>
-              </div>
-            </footer>
-          </template>
-        </template>
-      </section>
-      <p v-if="siteStorageError && !siteStorageUsageOpen && !siteStorageChangesOpen && !siteStorageIndexedDbOpen && !siteStoragePwaOpen" class="site-storage-error" role="alert">{{ siteStorageError }}</p>
-    </section>
+    <SiteStoragePanel
+      ref="siteStoragePanel"
+      v-model:open="siteStorageOpen"
+      v-model:dock="panelDock"
+      :active-tab="activeTab"
+      :locale="resolvedLocale"
+      :copy-text="copyAppText"
+      :keeps-separate-panel-open="keepsSeparatePanelOpen"
+    />
     <div v-if="workspaceEditorOpen" class="tab-group-editor-overlay" @click.self="closeWorkspaceEditor">
       <form class="tab-group-editor workspace-editor" role="dialog" aria-modal="true" aria-labelledby="tab-group-editor-title" @submit.prevent="saveWorkspaceEditor">
         <header>
-          <div><span class="eyebrow">Browser workspace</span><h2 id="tab-group-editor-title">{{ workspaceEditorMode === 'create' ? 'Create workspace' : 'Edit workspace' }}</h2></div>
-          <button class="panel-close" type="button" aria-label="Close workspace editor" @click="closeWorkspaceEditor"><IconClose aria-hidden="true" /></button>
+          <div><span class="eyebrow">{{ t('workspaceEditor.kicker') }}</span><h2 id="tab-group-editor-title">{{ workspaceEditorMode === 'create' ? t('workspaceEditor.create') : t('workspaceEditor.edit') }}</h2></div>
+          <button class="panel-close" type="button" :aria-label="t('workspaceEditor.close')" @click="closeWorkspaceEditor"><IconClose aria-hidden="true" /></button>
         </header>
         <div class="workspace-editor-body">
-        <label for="tab-group-name">Workspace name</label>
+        <label for="tab-group-name">{{ t('workspaceEditor.name') }}</label>
         <input id="tab-group-name" v-model="tabGroupEditorName" type="text" maxlength="80" autocomplete="off" autofocus :disabled="workspaceEditorMode === 'edit' && state.mcpTabGroups.find((workspace) => workspace.id === tabGroupEditorId)?.isDefault" />
-        <label id="tab-group-color-label">Color</label>
+        <label id="tab-group-color-label">{{ t('workspaceEditor.color') }}</label>
         <div class="tab-group-color-options" role="radiogroup" aria-labelledby="tab-group-color-label">
           <button
             v-for="color in BROWSER_TAB_GROUP_COLORS"
@@ -10195,41 +5777,41 @@ onBeforeUnmount(() => {
           ><IconCheck v-if="tabGroupEditorColor === color" aria-hidden="true" /></button>
         </div>
         <section v-if="workspaceEditorMode === 'create'" class="workspace-storage-section">
-          <div class="workspace-storage-heading"><IconDatabase aria-hidden="true" /><div><strong>Starting browser data</strong><span>Choose whether this workspace starts clean or receives selected data from Default.</span></div></div>
+          <div class="workspace-storage-heading"><IconDatabase aria-hidden="true" /><div><strong>{{ t('workspaceEditor.startingData') }}</strong><span>{{ t('workspaceEditor.startingDescription') }}</span></div></div>
           <label class="workspace-storage-choice">
             <input v-model="workspaceStorageMode" type="radio" value="scratch" />
-            <span><strong>Start from scratch</strong><small>Use an empty isolated browser profile.</small></span>
+            <span><strong>{{ t('workspaceEditor.scratch') }}</strong><small>{{ t('workspaceEditor.scratchDescription') }}</small></span>
           </label>
           <label class="workspace-storage-choice">
             <input v-model="workspaceStorageMode" type="radio" value="fork-default" />
-            <span><strong>Fork Default</strong><small>Copy cookies and local storage without linking future changes.</small></span>
+            <span><strong>{{ t('workspaceEditor.fork') }}</strong><small>{{ t('workspaceEditor.forkDescription') }}</small></span>
           </label>
           <div v-if="workspaceStorageMode === 'fork-default'" class="workspace-origin-picker">
-            <div><strong>Websites to copy</strong><button type="button" @click="workspaceSelectedOrigins = workspaceSelectedOrigins.length === workspaceOriginOptions.length ? [] : [...workspaceOriginOptions]">{{ workspaceSelectedOrigins.length === workspaceOriginOptions.length ? 'Clear' : 'Select all' }}</button></div>
-            <p v-if="!workspaceOriginOptions.length">No known website origins yet. Bronom will still copy Default cookies.</p>
+            <div><strong>{{ t('workspaceEditor.websites') }}</strong><button type="button" @click="workspaceSelectedOrigins = workspaceSelectedOrigins.length === workspaceOriginOptions.length ? [] : [...workspaceOriginOptions]">{{ workspaceSelectedOrigins.length === workspaceOriginOptions.length ? t('workspaceEditor.clear') : t('workspaceEditor.selectAll') }}</button></div>
+            <p v-if="!workspaceOriginOptions.length">{{ t('workspaceEditor.noOrigins') }}</p>
             <label v-for="origin in workspaceOriginOptions" :key="origin"><input v-model="workspaceSelectedOrigins" type="checkbox" :value="origin" /><span>{{ origin }}</span></label>
           </div>
         </section>
-        <p v-else-if="state.mcpTabGroups.find((workspace) => workspace.id === tabGroupEditorId)?.isDefault" class="workspace-default-note"><IconKeep aria-hidden="true" /> Default is the shared durable browser profile. Human-created tabs open here, agents are instructed not to use it, and it cannot be closed or deleted.</p>
+        <p v-else-if="state.mcpTabGroups.find((workspace) => workspace.id === tabGroupEditorId)?.isDefault" class="workspace-default-note"><IconKeep aria-hidden="true" /> {{ t('workspaceEditor.defaultDescription') }}</p>
         <section v-else class="workspace-storage-section">
-          <div class="workspace-storage-heading"><IconDatabase aria-hidden="true" /><div><strong>Browser data</strong><span>This workspace has an isolated profile. Transfers merge data; they do not create a live connection.</span></div></div>
-          <div class="workspace-transfer-direction" role="radiogroup" aria-label="Storage transfer direction">
-            <label><input v-model="workspaceTransferDirection" type="radio" value="from-default" /><span>Import from Default</span></label>
-            <label><input v-model="workspaceTransferDirection" type="radio" value="to-default" /><span>Save to Default</span></label>
+          <div class="workspace-storage-heading"><IconDatabase aria-hidden="true" /><div><strong>{{ t('workspaceEditor.browserData') }}</strong><span>{{ t('workspaceEditor.browserDataDescription') }}</span></div></div>
+          <div class="workspace-transfer-direction" role="radiogroup" :aria-label="t('workspaceEditor.transferDirection')">
+            <label><input v-model="workspaceTransferDirection" type="radio" value="from-default" /><span>{{ t('workspaceEditor.importDefault') }}</span></label>
+            <label><input v-model="workspaceTransferDirection" type="radio" value="to-default" /><span>{{ t('workspaceEditor.saveDefault') }}</span></label>
           </div>
           <div class="workspace-origin-picker">
-            <div><strong>Websites to copy</strong><button type="button" @click="workspaceSelectedOrigins = workspaceSelectedOrigins.length === workspaceOriginOptions.length ? [] : [...workspaceOriginOptions]">{{ workspaceSelectedOrigins.length === workspaceOriginOptions.length ? 'Clear' : 'Select all' }}</button></div>
-            <p v-if="workspaceStorageState === 'loading'">Loading known websites…</p>
-            <p v-else-if="!workspaceOriginOptions.length">No known website origins in the source profile. All cookies can still be copied.</p>
+            <div><strong>{{ t('workspaceEditor.websites') }}</strong><button type="button" @click="workspaceSelectedOrigins = workspaceSelectedOrigins.length === workspaceOriginOptions.length ? [] : [...workspaceOriginOptions]">{{ workspaceSelectedOrigins.length === workspaceOriginOptions.length ? t('workspaceEditor.clear') : t('workspaceEditor.selectAll') }}</button></div>
+            <p v-if="workspaceStorageState === 'loading'">{{ t('workspaceEditor.loading') }}</p>
+            <p v-else-if="!workspaceOriginOptions.length">{{ t('workspaceEditor.noSourceOrigins') }}</p>
             <label v-for="origin in workspaceOriginOptions" :key="origin"><input v-model="workspaceSelectedOrigins" type="checkbox" :value="origin" /><span>{{ origin }}</span></label>
           </div>
-          <button class="workspace-transfer-button" type="button" :disabled="workspaceStorageState === 'saving' || workspaceStorageState === 'loading' || workspaceStorageState === 'error'" @click="transferWorkspaceStorage"><IconSwapHoriz aria-hidden="true" /> {{ workspaceStorageState === 'saving' ? 'Copying…' : workspaceTransferDirection === 'from-default' ? 'Import selected data' : 'Save selected data to Default' }}</button>
+          <button class="workspace-transfer-button" type="button" :disabled="workspaceStorageState === 'saving' || workspaceStorageState === 'loading' || workspaceStorageState === 'error'" @click="transferWorkspaceStorage"><IconSwapHoriz aria-hidden="true" /> {{ workspaceStorageState === 'saving' ? t('workspaceEditor.copying') : workspaceTransferDirection === 'from-default' ? t('workspaceEditor.importSelected') : t('workspaceEditor.saveSelected') }}</button>
           <output v-if="workspaceStorageMessage" :class="{ error: workspaceStorageState === 'error' }" role="status">{{ workspaceStorageMessage }}</output>
-          <div class="workspace-danger-zone"><div><strong>Close workspace permanently</strong><span>Closes its tabs and deletes its isolated browser data.</span></div><button type="button" :disabled="state.allHumanInteractionLocked" :title="state.allHumanInteractionLocked ? 'Unlock all tabs before closing a workspace' : undefined" data-lock-protected-tab-close @click="closeEditedWorkspace">Close workspace</button></div>
+          <div class="workspace-danger-zone"><div><strong>{{ t('workspaceEditor.closePermanently') }}</strong><span>{{ t('workspaceEditor.closeDescription') }}</span></div><button type="button" :disabled="state.allHumanInteractionLocked" :title="state.allHumanInteractionLocked ? t('workspaceEditor.unlockTitle') : undefined" data-lock-protected-tab-close @click="closeEditedWorkspace">{{ t('workspaceEditor.closeWorkspace') }}</button></div>
         </section>
         <output v-if="tabGroupEditorError" class="workspace-editor-error" role="alert">{{ tabGroupEditorError }}</output>
         </div>
-        <footer><button type="button" @click="closeWorkspaceEditor">Cancel</button><button class="primary" type="submit" :disabled="!tabGroupEditorName.trim()">{{ workspaceEditorMode === 'create' ? 'Create workspace' : 'Save changes' }}</button></footer>
+        <footer><button type="button" @click="closeWorkspaceEditor">{{ t('workspaceEditor.cancel') }}</button><button class="primary" type="submit" :disabled="!tabGroupEditorName.trim()">{{ workspaceEditorMode === 'create' ? t('workspaceEditor.create') : t('workspaceEditor.save') }}</button></footer>
       </form>
     </div>
     <div v-if="credentialPickerOpen" class="settings-overlay credential-picker-overlay" @click.self="credentialPickerOpen = false">
@@ -10237,10 +5819,10 @@ onBeforeUnmount(() => {
         <header class="credential-picker-header">
           <IconPassword aria-hidden="true" />
           <div>
-            <span class="eyebrow">Saved locally</span>
-            <h2 id="credential-picker-title">Choose an account</h2>
+            <span class="eyebrow">{{ t('credentialPicker.kicker') }}</span>
+            <h2 id="credential-picker-title">{{ t('credentialPicker.heading') }}</h2>
           </div>
-          <button class="panel-close" type="button" aria-label="Close account chooser" @click="credentialPickerOpen = false"><IconClose aria-hidden="true" /></button>
+          <button class="panel-close" type="button" :aria-label="t('credentialPicker.close')" @click="credentialPickerOpen = false"><IconClose aria-hidden="true" /></button>
         </header>
         <div class="credential-picker-field">
           <IconSearch aria-hidden="true" />
@@ -10249,18 +5831,18 @@ onBeforeUnmount(() => {
             v-model="credentialPickerQuery"
             type="search"
             role="combobox"
-            aria-label="Search saved accounts"
+            :aria-label="t('credentialPicker.search')"
             aria-autocomplete="list"
             aria-controls="credential-picker-results"
             :aria-expanded="filteredActiveCredentials.length > 0"
             :aria-activedescendant="selectedActiveCredential ? credentialOptionId(selectedActiveCredential) : undefined"
             autocomplete="off"
             spellcheck="false"
-            placeholder="Search usernames"
+            :placeholder="t('credentialPicker.placeholder')"
             @keydown="handleCredentialPickerKeydown"
           />
         </div>
-        <div v-if="filteredActiveCredentials.length" id="credential-picker-results" class="credential-picker-results" role="listbox" aria-label="Saved accounts for this website">
+        <div v-if="filteredActiveCredentials.length" id="credential-picker-results" class="credential-picker-results" role="listbox" :aria-label="t('credentialPicker.results')">
           <button
             v-for="(credential, index) in filteredActiveCredentials"
             :id="credentialOptionId(credential)"
@@ -10274,12 +5856,12 @@ onBeforeUnmount(() => {
             @click="fillSelectedCredential(credential)"
           >
             <span class="credential-picker-mark" aria-hidden="true"><IconKey /></span>
-            <span><strong>{{ credential.username || 'Unnamed account' }}</strong><small>{{ credential.origin }}</small></span>
+            <span><strong>{{ credential.username || t('credentialPicker.unnamed') }}</strong><small>{{ credential.origin }}</small></span>
             <IconKeyboardArrowRight aria-hidden="true" />
           </button>
         </div>
-        <div v-else class="credential-picker-empty"><IconSearch aria-hidden="true" /><strong>No matching accounts</strong><span>Try another username.</span></div>
-        <footer><span><IconShieldLock aria-hidden="true" /> Filling pauses new agent commands and leaves agents paused.</span><span><kbd>↑</kbd><kbd>↓</kbd> Select · <kbd>Enter</kbd> Fill</span></footer>
+        <div v-else class="credential-picker-empty"><IconSearch aria-hidden="true" /><strong>{{ t('credentialPicker.empty') }}</strong><span>{{ t('credentialPicker.tryAnother') }}</span></div>
+        <footer><span><IconShieldLock aria-hidden="true" /> {{ t('credentialPicker.paused') }}</span><span><kbd>↑</kbd><kbd>↓</kbd> {{ t('credentialPicker.select') }} · <kbd>Enter</kbd> {{ t('credentialPicker.fill') }}</span></footer>
       </section>
     </div>
     <div v-if="commandPaletteOpen" class="settings-overlay command-palette-overlay" @click.self="commandPaletteOpen = false">
@@ -10292,10 +5874,10 @@ onBeforeUnmount(() => {
         <header class="command-palette-header">
           <IconKeyboardCommandKey aria-hidden="true" />
           <div>
-            <span class="eyebrow">Quick actions</span>
-            <h2 id="command-palette-title">Commands</h2>
+            <span class="eyebrow">{{ t('commandPalette.kicker') }}</span>
+            <h2 id="command-palette-title">{{ t('commandPalette.heading') }}</h2>
           </div>
-          <button class="panel-close" type="button" aria-label="Close command palette" @click="commandPaletteOpen = false"><IconClose aria-hidden="true" /></button>
+          <button class="panel-close" type="button" :aria-label="t('commandPalette.close')" @click="commandPaletteOpen = false"><IconClose aria-hidden="true" /></button>
         </header>
         <div class="command-palette-field">
           <IconSearch aria-hidden="true" />
@@ -10304,22 +5886,22 @@ onBeforeUnmount(() => {
             v-model="commandPaletteQuery"
             type="search"
             role="combobox"
-            aria-label="Search commands"
+            :aria-label="t('commandPalette.search')"
             aria-autocomplete="list"
             aria-controls="command-palette-results"
             :aria-expanded="commandPaletteCommands.length > 0"
             :aria-activedescendant="selectedCommandPaletteCommand ? commandPaletteCommandId(selectedCommandPaletteCommand) : undefined"
             autocomplete="off"
             spellcheck="false"
-            placeholder="Type a command or feature"
+            :placeholder="t('commandPalette.placeholder')"
             @keydown="handleCommandPaletteKeydown"
           />
           <kbd>⌃/⌘ ⇧ P</kbd>
         </div>
         <span class="sr-only" role="status" aria-live="polite">
-          {{ commandPaletteCommands.length }} matching {{ commandPaletteCommands.length === 1 ? 'command' : 'commands' }}.<template v-if="selectedCommandPaletteCommand"> Selected {{ selectedCommandPaletteCommand.label }}.</template>
+          {{ t('commandPalette.matches', { count: localNumber(commandPaletteCommands.length) }, commandPaletteCommands.length) }}<template v-if="selectedCommandPaletteCommand"> {{ t('commandPalette.selected', { label: selectedCommandPaletteCommand.label }) }}</template>
         </span>
-        <div v-if="commandPaletteCommands.length" id="command-palette-results" class="command-palette-results" role="listbox" aria-label="Available commands">
+        <div v-if="commandPaletteCommands.length" id="command-palette-results" class="command-palette-results" role="listbox" :aria-label="t('commandPalette.available')">
           <button
             v-for="(command, index) in commandPaletteCommands"
             :id="commandPaletteCommandId(command)"
@@ -10345,10 +5927,10 @@ onBeforeUnmount(() => {
         </div>
         <div v-else class="command-palette-empty">
           <IconSearch aria-hidden="true" />
-          <strong>No matching commands</strong>
-          <span>Try a feature, action, or synonym such as “screenshot” or “cookies”.</span>
+          <strong>{{ t('commandPalette.empty') }}</strong>
+          <span>{{ t('commandPalette.emptyDescription') }}</span>
         </div>
-        <footer><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>Enter</kbd> Run</span><span><kbd>Esc</kbd> Close</span></footer>
+        <footer><span><kbd>↑</kbd><kbd>↓</kbd> {{ t('commandPalette.navigate') }}</span><span><kbd>Enter</kbd> {{ t('commandPalette.run') }}</span><span><kbd>Esc</kbd> {{ t('common.close') }}</span></footer>
       </section>
     </div>
     <div v-if="settingsOpen" class="settings-overlay" @click.self="settingsOpen = false">
@@ -10362,14 +5944,14 @@ onBeforeUnmount(() => {
       >
         <div class="settings-header">
           <div>
-            <span class="eyebrow">Bronom preferences</span>
-            <h2 id="settings-title">Settings</h2>
+            <span class="eyebrow">{{ t('settings.kicker') }}</span>
+            <h2 id="settings-title">{{ t('settings.heading') }}</h2>
           </div>
-          <button class="panel-close" type="button" aria-label="Close settings" @click="settingsOpen = false"><IconClose aria-hidden="true" /></button>
+          <button class="panel-close" type="button" :aria-label="t('settings.close')" @click="settingsOpen = false"><IconClose aria-hidden="true" /></button>
         </div>
 
         <div class="settings-layout">
-          <nav class="settings-sidebar" aria-label="Settings sections">
+          <nav class="settings-sidebar" :aria-label="t('settings.sections')">
             <button
               class="settings-nav-item"
               :class="{ active: settingsSection === 'appearance' }"
@@ -10379,8 +5961,8 @@ onBeforeUnmount(() => {
             >
               <span class="settings-nav-icon" aria-hidden="true"><IconContrast /></span>
               <span>
-                <strong>Appearance</strong>
-                <small>Theme and window</small>
+                <strong>{{ t('settings.nav.appearance') }}</strong>
+                <small>{{ t('settings.nav.appearanceDescription') }}</small>
               </span>
             </button>
             <button
@@ -10392,8 +5974,8 @@ onBeforeUnmount(() => {
             >
               <span class="settings-nav-icon" aria-hidden="true"><IconSearch /></span>
               <span>
-                <strong>Search engine</strong>
-                <small>Address bar searches</small>
+                <strong>{{ t('settings.nav.search') }}</strong>
+                <small>{{ t('settings.nav.searchDescription') }}</small>
               </span>
             </button>
             <button
@@ -10405,8 +5987,8 @@ onBeforeUnmount(() => {
             >
               <span class="settings-nav-icon" aria-hidden="true"><IconDownload /></span>
               <span>
-                <strong>Downloads</strong>
-                <small>Location and prompts</small>
+                <strong>{{ t('settings.nav.downloads') }}</strong>
+                <small>{{ t('settings.nav.downloadsDescription') }}</small>
               </span>
             </button>
             <button
@@ -10418,8 +6000,8 @@ onBeforeUnmount(() => {
             >
               <span class="settings-nav-icon" aria-hidden="true"><IconBedtime /></span>
               <span>
-                <strong>Performance</strong>
-                <small>Sleeping tabs</small>
+                <strong>{{ t('settings.nav.performance') }}</strong>
+                <small>{{ t('settings.nav.performanceDescription') }}</small>
               </span>
             </button>
             <button
@@ -10431,8 +6013,8 @@ onBeforeUnmount(() => {
             >
               <span class="settings-nav-icon" aria-hidden="true"><IconShieldLock /></span>
               <span>
-                <strong>MCP security</strong>
-                <small>Local authentication</small>
+                <strong>{{ t('settings.nav.mcp') }}</strong>
+                <small>{{ t('settings.nav.mcpDescription') }}</small>
               </span>
             </button>
             <button
@@ -10444,8 +6026,8 @@ onBeforeUnmount(() => {
             >
               <span class="settings-nav-icon" aria-hidden="true"><IconDelete /></span>
               <span>
-                <strong>Privacy &amp; data</strong>
-                <small>History, cookies, cache</small>
+                <strong>{{ t('settings.nav.privacy') }}</strong>
+                <small>{{ t('settings.nav.privacyDescription') }}</small>
               </span>
             </button>
             <button
@@ -10457,8 +6039,8 @@ onBeforeUnmount(() => {
             >
               <span class="settings-nav-icon" aria-hidden="true"><IconPrivacy /></span>
               <span>
-                <strong>Site permissions</strong>
-                <small>Per-website access</small>
+                <strong>{{ t('settings.nav.permissions') }}</strong>
+                <small>{{ t('settings.nav.permissionsDescription') }}</small>
               </span>
             </button>
             <button
@@ -10470,8 +6052,8 @@ onBeforeUnmount(() => {
             >
               <span class="settings-nav-icon" aria-hidden="true"><IconKey /></span>
               <span>
-                <strong>Passwords</strong>
-                <small>Saved accounts</small>
+                <strong>{{ t('settings.nav.passwords') }}</strong>
+                <small>{{ t('settings.nav.passwordsDescription') }}</small>
               </span>
             </button>
             <button
@@ -10483,8 +6065,8 @@ onBeforeUnmount(() => {
             >
               <span class="settings-nav-icon" aria-hidden="true"><IconSystemUpdate /></span>
               <span>
-                <strong>Updates</strong>
-                <small>Automatic checks</small>
+                <strong>{{ t('settings.nav.updates') }}</strong>
+                <small>{{ t('settings.nav.updatesDescription') }}</small>
               </span>
             </button>
             <button
@@ -10496,118 +6078,23 @@ onBeforeUnmount(() => {
             >
               <span class="settings-nav-icon" aria-hidden="true"><IconFavorite /></span>
               <span>
-                <strong>Support Bronom</strong>
-                <small>Open source and contributions</small>
+                <strong>{{ t('settings.nav.support') }}</strong>
+                <small>{{ t('settings.nav.supportDescription') }}</small>
               </span>
             </button>
           </nav>
 
-          <main v-if="settingsSection === 'appearance'" class="settings-content">
-            <div class="setting-copy">
-              <h3>Application theme</h3>
-              <p>Choose how Bronom's tabs, toolbar, dialogs, and menus look.</p>
-            </div>
-            <div class="theme-options" role="radiogroup" aria-label="Theme">
-              <button
-                v-for="theme in themes"
-                :key="theme.name"
-                class="theme-option"
-                :class="[`theme-${theme.name}`, { selected: settings.theme === theme.name }]"
-                type="button"
-                role="radio"
-                :aria-checked="settings.theme === theme.name"
-                :data-testid="`theme-${theme.name}`"
-                @click="selectTheme(theme.name)"
-              >
-                <span class="theme-preview" aria-hidden="true">
-                  <span class="preview-tab" />
-                  <span class="preview-bar" />
-                  <span class="preview-page" />
-                </span>
-                <span class="theme-label">{{ theme.label }}</span>
-                <span class="theme-description">{{ theme.description }}</span>
-                <span class="theme-check" aria-hidden="true"><IconCheck /></span>
-              </button>
-            </div>
-            <div class="settings-info">
-              <span class="info-dot" aria-hidden="true"><IconInfo /></span>
-              <p>System follows your device as it changes. A specific theme stays fixed for this Bronom profile.</p>
-            </div>
-            <div class="settings-rows">
-              <label class="settings-row" for="setting-interface-scale">
-                <span>
-                  <strong>Interface size</strong>
-                  <small>Enlarge Bronom's controls and text without changing website zoom.</small>
-                </span>
-                <select
-                  id="setting-interface-scale"
-                  aria-label="Interface size"
-                  :value="settings.interfaceScale"
-                  @change="selectInterfaceScale"
-                >
-                  <option v-for="option in INTERFACE_SCALE_OPTIONS" :key="option.value" :value="option.value">
-                    {{ option.label }} · {{ option.description }}
-                  </option>
-                </select>
-              </label>
-              <label class="settings-row" for="setting-hide-in-tray">
-                <span>
-                  <strong>Hide in tray when closing</strong>
-                  <small>Keep Bronom and its MCP server running after the window is closed.</small>
-                </span>
-                <input
-                  id="setting-hide-in-tray"
-                  type="checkbox"
-                  :checked="settings.hideInTray"
-                  @change="setHideInTray"
-                />
-              </label>
-              <label class="settings-row" for="setting-attention-sound">
-                <span>
-                  <strong>Play attention sound</strong>
-                  <small>Play a warning cue when an agent needs you to complete a manual browser step.</small>
-                </span>
-                <input
-                  id="setting-attention-sound"
-                  type="checkbox"
-                  :checked="settings.attentionSound"
-                  @change="setAttentionSound"
-                />
-              </label>
-              <div class="settings-row">
-                <span>
-                  <strong>Attention sound</strong>
-                  <small>Choose the cue that plays when Bronom needs you.</small>
-                </span>
-                <div class="attention-sound-actions">
-                  <select
-                    aria-label="Attention sound"
-                    :value="settings.attentionSoundCue"
-                    :disabled="!settings.attentionSound"
-                    @change="setAttentionSoundCue"
-                  >
-                    <option v-for="option in attentionSoundOptions" :key="option.cue" :value="option.cue">
-                      {{ option.label }}
-                    </option>
-                  </select>
-                  <button
-                    class="test-sound-button"
-                    type="button"
-                    :disabled="!settings.attentionSound"
-                    @click="testAttentionSound"
-                  >
-                    Test sound
-                  </button>
-                </div>
-              </div>
-            </div>
-          </main>
+          <AppearanceSettings
+            v-if="settingsSection === 'appearance'"
+            @test-sound="testAttentionSound"
+            @setting-error="handleExtractedSettingError"
+          />
           <main v-else-if="settingsSection === 'search'" class="settings-content">
             <div class="setting-copy">
-              <h3>Default search engine</h3>
-              <p>Choose where plain text entered in the address bar or through <code>browser_navigate</code> is searched.</p>
+              <h3>{{ t('settings.search.heading') }}</h3>
+              <p>{{ t('settings.search.description') }}</p>
             </div>
-            <div class="search-engine-options" role="radiogroup" aria-label="Default search engine">
+            <div class="search-engine-options" role="radiogroup" :aria-label="t('settings.search.heading')">
               <button
                 v-for="engine in SEARCH_ENGINE_OPTIONS"
                 :key="engine.id"
@@ -10630,34 +6117,34 @@ onBeforeUnmount(() => {
             </div>
             <div class="settings-info">
               <span class="info-dot" aria-hidden="true"><IconInfo /></span>
-              <p>Local tabs, bookmarks, and history suggestions stay on this device. Bronom sends the query only after you submit it.</p>
+              <p>{{ t('settings.search.privacy') }}</p>
             </div>
           </main>
           <main v-else-if="settingsSection === 'downloads'" class="settings-content downloads-settings">
             <div class="setting-copy">
-              <h3>Website downloads</h3>
-              <p>Choose where new files go and whether Bronom asks before saving each one.</p>
+              <h3>{{ t('settings.downloads.heading') }}</h3>
+              <p>{{ t('settings.downloads.description') }}</p>
             </div>
             <div class="settings-rows">
               <div class="settings-row download-location-row">
                 <span class="download-location-copy">
-                  <strong>Download location</strong>
+                  <strong>{{ t('settings.downloads.location') }}</strong>
                   <code :title="effectiveDownloadDirectory">{{ effectiveDownloadDirectory }}</code>
                 </span>
                 <div class="download-location-actions">
                   <button class="secondary-button" type="button" :disabled="downloadSettingsState === 'working'" @click="chooseDownloadDirectory">
-                    Change…
+                    {{ t('settings.downloads.change') }}
                   </button>
                   <button class="secondary-button" type="button" :disabled="downloadSettingsState === 'working'" @click="openDownloadDirectory">
                     <IconFolderOpen aria-hidden="true" />
-                    Open folder
+                    {{ t('settings.downloads.open') }}
                   </button>
                 </div>
               </div>
               <label class="settings-row" for="setting-ask-download-location">
                 <span>
-                  <strong>Ask where to save each file</strong>
-                  <small>Show the operating system save dialog for every new website download.</small>
+                  <strong>{{ t('settings.downloads.ask') }}</strong>
+                  <small>{{ t('settings.downloads.askDescription') }}</small>
                 </span>
                 <input
                   id="setting-ask-download-location"
@@ -10671,23 +6158,23 @@ onBeforeUnmount(() => {
             <output class="download-settings-status" :class="downloadSettingsState" aria-live="polite">{{ downloadSettingsMessage }}</output>
             <div class="settings-info">
               <span class="info-dot" aria-hidden="true"><IconInfo /></span>
-              <p>Changes apply to new website downloads. Active transfers keep their original destination. PDF exports and agent-created files use the selected folder without opening a human dialog.</p>
+              <p>{{ t('settings.downloads.help') }}</p>
             </div>
           </main>
           <main v-else-if="settingsSection === 'performance'" class="settings-content performance-settings">
             <div class="setting-copy">
-              <h3>Memory Saver</h3>
-              <p>Unload inactive website tabs so active human and agent work gets more CPU and memory.</p>
+              <h3>{{ t('settings.memory.heading') }}</h3>
+              <p>{{ t('settings.memory.description') }}</p>
             </div>
             <div class="memory-saver-summary" aria-live="polite">
               <span class="settings-nav-icon" aria-hidden="true"><IconBedtime /></span>
-              <span><strong>{{ sleepingTabsCount }} sleeping</strong><small>of {{ regularTabs.length }} website tabs</small></span>
+              <span><strong>{{ sleepingTabsCount }} {{ t('settings.memory.sleeping') }}</strong><small>{{ t('settings.memory.of') }} {{ regularTabs.length }} {{ t('settings.memory.websiteTabs') }}</small></span>
             </div>
             <div class="settings-rows">
               <label class="settings-row" for="setting-memory-saver">
                 <span>
-                  <strong>Automatically sleep inactive tabs</strong>
-                  <small>Sleeping tabs wake before you select them or an MCP tool uses them.</small>
+                  <strong>{{ t('settings.memory.auto') }}</strong>
+                  <small>{{ t('settings.memory.autoDescription') }}</small>
                 </span>
                 <input
                   id="setting-memory-saver"
@@ -10698,8 +6185,8 @@ onBeforeUnmount(() => {
               </label>
               <label class="settings-row" for="setting-memory-saver-timeout">
                 <span>
-                  <strong>Sleep after</strong>
-                  <small>Counted from the tab's last selection, human input, navigation, or MCP command.</small>
+                  <strong>{{ t('settings.memory.sleepAfter') }}</strong>
+                  <small>{{ t('settings.memory.counted') }}</small>
                 </span>
                 <select
                   id="setting-memory-saver-timeout"
@@ -10715,24 +6202,24 @@ onBeforeUnmount(() => {
             </div>
             <div class="memory-saver-actions">
               <button class="secondary-button" type="button" :disabled="!settings.memorySaverEnabled" @click="sleepInactiveTabsNow">
-                <IconBedtime aria-hidden="true" /> Sleep eligible tabs now
+                <IconBedtime aria-hidden="true" /> {{ t('settings.memory.sleepNow') }}
               </button>
             </div>
             <div class="settings-info">
               <span class="info-dot" aria-hidden="true"><IconInfo /></span>
-              <p>Visible, pinned, loading, audio-playing, downloading, form-edited, DevTools, and active MCP tabs stay awake. Sleeping unloads the page and restores its navigation history when it wakes.</p>
+              <p>{{ t('settings.memory.help') }}</p>
             </div>
           </main>
           <main v-else-if="settingsSection === 'mcp'" class="settings-content">
             <div class="setting-copy">
-              <h3>MCP security</h3>
-              <p>Control which local applications can connect to this browser profile.</p>
+              <h3>{{ t('settings.mcp.heading') }}</h3>
+              <p>{{ t('settings.mcp.description') }}</p>
             </div>
             <div class="settings-rows">
               <label class="settings-row" for="setting-mcp-authentication">
                 <span>
-                  <strong>Require MCP authentication</strong>
-                  <small>Require the owner-only per-profile bearer token for MCP and health requests.</small>
+                  <strong>{{ t('settings.mcp.require') }}</strong>
+                  <small>{{ t('settings.mcp.requireDescription') }}</small>
                 </span>
                 <input
                   id="setting-mcp-authentication"
@@ -10743,8 +6230,8 @@ onBeforeUnmount(() => {
               </label>
               <div class="settings-row mcp-port-row">
                 <label for="setting-mcp-port">
-                  <strong>MCP server port</strong>
-                  <small>Move the local listener without restarting Bronom. Connected clients must use the new endpoint.</small>
+                  <strong>{{ t('settings.mcp.port') }}</strong>
+                  <small>{{ t('settings.mcp.portDescription') }}</small>
                 </label>
                 <div class="mcp-port-control">
                   <div>
@@ -10756,7 +6243,7 @@ onBeforeUnmount(() => {
                       :min="MIN_MCP_PORT"
                       :max="MAX_MCP_PORT"
                       step="1"
-                      aria-label="MCP server port"
+                      :aria-label="t('settings.mcp.port')"
                       @input="editMcpPort"
                       @keydown.enter.prevent="applyMcpPort"
                     />
@@ -10766,14 +6253,14 @@ onBeforeUnmount(() => {
                       :disabled="!canApplyMcpPort || mcpPortState === 'saving'"
                       @click="applyMcpPort"
                     >
-                      {{ mcpPortState === 'saving' ? 'Moving…' : 'Apply port' }}
+                      {{ mcpPortState === 'saving' ? t('settings.mcp.moving') : t('settings.mcp.applyPort') }}
                     </button>
                   </div>
                   <output
                     class="mcp-port-status"
                     :class="mcpPortState"
                     aria-live="polite"
-                  >{{ mcpPortMessage || `Active endpoint: ${state.mcpUrl}` }}</output>
+                  >{{ mcpPortMessage || t('runtimeActions.mcp.endpoint', { url: state.mcpUrl }) }}</output>
                 </div>
               </div>
             </div>
@@ -10782,28 +6269,28 @@ onBeforeUnmount(() => {
                 <IconInfo v-if="settings.mcpAuthentication" />
                 <IconWarning v-else />
               </span>
-              <p v-if="settings.mcpAuthentication">The token is generated once per profile and never displayed on Bronom Home.</p>
-              <p v-else>Authentication is off. Any process on this computer can control logged-in tabs and attach local files.</p>
+              <p v-if="settings.mcpAuthentication">{{ t('settings.mcp.tokenHelp') }}</p>
+              <p v-else>{{ t('settings.mcp.warning') }}</p>
             </div>
           </main>
           <main v-else-if="settingsSection === 'privacy'" class="settings-content privacy-settings">
             <div class="setting-copy">
-              <h3>Privacy &amp; browsing data</h3>
-              <p>Manage the durable Default workspace profile. Isolated workspaces are managed from their workspace editor.</p>
+              <h3>{{ t('settings.privacy.heading') }}</h3>
+              <p>{{ t('settings.privacy.description') }}</p>
             </div>
             <fieldset class="privacy-category-options" :disabled="browsingDataState === 'clearing' || janitorState === 'clearing'">
-              <legend>What to clear</legend>
+              <legend>{{ t('settings.privacy.whatToClear') }}</legend>
               <label for="clear-browsing-history">
                 <input id="clear-browsing-history" v-model="browsingDataOptions.history" type="checkbox" />
-                <span><strong>History</strong><small>Local visits</small></span>
+                <span><strong>{{ t('settings.privacy.history') }}</strong><small>{{ t('settings.privacy.localVisits') }}</small></span>
               </label>
               <label for="clear-cookies-site-data">
                 <input id="clear-cookies-site-data" v-model="browsingDataOptions.cookiesAndSiteData" type="checkbox" />
-                <span><strong>Cookies &amp; site data</strong><small>May sign you out</small></span>
+                <span><strong>{{ t('settings.privacy.cookies') }}</strong><small>{{ t('settings.privacy.signOut') }}</small></span>
               </label>
               <label for="clear-browser-cache">
                 <input id="clear-browser-cache" v-model="browsingDataOptions.cache" type="checkbox" />
-                <span><strong>Cached files</strong><small>Reloads may be slower</small></span>
+                <span><strong>{{ t('settings.privacy.cache') }}</strong><small>{{ t('settings.privacy.slower') }}</small></span>
               </label>
             </fieldset>
             <div class="privacy-data-actions">
@@ -10813,40 +6300,40 @@ onBeforeUnmount(() => {
                 :disabled="!canClearBrowsingData"
                 @click="clearSelectedBrowsingData"
               >
-                {{ browsingDataState === 'clearing' ? 'Clearing all…' : `Clear all websites… (${selectedBrowsingDataCount})` }}
+                {{ browsingDataState === 'clearing' ? t('settings.privacy.clearingAll') : t('settings.privacy.clearAll', { count: localNumber(selectedBrowsingDataCount) }) }}
               </button>
-              <output class="privacy-data-status" :class="browsingDataState" aria-live="polite">{{ browsingDataMessage || (browsingDataSummary ? `${browsingDataSummary.historyEntries} ${browsingDataSummary.historyEntries === 1 ? 'history page' : 'history pages'} · ${browsingDataSummary.cookieCount} ${browsingDataSummary.cookieCount === 1 ? 'cookie' : 'cookies'} · ${formatBytes(browsingDataSummary.cacheBytes)} cache` : 'Loading profile totals…') }}</output>
+              <output class="privacy-data-status" :class="browsingDataState" aria-live="polite">{{ browsingDataMessage || (browsingDataSummary ? t('settings.privacy.totalsDetail', { history: t('settings.privacy.totals', { history: localNumber(browsingDataSummary.historyEntries) }, browsingDataSummary.historyEntries), cookies: t(browsingDataSummary.cookieCount === 1 ? 'shell.siteControls.cookie' : 'shell.siteControls.cookies', { count: localNumber(browsingDataSummary.cookieCount) }), cache: formatBytes(browsingDataSummary.cacheBytes) }) : t('settings.privacy.loadingTotals')) }}</output>
             </div>
             <div class="privacy-websites-heading">
               <div>
-                <h4>Websites</h4>
-                <p>Search Default and application-wide records, then clear the selected categories from one website.</p>
+                <h4>{{ t('settings.privacy.websites') }}</h4>
+                <p>{{ t('settings.privacy.websitesDescription') }}</p>
               </div>
               <button class="secondary-button janitor-refresh" type="button" :disabled="janitorState === 'loading' || janitorState === 'clearing'" @click="refreshJanitorWebsites">
                 <IconRefresh aria-hidden="true" />
-                Refresh
+                {{ t('settings.privacy.refresh') }}
               </button>
             </div>
             <div class="janitor-search-field">
               <IconSearch aria-hidden="true" />
-              <input v-model="janitorSearch" type="search" aria-label="Search websites" autocomplete="off" spellcheck="false" placeholder="Search websites" />
-              <span>{{ filteredJanitorWebsites.length }} of {{ janitorWebsites.length }}</span>
+              <input v-model="janitorSearch" type="search" :aria-label="t('settings.privacy.search')" autocomplete="off" spellcheck="false" :placeholder="t('settings.privacy.search')" />
+              <span>{{ t('settings.privacy.range', { shown: localNumber(filteredJanitorWebsites.length), total: localNumber(janitorWebsites.length) }) }}</span>
             </div>
             <div class="janitor-list" :aria-busy="janitorState === 'loading'">
               <div v-if="janitorState === 'loading' && !janitorWebsites.length" class="site-permissions-empty janitor-empty">
                 <IconProgress class="state-spinner" aria-hidden="true" />
-                <strong>Finding websites…</strong>
-                <p>Checking the Default workspace and application-wide records.</p>
+                <strong>{{ t('settings.privacy.finding') }}</strong>
+                <p>{{ t('settings.privacy.checking') }}</p>
               </div>
               <div v-else-if="!janitorWebsites.length" class="site-permissions-empty janitor-empty">
                 <IconCleaning aria-hidden="true" />
-                <strong>No websites yet</strong>
-                <p>Websites appear after they are visited, opened, bookmarked, granted a permission, saved with an account, or store a cookie.</p>
+                <strong>{{ t('settings.privacy.empty') }}</strong>
+                <p>{{ t('settings.privacy.emptyDescription') }}</p>
               </div>
               <div v-else-if="!filteredJanitorWebsites.length" class="site-permissions-empty janitor-empty">
                 <IconSearch aria-hidden="true" />
-                <strong>No matching websites</strong>
-                <p>Try a hostname, title, or full origin.</p>
+                <strong>{{ t('settings.privacy.noMatches') }}</strong>
+                <p>{{ t('settings.privacy.noMatchesDescription') }}</p>
               </div>
               <article v-for="site in filteredJanitorWebsites" v-else :key="site.origin" class="janitor-site">
                 <span class="janitor-site-icon" aria-hidden="true"><IconLanguage /></span>
@@ -10856,42 +6343,36 @@ onBeforeUnmount(() => {
                   <span v-if="janitorWebsiteMeta(site).length" class="janitor-site-meta">
                     <span v-for="item in janitorWebsiteMeta(site)" :key="item">{{ item }}</span>
                   </span>
-                  <span v-else class="janitor-site-meta"><span>Known to Default</span></span>
+                  <span v-else class="janitor-site-meta"><span>{{ t('settings.privacy.known') }}</span></span>
                 </span>
                 <button
                   class="janitor-clear-button"
                   type="button"
-                  :aria-label="`Clear selected data for ${site.origin}`"
+                  :aria-label="t('settings.privacy.clearSiteAria', { origin: site.origin })"
                   :disabled="selectedBrowsingDataCount === 0 || janitorState === 'clearing' || browsingDataState === 'clearing'"
                   @click="clearJanitorWebsite(site)"
                 >
                   <IconProgress v-if="janitorClearingOrigin === site.origin" class="state-spinner" aria-hidden="true" />
                   <IconDelete v-else aria-hidden="true" />
-                  {{ janitorClearingOrigin === site.origin ? 'Clearing…' : 'Clear…' }}
+                  {{ janitorClearingOrigin === site.origin ? t('settings.privacy.clearing') : t('settings.privacy.clear') }}
                 </button>
               </article>
             </div>
             <output class="privacy-data-status janitor-status" :class="janitorState" aria-live="polite">{{ janitorMessage }}</output>
             <div class="settings-info">
               <span class="info-dot" aria-hidden="true"><IconInfo /></span>
-              <p>
-                Bookmarks ({{ browsingDataSummary?.bookmarkCount ?? '…' }}), saved passwords ({{ browsingDataSummary?.savedPasswordCount ?? '…' }}),
-                site-permission decisions ({{ browsingDataSummary?.permissionDecisionCount ?? '…' }}), downloaded files, settings, and open tabs stay untouched.
-                Open pages are not reloaded automatically. New MCP commands pause only while clearing is in progress.
-                Cookies, cache, and site data here belong to Default; history, bookmarks, saved accounts, and downloaded files are application-wide.
-                The website list combines origins known from those records and open Default tabs. Chromium does not expose a complete index of storage-only origins. Related subdomains may share cookies.
-              </p>
+              <p>{{ t('settings.privacy.exclusions', { bookmarks: browsingDataSummary?.bookmarkCount === undefined ? '…' : localNumber(browsingDataSummary.bookmarkCount), passwords: browsingDataSummary?.savedPasswordCount === undefined ? '…' : localNumber(browsingDataSummary.savedPasswordCount), permissions: browsingDataSummary?.permissionDecisionCount === undefined ? '…' : localNumber(browsingDataSummary.permissionDecisionCount) }) }}</p>
             </div>
           </main>
           <main v-else-if="settingsSection === 'permissions'" class="settings-content permissions-settings">
             <div class="setting-copy">
-              <h3>Site permissions</h3>
-              <p>Review access decisions remembered for each website.</p>
+              <h3>{{ t('settings.permissions.heading') }}</h3>
+              <p>{{ t('settings.permissions.description') }}</p>
             </div>
             <div v-if="!permissionsByOrigin.length" class="site-permissions-empty">
               <span class="empty-permission-icon" aria-hidden="true"><IconPrivacy /></span>
-              <strong>No saved decisions</strong>
-              <p>Websites will appear here after they request permission and you choose Allow or Deny.</p>
+              <strong>{{ t('settings.permissions.emptyHeading') }}</strong>
+              <p>{{ t('settings.permissions.emptyDescription') }}</p>
             </div>
             <div v-else class="permission-sites">
               <section v-for="group in permissionsByOrigin" :key="group.origin" class="permission-site">
@@ -10907,17 +6388,17 @@ onBeforeUnmount(() => {
                   </span>
                   <select
                     :value="permission.decision"
-                    :aria-label="`${permissionLabel(permission.permission)} permission for ${group.origin}`"
+                    :aria-label="t('runtimeActions.permission.aria', { permission: permissionLabel(permission.permission), origin: group.origin })"
                     @change="setSitePermission(permission, $event)"
                   >
-                    <option value="allow">Allow</option>
-                    <option value="deny">Block</option>
+                    <option value="allow">{{ t('settings.permissions.allow') }}</option>
+                    <option value="deny">{{ t('settings.permissions.block') }}</option>
                   </select>
                   <button
                     class="permission-remove"
                     type="button"
-                    :aria-label="`Forget ${permissionLabel(permission.permission)} permission for ${group.origin}`"
-                    title="Forget decision"
+                    :aria-label="t('runtimeActions.permission.forgetAria', { permission: permissionLabel(permission.permission), origin: group.origin })"
+                    :title="t('settings.permissions.forget')"
                     @click="removeSitePermission(permission)"
                   >
                     <IconDelete aria-hidden="true" />
@@ -10927,13 +6408,13 @@ onBeforeUnmount(() => {
             </div>
             <div class="settings-info">
               <span class="info-dot" aria-hidden="true"><IconInfo /></span>
-              <p>Removing a decision makes Bronom ask again the next time the website requests that permission.</p>
+              <p>{{ t('settings.permissions.help') }}</p>
             </div>
           </main>
           <main v-else-if="settingsSection === 'credentials'" class="settings-content credentials-settings">
             <div class="setting-copy">
-              <h3>Saved passwords</h3>
-              <p>Save website logins with explicit consent and fill them from the password button in the toolbar.</p>
+              <h3>{{ t('settings.passwords.heading') }}</h3>
+              <p>{{ t('settings.passwords.description') }}</p>
             </div>
             <div v-if="!credentialStorage.available" class="settings-info security-warning">
               <span class="info-dot" aria-hidden="true"><IconWarning /></span>
@@ -10941,21 +6422,21 @@ onBeforeUnmount(() => {
             </div>
             <div v-else-if="!credentials.length" class="site-permissions-empty">
               <span class="empty-permission-icon" aria-hidden="true"><IconKey /></span>
-              <strong>No saved passwords</strong>
-              <p>After you submit a password form yourself, Bronom will ask whether to save it.</p>
+              <strong>{{ t('settings.passwords.emptyHeading') }}</strong>
+              <p>{{ t('settings.passwords.emptyDescription') }}</p>
             </div>
             <div v-else class="permission-sites">
               <section v-for="credential in credentials" :key="credential.id" class="permission-site">
                 <div class="credential-row">
                   <span class="permission-name">
-                    <strong>{{ credential.username || 'Unnamed account' }}</strong>
+                    <strong>{{ credential.username || t('credentialPicker.unnamed') }}</strong>
                     <small>{{ credential.origin }}</small>
                   </span>
                   <button
                     class="permission-remove credential-remove"
                     type="button"
-                    :aria-label="`Remove saved password for ${credential.username || 'unnamed account'} on ${credential.origin}`"
-                    title="Remove saved password"
+                    :aria-label="t('settings.passwords.removeAria', { username: credential.username || t('settings.passwords.unnamed'), origin: credential.origin })"
+                    :title="t('settings.passwords.remove')"
                     @click="removeSavedCredential(credential.id)"
                   >
                     <IconDelete aria-hidden="true" />
@@ -10965,13 +6446,13 @@ onBeforeUnmount(() => {
             </div>
             <div v-if="credentialStorage.available" class="settings-info">
               <span class="info-dot" aria-hidden="true"><IconInfo /></span>
-              <p>Encrypted by {{ credentialStorage.backend }}. Filling a password automatically pauses new MCP commands and leaves agents paused until you resume them.</p>
+              <p>{{ t('settings.passwords.encryptedBy') }} {{ credentialStorage.backend }}. {{ t('settings.passwords.help') }}</p>
             </div>
           </main>
           <main v-else-if="settingsSection === 'updates'" class="settings-content updates-settings">
             <div class="setting-copy">
-              <h3>Software updates</h3>
-              <p>Keep Bronom current without downloading or installing anything silently.</p>
+              <h3>{{ t('settings.updates.heading') }}</h3>
+              <p>{{ t('settings.updates.description') }}</p>
             </div>
             <UpdateNotification
               v-if="updateState.status !== 'idle'"
@@ -10984,8 +6465,8 @@ onBeforeUnmount(() => {
             <div class="settings-rows">
               <label class="settings-row" for="setting-startup-update">
                 <span>
-                  <strong>Check for updates on startup</strong>
-                  <small>Run a background check shortly after Bronom opens.</small>
+                  <strong>{{ t('settings.updates.startup') }}</strong>
+                  <small>{{ t('settings.updates.startupDescription') }}</small>
                 </span>
                 <input
                   id="setting-startup-update"
@@ -10996,80 +6477,80 @@ onBeforeUnmount(() => {
               </label>
               <div class="settings-row version-row">
                 <span>
-                  <strong>Current version</strong>
-                  <small>{{ updateState.currentVersion || 'Development build' }}</small>
+                  <strong>{{ t('settings.updates.current') }}</strong>
+                  <small>{{ updateState.currentVersion || t('help.developmentBuild') }}</small>
                 </span>
                 <button class="secondary-button check-update-button" type="button" @click="checkForUpdatesInSettings">
-                  Check now
+                  {{ t('settings.updates.check') }}
                 </button>
               </div>
             </div>
             <div class="settings-info">
               <span class="info-dot" aria-hidden="true"><IconInfo /></span>
-              <p>Bronom asks before downloading and installing an available update.</p>
+              <p>{{ t('settings.updates.help') }}</p>
             </div>
           </main>
           <main v-else class="settings-content support-settings">
             <div class="setting-copy">
-              <span class="support-kicker">Open source</span>
-              <h3>{{ commercialLicense.active ? 'Thank you for supporting Bronom' : 'Support Bronom development' }}</h3>
-              <p>Bronom is open source under Apache 2.0. Personal and commercial use do not require activation; an optional supporter subscription helps fund continued development.</p>
+              <span class="support-kicker">{{ t('settings.support.kicker') }}</span>
+              <h3>{{ commercialLicense.active ? t('settings.support.thanks') : t('settings.support.heading') }}</h3>
+              <p>{{ t('settings.support.description') }}</p>
             </div>
             <div v-if="commercialLicense.active" class="support-card commercial-license-card active">
               <span class="support-heart" aria-hidden="true"><IconCheck /></span>
-              <strong>Supporter key {{ commercialLicense.maskedKey }} is active on this device.</strong>
+              <strong>{{ t('settings.support.active', { key: commercialLicense.maskedKey }) }}</strong>
               <small>
-                {{ commercialLicense.activations ?? '—' }} of {{ commercialLicense.activationLimit ?? 'unlimited' }} device activations used.
-                <template v-if="commercialLicense.lastValidatedAt"> Last checked {{ new Date(commercialLicense.lastValidatedAt).toLocaleString() }}.</template>
+                {{ t('settings.support.activations', { used: commercialLicense.activations == null ? '—' : localNumber(commercialLicense.activations), limit: commercialLicense.activationLimit == null ? t('settings.support.unlimited') : localNumber(commercialLicense.activationLimit) }) }}
+                <template v-if="commercialLicense.lastValidatedAt"> {{ t('settings.support.lastChecked', { time: localDateTime(commercialLicense.lastValidatedAt) }) }}</template>
               </small>
               <div class="commercial-license-actions">
                 <button class="secondary-button" type="button" :disabled="commercialLicenseAction !== 'idle'" @click="refreshCommercialLicense">
-                  {{ commercialLicenseAction === 'refreshing' ? 'Checking…' : 'Check license' }}
+                  {{ commercialLicenseAction === 'refreshing' ? t('settings.support.checking') : t('settings.support.check') }}
                 </button>
                 <button class="secondary-button" type="button" :disabled="commercialLicenseAction !== 'idle'" @click="openSupport('https://www.creem.io/my-orders/login')">
-                  Manage subscription ↗
+                  {{ t('settings.support.manage') }}
                 </button>
                 <button class="secondary-button danger" type="button" :disabled="commercialLicenseAction !== 'idle'" @click="deactivateCommercialLicense">
-                  {{ commercialLicenseAction === 'deactivating' ? 'Deactivating…' : 'Deactivate device' }}
+                  {{ commercialLicenseAction === 'deactivating' ? t('settings.support.deactivating') : t('settings.support.deactivate') }}
                 </button>
               </div>
             </div>
             <div v-else class="support-card commercial-license-card">
               <span class="support-heart" aria-hidden="true"><IconFavorite /></span>
-              <strong>Activate an optional supporter key from your Creem receipt.</strong>
-              <small v-if="commercialLicense.secureStorageAvailable">The key is encrypted with your operating system secure storage and is used only for Creem license validation.</small>
-              <small v-else>License activation requires an operating-system secure storage backend.</small>
+              <strong>{{ t('settings.support.activateDescription') }}</strong>
+              <small v-if="commercialLicense.secureStorageAvailable">{{ t('settings.support.secure') }}</small>
+              <small v-else>{{ t('settings.support.unavailable') }}</small>
               <form class="commercial-license-form" @submit.prevent="activateCommercialLicense">
-                <label for="commercial-license-key">Supporter key</label>
+                <label for="commercial-license-key">{{ t('settings.support.key') }}</label>
                 <input
                   id="commercial-license-key"
                   v-model="commercialLicenseKey"
                   type="password"
                   autocomplete="off"
                   spellcheck="false"
-                  placeholder="XXXX-XXXX-XXXX-XXXX"
+                  :placeholder="t('settings.support.placeholder')"
                   :disabled="!commercialLicense.secureStorageAvailable || commercialLicenseAction !== 'idle'"
                 />
                 <button class="primary-button support-primary" type="submit" :disabled="!commercialLicense.secureStorageAvailable || commercialLicenseAction !== 'idle'">
-                  {{ commercialLicenseAction === 'activating' ? 'Activating…' : 'Activate supporter key' }}
+                  {{ commercialLicenseAction === 'activating' ? t('settings.support.activating') : t('settings.support.activate') }}
                 </button>
               </form>
               <small v-if="commercialLicense.message">{{ commercialLicense.message }}</small>
               <small v-if="commercialLicenseError" class="commercial-license-error" role="alert">{{ commercialLicenseError }}</small>
-              <button class="secondary-button" type="button" @click="openSupport('https://bronom.pages.dev')">Support Bronom ↗</button>
+              <button class="secondary-button" type="button" @click="openSupport('https://bronom.pages.dev')">{{ t('settings.support.support') }}</button>
             </div>
             <div class="support-alternatives">
-              <span>License and community</span>
-              <button type="button" @click="openSupport('https://github.com/Netroforge/bronom/blob/main/LICENSE')">Apache 2.0 license ↗</button>
-              <button type="button" @click="openSupport('https://github.com/Netroforge/bronom/blob/main/CONTRIBUTING.md')">Contributing guide ↗</button>
-              <button type="button" @click="openSupport('https://github.com/Netroforge/bronom/issues')">Report an issue ↗</button>
+              <span>{{ t('settings.support.alternatives') }}</span>
+              <button type="button" @click="openSupport('https://github.com/Netroforge/bronom/blob/main/LICENSE')">{{ t('settings.support.license') }}</button>
+              <button type="button" @click="openSupport('https://github.com/Netroforge/bronom/blob/main/CONTRIBUTING.md')">{{ t('settings.support.contributing') }}</button>
+              <button type="button" @click="openSupport('https://github.com/Netroforge/bronom/issues')">{{ t('settings.support.issue') }}</button>
             </div>
           </main>
         </div>
 
         <footer class="settings-footer">
-          <button v-if="settingsSection !== 'support' && settingsSection !== 'credentials'" class="secondary-button" type="button" @click="resetCurrentSection">Reset to default</button>
-          <button class="primary-button" type="button" @click="settingsOpen = false">Close</button>
+          <button v-if="settingsSection !== 'support' && settingsSection !== 'credentials'" class="secondary-button" type="button" @click="resetCurrentSection">{{ t('settings.reset') }}</button>
+          <button class="primary-button" type="button" @click="settingsOpen = false">{{ t('common.close') }}</button>
         </footer>
       </section>
     </div>
@@ -11084,14 +6565,14 @@ onBeforeUnmount(() => {
       >
         <header class="help-dialog-header">
           <div>
-            <span class="eyebrow">Bronom help</span>
-            <h2 v-if="helpDialog === 'shortcuts'" id="shortcuts-title">Keyboard shortcuts</h2>
-            <h2 v-else id="about-title">About Bronom</h2>
+            <span class="eyebrow">{{ t('help.kicker') }}</span>
+            <h2 v-if="helpDialog === 'shortcuts'" id="shortcuts-title">{{ t('help.shortcuts') }}</h2>
+            <h2 v-else id="about-title">{{ t('help.about') }}</h2>
           </div>
-          <button class="panel-close" type="button" aria-label="Close help" @click="helpDialog = null"><IconClose aria-hidden="true" /></button>
+          <button class="panel-close" type="button" :aria-label="t('help.close')" @click="helpDialog = null"><IconClose aria-hidden="true" /></button>
         </header>
         <div v-if="helpDialog === 'shortcuts'" class="shortcuts-content">
-          <p>Use these shortcuts from Bronom or from the website currently in focus.</p>
+          <p>{{ t('help.shortcutsDescription') }}</p>
           <dl class="shortcut-list">
             <div v-for="shortcut in keyboardShortcuts" :key="shortcut.label" class="shortcut-row">
               <dt>{{ shortcut.label }}</dt>
@@ -11104,14 +6585,14 @@ onBeforeUnmount(() => {
         <div v-else class="about-content">
           <span class="about-mark" aria-hidden="true"><IconDashboard /></span>
           <div>
-            <h3>Bronom {{ updateState.currentVersion || 'Development build' }}</h3>
-            <p>A persistent, visible browser that coding agents can navigate with you through MCP.</p>
+            <h3>Bronom {{ updateState.currentVersion || t('help.developmentBuild') }}</h3>
+            <p>{{ t('help.description') }}</p>
           </div>
           <div class="about-actions">
-            <button class="secondary-button" type="button" @click="openSupport('https://github.com/Netroforge/bronom')">GitHub repository</button>
-            <button class="secondary-button" type="button" @click="openSupport('https://github.com/Netroforge/bronom/blob/main/LICENSE')">Apache 2.0 license</button>
-            <button class="secondary-button" type="button" @click="openSupport('https://github.com/Netroforge/bronom/blob/main/CONTRIBUTING.md')">Contribute</button>
-            <button class="primary-button" type="button" @click="openSupportSettings">Support Bronom</button>
+            <button class="secondary-button" type="button" @click="openSupport('https://github.com/Netroforge/bronom')">{{ t('help.repository') }}</button>
+            <button class="secondary-button" type="button" @click="openSupport('https://github.com/Netroforge/bronom/blob/main/LICENSE')">{{ t('help.license') }}</button>
+            <button class="secondary-button" type="button" @click="openSupport('https://github.com/Netroforge/bronom/blob/main/CONTRIBUTING.md')">{{ t('help.contribute') }}</button>
+            <button class="primary-button" type="button" @click="openSupportSettings">{{ t('help.support') }}</button>
           </div>
         </div>
       </section>
@@ -11125,18 +6606,18 @@ onBeforeUnmount(() => {
     >
       <header>
         <span>
-          <small>WEBSITE REQUIRED</small>
+          <small>{{ t('panels.websiteRequired') }}</small>
           <strong>{{ detachedPanelLabelText }}</strong>
         </span>
         <div class="panel-header-actions">
-          <PanelDockPicker v-model="panelDock" :label="`Dock ${detachedPanelLabelText.toLocaleLowerCase()}`" />
-          <button class="panel-close" type="button" :aria-label="`Close ${detachedPanelLabelText.toLocaleLowerCase()}`" @click="closeDockedPanels"><IconClose aria-hidden="true" /></button>
+          <PanelDockPicker v-model="panelDock" :label="t('panels.dockPanel')" />
+          <button class="panel-close" type="button" :aria-label="t('panels.closePanel', { panel: detachedPanelLabelText })" @click="closeDockedPanels"><IconClose aria-hidden="true" /></button>
         </div>
       </header>
       <div>
         <span aria-hidden="true"><IconLanguage /></span>
-        <h2>Open a website tab</h2>
-        <p>Select or open a website tab in the main Bronom window. This panel will refresh automatically.</p>
+        <h2>{{ t('panels.openWebsite') }}</h2>
+        <p>{{ t('panels.openWebsiteDescription') }}</p>
       </div>
     </div>
     <div
@@ -11145,12 +6626,12 @@ onBeforeUnmount(() => {
       :class="{ active: panelResizeGesture !== null }"
       role="separator"
       :aria-orientation="panelDock === 'right' || panelDock === 'left' ? 'vertical' : 'horizontal'"
-      aria-label="Resize docked panel"
+      :aria-label="t('panels.resize')"
       :aria-valuemin="panelDockMinimumSize()"
       :aria-valuemax="panelDockMaximumSize()"
       :aria-valuenow="panelDockSize"
       tabindex="0"
-      title="Drag to resize. Use arrow keys for precise changes; double-click to reset."
+      :title="t('panels.resizeHelp')"
       @pointerdown="startPanelResize"
       @keydown="resizePanelWithKeyboard"
       @dblclick="resetPanelDockSize"
@@ -11161,7 +6642,7 @@ onBeforeUnmount(() => {
     tag="aside"
     class="app-toast-region"
     :class="{ home: activeIsHome }"
-    aria-label="Application notifications"
+    :aria-label="t('panels.notifications')"
   >
     <article
       v-for="toast in appToasts"
@@ -11178,7 +6659,7 @@ onBeforeUnmount(() => {
         <IconInfo v-else />
       </span>
       <span class="app-toast-copy"><strong>{{ toast.title }}</strong><span>{{ toast.message }}</span></span>
-      <button type="button" :aria-label="`Dismiss ${toast.title}`" @click="dismissAppToast(toast.id)"><IconClose aria-hidden="true" /></button>
+      <button type="button" :aria-label="t('panels.dismiss', { title: toast.title })" @click="dismissAppToast(toast.id)"><IconClose aria-hidden="true" /></button>
     </article>
   </TransitionGroup>
 </template>

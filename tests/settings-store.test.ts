@@ -37,7 +37,8 @@ describe('SettingsStore', () => {
       askWhereToSaveDownloads: true,
       memorySaverEnabled: false,
       memorySaverTimeoutMinutes: 15,
-      checkForUpdatesOnStartup: false
+      checkForUpdatesOnStartup: false,
+      languagePreference: 'uk-UA'
     })
     expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({
       theme: 'cyberpunk',
@@ -52,7 +53,8 @@ describe('SettingsStore', () => {
       askWhereToSaveDownloads: true,
       memorySaverEnabled: false,
       memorySaverTimeoutMinutes: 15,
-      checkForUpdatesOnStartup: false
+      checkForUpdatesOnStartup: false,
+      languagePreference: 'uk-UA'
     })
     expect(await store.load()).toEqual({
       theme: 'cyberpunk',
@@ -67,7 +69,8 @@ describe('SettingsStore', () => {
       askWhereToSaveDownloads: true,
       memorySaverEnabled: false,
       memorySaverTimeoutMinutes: 15,
-      checkForUpdatesOnStartup: false
+      checkForUpdatesOnStartup: false,
+      languagePreference: 'uk-UA'
     })
   })
 
@@ -111,8 +114,16 @@ describe('SettingsStore', () => {
       askWhereToSaveDownloads: false,
       memorySaverEnabled: true,
       memorySaverTimeoutMinutes: 60,
-      checkForUpdatesOnStartup: true
+      checkForUpdatesOnStartup: true,
+      languagePreference: 'system'
     })
+  })
+
+  it.each(['uk', 'en-GB', 'ja-JP', '', 42, null])('migrates an invalid language preference to system: %s', async (languagePreference) => {
+    const { path, store } = await createStore()
+    await mkdir(join(path, '..'), { recursive: true })
+    await writeFile(path, JSON.stringify({ languagePreference }), 'utf8')
+    expect((await store.load()).languagePreference).toBe('system')
   })
 
   it.each([80, 65_536, 48_000.5, '48000'])('rejects an invalid persisted MCP port: %s', async (mcpPort) => {

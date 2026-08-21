@@ -111,7 +111,7 @@ test('isolates workspace profiles and explicitly forks or saves data through Def
       const heldSession = (globalThis as typeof globalThis & { __scratchWorkspaceSession?: Electron.Session }).__scratchWorkspaceSession
       if (!heldSession) throw new Error('Scratch workspace session was not retained for the destruction failure check')
       const originalClearData = heldSession.clearData.bind(heldSession)
-      heldSession.clearData = async (...args: Parameters<Electron.Session['clearData']>) => {
+      heldSession.clearData = async (..._args: Parameters<Electron.Session['clearData']>) => {
         heldSession.clearData = originalClearData
         throw new Error('simulated workspace storage deletion failure')
       }
@@ -345,7 +345,7 @@ test('restores the only workspace without leaving a phantom Default tab when pro
       if (!contents) throw new Error('Only-workspace page was not found')
       const browserSession = contents.session
       const originalClearData = browserSession.clearData.bind(browserSession)
-      browserSession.clearData = async (...args: Parameters<Electron.Session['clearData']>) => {
+      browserSession.clearData = async (..._args: Parameters<Electron.Session['clearData']>) => {
         browserSession.clearData = originalClearData
         throw new Error('simulated only-workspace deletion failure')
       }

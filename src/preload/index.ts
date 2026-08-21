@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AppSettings,
+  LanguagePreference,
+  RendererSettingsState,
   InterfaceScale,
   AppUpdateState,
   BronomApi,
@@ -259,6 +261,7 @@ const mcpApi: BronomMcpApi = {
 contextBridge.exposeInMainWorld('bronomMcp', mcpApi)
 const settingsApi: BronomSettingsApi = {
   get: () => ipcRenderer.invoke('settings:get'),
+  getRendererState: () => ipcRenderer.invoke('settings:get-renderer-state'),
   getSystemTheme: () => ipcRenderer.invoke('settings:get-system-theme'),
   setTheme: (theme: ThemeName) => ipcRenderer.invoke('settings:set-theme', theme),
   setInterfaceScale: (scale: InterfaceScale) => ipcRenderer.invoke('settings:set-interface-scale', scale),
@@ -277,6 +280,7 @@ const settingsApi: BronomSettingsApi = {
   setMemorySaverTimeoutMinutes: (timeoutMinutes: MemorySaverTimeoutMinutes) =>
     ipcRenderer.invoke('settings:set-memory-saver-timeout', timeoutMinutes),
   setCheckForUpdatesOnStartup: (enabled: boolean) => ipcRenderer.invoke('settings:set-check-on-startup', enabled),
+  setLanguagePreference: (preference: LanguagePreference) => ipcRenderer.invoke('settings:set-language-preference', preference),
   onChanged: (listener: (settings: AppSettings) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, settings: AppSettings): void => listener(settings)
     ipcRenderer.on('settings:changed', handler)
@@ -286,6 +290,11 @@ const settingsApi: BronomSettingsApi = {
     const handler = (_event: Electron.IpcRendererEvent, theme: 'light' | 'dark'): void => listener(theme)
     ipcRenderer.on('settings:system-theme-changed', handler)
     return () => ipcRenderer.removeListener('settings:system-theme-changed', handler)
+  },
+  onRendererStateChanged: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: RendererSettingsState): void => listener(state)
+    ipcRenderer.on('settings:renderer-state-changed', handler)
+    return () => ipcRenderer.removeListener('settings:renderer-state-changed', handler)
   }
 }
 

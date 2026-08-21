@@ -1848,7 +1848,13 @@ export class McpHttpServer {
     if (!this.httpServer) return
     const server = this.httpServer
     this.httpServer = null
-    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()))
+      // A listener move is a hard endpoint cutover. Terminate keep-alive
+      // sockets too, otherwise an HTTP client can continue reaching the old
+      // port through a pooled connection after server.close().
+      server.closeAllConnections()
+    })
     this.startedAt = null
   }
 

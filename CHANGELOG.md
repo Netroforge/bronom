@@ -4,6 +4,25 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-08-21
+
+### Added
+
+- Choose English, Ukrainian, Russian, German, French, Spanish, or Polish for the Bronom interface, or follow the operating-system language, with the preference applied immediately and retained across restarts.
+- Localize the main window, detached panels, Bronom Home, native menus, context menus, permission and credential dialogs, page-failure guidance, diagnostic panels, and locale-aware numbers, dates, durations, and byte sizes.
+
+### Changed
+
+- Move authoritative renderer settings into a Pinia-backed IPC mirror and adopt Vue I18n with complete, placeholder-compatible catalogs and a safe English fallback.
+- Split Console, Network, Site storage, Appearance, and the remaining diagnostic panels out of the application shell into focused components and lifecycle-aware controllers, reducing `App.vue` from 11,184 to 6,665 lines.
+- Add flat ESLint configuration plus renderer component and controller tests for localization, stale-response rejection, tab isolation, diagnostic polling, persistence, docking, filtering, and copying.
+
+### Fixed
+
+- Reject delayed Console and diagnostic responses after a reset or tab change, stop background refresh timers when their panels close, and keep main-process browser state authoritative after diagnostic-log preservation changes.
+- Close pooled keep-alive connections when moving the MCP listener so clients cannot continue reaching the retired port after a successful endpoint cutover.
+- Report the current DevTools state with Browser Issues so recording and issue panels stay synchronized when DevTools is opened or closed externally.
+
 ## [1.6.9] - 2026-08-21
 
 ### Fixed

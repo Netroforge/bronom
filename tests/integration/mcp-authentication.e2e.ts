@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { get } from 'node:http'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
 import { DEFAULT_MCP_PORT } from '../../src/shared/mcp-port.js'
@@ -12,13 +13,15 @@ test('starts without MCP authentication and can enable or disable it in Settings
 }) => {
   const health = `http://127.0.0.1:${mcpPort}/healthz`
   const authorization = { authorization: `Bearer ${mcpToken}` }
-  const healthStatus = async (headers?: Record<string, string>): Promise<number> => {
-    try {
-      return (await fetch(health, { headers })).status
-    } catch {
-      return 0
-    }
-  }
+  const healthStatus = (headers?: Record<string, string>, url = health): Promise<number> => new Promise((resolve) => {
+    const request = get(url, { headers, agent: false }, (response) => {
+      response.resume()
+      resolve(response.statusCode ?? 0)
+    })
+    request.once('error', () => resolve(0))
+  })
+  const defaultHealth = `http://127.0.0.1:${DEFAULT_MCP_PORT}/healthz`
+  const defaultPortWasOccupied = await healthStatus(undefined, defaultHealth) !== 0
   await expect.poll(() => healthStatus()).toBe(200)
 
   await appWindow.getByRole('button', { name: 'Settings' }).click()
@@ -45,17 +48,19 @@ test('starts without MCP authentication and can enable or disable it in Settings
   await expect.poll(() => healthStatus()).toBe(401)
   await appWindow.getByRole('button', { name: 'Reset to default' }).click()
   await expect(authentication).not.toBeChecked()
-  await expect.poll(async () => {
-    try {
-      return (await fetch(`http://127.0.0.1:${DEFAULT_MCP_PORT}/healthz`)).status
-    } catch {
-      return 0
-    }
-  }).toBe(200)
-  await expect.poll(() => healthStatus()).toBe(0)
-  await expect
-    .poll(async () => JSON.parse(await readFile(join(profileDirectory, 'settings.json'), 'utf8')))
-    .toMatchObject({ mcpAuthentication: false, mcpPort: DEFAULT_MCP_PORT })
+  if (defaultPortWasOccupied) {
+    await expect(appWindow.locator('.mcp-port-status.error')).toContainText(`Could not listen on 127.0.0.1:${DEFAULT_MCP_PORT}`)
+    await expect.poll(() => healthStatus()).toBe(200)
+    await expect
+      .poll(async () => JSON.parse(await readFile(join(profileDirectory, 'settings.json'), 'utf8')))
+      .toMatchObject({ mcpAuthentication: false, mcpPort })
+  } else {
+    await expect.poll(() => healthStatus(undefined, defaultHealth)).toBe(200)
+    await expect.poll(() => healthStatus()).toBe(0)
+    await expect
+      .poll(async () => JSON.parse(await readFile(join(profileDirectory, 'settings.json'), 'utf8')))
+      .toMatchObject({ mcpAuthentication: false, mcpPort: DEFAULT_MCP_PORT })
+  }
 })
 
 test('moves the live MCP listener to a validated available port and rolls back on conflicts', async ({

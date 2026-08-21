@@ -1,0 +1,198 @@
+import { nextTick } from 'vue'
+import { describe, expect, it, vi } from 'vitest'
+import type { BrowserState, RendererSettingsState } from '../../src/shared/types.js'
+import { useBrowserStore } from '../../src/renderer/src/stores/browser.js'
+import { useSettingsStore } from '../../src/renderer/src/stores/settings.js'
+
+function browserState(activeTabId: string | null = null): BrowserState {
+  return {
+    tabs: activeTabId
+      ? [{
+          id: activeTabId,
+          title: 'Example',
+          url: 'https://example.com/',
+          loading: false,
+          canGoBack: false,
+          canGoForward: false,
+          active: true,
+          pinned: false,
+          sleeping: false,
+          humanInteractionLocked: false,
+          preserveDiagnosticLogs: false,
+          zoomPercent: 100,
+          audible: false,
+          muted: false,
+          devToolsOpen: false
+        }]
+      : [],
+    closedTabs: [],
+    activeTabId,
+    allHumanInteractionLocked: false,
+    mcpUrl: 'http://127.0.0.1:47812/mcp',
+    profilePath: '/profile',
+    mcpTabGroups: [],
+    savedTabGroups: []
+  }
+}
+
+function settingsState(locale: 'en-US' | 'uk-UA' = 'en-US'): RendererSettingsState {
+  return {
+    settings: {
+      theme: 'system',
+      interfaceScale: 1.1,
+      searchEngine: 'google',
+      hideInTray: true,
+      attentionSound: true,
+      attentionSoundCue: 'warning',
+      mcpAuthentication: false,
+      mcpPort: 47_812,
+      downloadDirectory: null,
+      askWhereToSaveDownloads: false,
+      memorySaverEnabled: true,
+      memorySaverTimeoutMinutes: 60,
+      checkForUpdatesOnStartup: true,
+      languagePreference: locale
+    },
+    systemTheme: 'dark',
+    systemLocale: locale,
+    resolvedLocale: locale
+  }
+}
+
+function deferred<Value>(): {
+  promise: Promise<Value>
+  resolve: (value: Value) => void
+  reject: (error: unknown) => void
+} {
+  let resolve!: (value: Value) => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<Value>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
+function installBrowserApi(options: {
+  getState: () => Promise<BrowserState>
+  onStateChanged: (listener: (state: BrowserState) => void) => () => void
+  selectTab?: (tabId: string) => Promise<BrowserState>
+}): void {
+  Object.defineProperty(window, 'bronom', { configurable: true, value: options })
+}
+
+function installSettingsApi(options: {
+  getRendererState: () => Promise<RendererSettingsState>
+  onRendererStateChanged: (listener: (state: RendererSettingsState) => void) => () => void
+}): void {
+  Object.defineProperty(window, 'bronomSettings', { configurable: true, value: options })
+}
+
+describe('browser Pinia store lifecycle', () => {
+  it('protects a newer IPC event from a stale initialization response and avoids duplicate subscriptions', async () => {
+    const pending = deferred<BrowserState>()
+    let listener: ((state: BrowserState) => void) | undefined
+    const unsubscribe = vi.fn()
+    const getState = vi.fn(() => pending.promise)
+    const onStateChanged = vi.fn((next: (state: BrowserState) => void) => {
+      listener = next
+      return unsubscribe
+    })
+    installBrowserApi({ getState, onStateChanged })
+    const store = useBrowserStore()
+
+    const first = store.initialize()
+    const second = store.initialize()
+    expect(getState).toHaveBeenCalledTimes(1)
+    expect(onStateChanged).toHaveBeenCalledTimes(1)
+    listener?.(browserState('event-tab'))
+    pending.resolve(browserState('stale-tab'))
+    await Promise.all([first, second])
+
+    expect(store.state.activeTabId).toBe('event-tab')
+    expect(store.initialized).toBe(true)
+    store.dispose()
+    expect(unsubscribe).toHaveBeenCalledOnce()
+  })
+
+  it('exposes initialization failure and retries with a fresh subscription', async () => {
+    const failure = new Error('state unavailable')
+    const getState = vi.fn()
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce(browserState('recovered'))
+    const unsubscribers = [vi.fn(), vi.fn()]
+    let subscriptionIndex = 0
+    const onStateChanged = vi.fn((_listener: (state: BrowserState) => void) => unsubscribers[subscriptionIndex++] ?? vi.fn())
+    installBrowserApi({ getState, onStateChanged })
+    const store = useBrowserStore()
+
+    await expect(store.initialize()).rejects.toBe(failure)
+    expect(store.initialized).toBe(false)
+    expect(store.initializationError).toBe(failure)
+    expect(unsubscribers[0]).toHaveBeenCalledOnce()
+    await store.initialize()
+    expect(store.state.activeTabId).toBe('recovered')
+    expect(onStateChanged).toHaveBeenCalledTimes(2)
+  })
+
+  it('delegates actions and does not apply events after disposal', async () => {
+    let listener: ((state: BrowserState) => void) | undefined
+    const selectTab = vi.fn(async (tabId: string) => browserState(tabId))
+    installBrowserApi({
+      getState: async () => browserState(),
+      onStateChanged: (next) => {
+        listener = next
+        return vi.fn()
+      },
+      selectTab
+    })
+    const store = useBrowserStore()
+    await store.initialize()
+    await store.selectTab('selected')
+    expect(selectTab).toHaveBeenCalledWith('selected')
+    expect(store.activeTab?.id).toBe('selected')
+    store.dispose()
+    listener?.(browserState('ignored'))
+    await nextTick()
+    expect(store.state.activeTabId).toBe('selected')
+  })
+})
+
+describe('settings Pinia store lifecycle', () => {
+  it('keeps settings, system theme, and locale synchronized without an initialization race', async () => {
+    const pending = deferred<RendererSettingsState>()
+    let listener: ((state: RendererSettingsState) => void) | undefined
+    installSettingsApi({
+      getRendererState: () => pending.promise,
+      onRendererStateChanged: (next) => {
+        listener = next
+        return vi.fn()
+      }
+    })
+    const store = useSettingsStore()
+    const initializing = store.initialize()
+    listener?.(settingsState('uk-UA'))
+    pending.resolve(settingsState('en-US'))
+    await initializing
+
+    expect(store.resolvedLocale).toBe('uk-UA')
+    expect(store.systemTheme).toBe('dark')
+    expect(store.settings.languagePreference).toBe('uk-UA')
+  })
+
+  it('unsubscribes on failure and can retry', async () => {
+    const failure = new Error('settings unavailable')
+    const getRendererState = vi.fn()
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce(settingsState())
+    const unsubscribe = vi.fn()
+    installSettingsApi({ getRendererState, onRendererStateChanged: () => unsubscribe })
+    const store = useSettingsStore()
+
+    await expect(store.initialize()).rejects.toBe(failure)
+    expect(unsubscribe).toHaveBeenCalledOnce()
+    await store.initialize()
+    expect(store.initialized).toBe(true)
+    expect(getRendererState).toHaveBeenCalledTimes(2)
+  })
+})
