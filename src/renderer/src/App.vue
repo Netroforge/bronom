@@ -124,6 +124,7 @@ import UpdateNotification from './components/UpdateNotification.vue'
 import AppearanceSettings from './components/AppearanceSettings.vue'
 import CommandPalette from './components/CommandPalette.vue'
 import ConsolePanelContainer from './components/ConsolePanelContainer.vue'
+import CredentialPicker from './components/CredentialPicker.vue'
 import DiagnosticsPanels from './components/DiagnosticsPanels.vue'
 import NetworkPanel from './components/NetworkPanel.vue'
 import PanelDockPicker from './components/PanelDockPicker.vue'
@@ -241,9 +242,7 @@ const sitePermissions = ref<SitePermissionEntry[]>([])
 const credentials = ref<CredentialSummary[]>([])
 const credentialStorage = ref<CredentialStorageStatus>({ available: false, reason: t('runtime.initializingStorage') })
 const credentialPickerOpen = ref(false)
-const credentialPickerQuery = ref('')
-const credentialPickerSelection = ref(0)
-const credentialPickerInput = ref<HTMLInputElement | null>(null)
+const credentialPicker = ref<InstanceType<typeof CredentialPicker> | null>(null)
 const credentialFillState = ref<'idle' | 'filling'>('idle')
 const commercialLicense = ref<CommercialLicenseState>({
   status: 'not-activated',
@@ -896,15 +895,6 @@ const activeSitePermissions = computed(() => (
 ))
 const activeAddressKind = computed(() => activeWebUrl.value?.startsWith('https:') ? t('runtime.address.https') : t('runtime.address.http'))
 const activeCredentials = computed(() => credentials.value.filter((credential) => credential.origin === activeOrigin.value))
-const filteredActiveCredentials = computed(() => {
-  const query = credentialPickerQuery.value.trim().toLocaleLowerCase()
-  if (!query) return activeCredentials.value
-  return activeCredentials.value.filter((credential) => (
-    (credential.username || t('credentialPicker.unnamed')).toLocaleLowerCase().includes(query)
-    || credential.origin.toLocaleLowerCase().includes(query)
-  ))
-})
-const selectedActiveCredential = computed(() => filteredActiveCredentials.value[credentialPickerSelection.value])
 const activeDownloads = computed(() => downloads.value.filter((download) => download.state === 'progressing'))
 const finishedDownloads = computed(() => downloads.value.filter((download) => download.state !== 'progressing'))
 const effectiveDownloadDirectory = computed(() => settings.value.downloadDirectory || defaultDownloadDirectory.value || t('runtime.storage.systemDownloads'))
@@ -1901,12 +1891,6 @@ watch(
     syncAddressSuggestionOverlay()
   }
 )
-
-watch(credentialPickerQuery, async () => {
-  credentialPickerSelection.value = 0
-  await nextTick()
-  revealSelectedCredential()
-})
 
 watch(
   () => activeTab.value?.id,
@@ -3022,11 +3006,7 @@ async function fillSavedPassword(): Promise<void> {
     await fillSelectedCredential(activeCredentials.value[0])
     return
   }
-  credentialPickerQuery.value = ''
-  credentialPickerSelection.value = 0
-  credentialPickerOpen.value = true
-  await nextTick()
-  credentialPickerInput.value?.focus()
+  await credentialPicker.value?.openPanel()
 }
 
 async function fillSelectedCredential(credential: CredentialSummary): Promise<void> {
@@ -3042,48 +3022,6 @@ async function fillSelectedCredential(credential: CredentialSummary): Promise<vo
     showAppToast('error', t('runtime.toast.passwordFillFailed'), friendlyUiError(error, t('runtime.toast.passwordFillDescription')))
   } finally {
     credentialFillState.value = 'idle'
-  }
-}
-
-function credentialOptionId(credential: CredentialSummary): string {
-  return `credential-option-${credential.id}`
-}
-
-function revealSelectedCredential(): void {
-  const credential = selectedActiveCredential.value
-  if (!credential) return
-  document.getElementById(credentialOptionId(credential))?.scrollIntoView({ block: 'nearest' })
-}
-
-async function moveCredentialPickerSelection(offset: -1 | 1): Promise<void> {
-  const count = filteredActiveCredentials.value.length
-  if (!count) return
-  credentialPickerSelection.value = (credentialPickerSelection.value + offset + count) % count
-  await nextTick()
-  revealSelectedCredential()
-}
-
-function handleCredentialPickerKeydown(event: KeyboardEvent): void {
-  const count = filteredActiveCredentials.value.length
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    credentialPickerOpen.value = false
-    return
-  }
-  if (!count) return
-  if (event.key === 'ArrowDown') {
-    event.preventDefault()
-    void moveCredentialPickerSelection(1)
-    return
-  }
-  if (event.key === 'ArrowUp') {
-    event.preventDefault()
-    void moveCredentialPickerSelection(-1)
-    return
-  }
-  if (event.key === 'Enter' && selectedActiveCredential.value) {
-    event.preventDefault()
-    void fillSelectedCredential(selectedActiveCredential.value)
   }
 }
 
@@ -5272,56 +5210,13 @@ onBeforeUnmount(() => {
       :sync-state="syncState"
       :format-number="localNumber"
     />
-    <div v-if="credentialPickerOpen" class="settings-overlay credential-picker-overlay" @click.self="credentialPickerOpen = false">
-      <section class="credential-picker" role="dialog" aria-modal="true" aria-labelledby="credential-picker-title">
-        <header class="credential-picker-header">
-          <IconPassword aria-hidden="true" />
-          <div>
-            <span class="eyebrow">{{ t('credentialPicker.kicker') }}</span>
-            <h2 id="credential-picker-title">{{ t('credentialPicker.heading') }}</h2>
-          </div>
-          <button class="panel-close" type="button" :aria-label="t('credentialPicker.close')" @click="credentialPickerOpen = false"><IconClose aria-hidden="true" /></button>
-        </header>
-        <div class="credential-picker-field">
-          <IconSearch aria-hidden="true" />
-          <input
-            ref="credentialPickerInput"
-            v-model="credentialPickerQuery"
-            type="search"
-            role="combobox"
-            :aria-label="t('credentialPicker.search')"
-            aria-autocomplete="list"
-            aria-controls="credential-picker-results"
-            :aria-expanded="filteredActiveCredentials.length > 0"
-            :aria-activedescendant="selectedActiveCredential ? credentialOptionId(selectedActiveCredential) : undefined"
-            autocomplete="off"
-            spellcheck="false"
-            :placeholder="t('credentialPicker.placeholder')"
-            @keydown="handleCredentialPickerKeydown"
-          />
-        </div>
-        <div v-if="filteredActiveCredentials.length" id="credential-picker-results" class="credential-picker-results" role="listbox" :aria-label="t('credentialPicker.results')">
-          <button
-            v-for="(credential, index) in filteredActiveCredentials"
-            :id="credentialOptionId(credential)"
-            :key="credential.id"
-            class="credential-picker-item"
-            :class="{ selected: index === credentialPickerSelection }"
-            type="button"
-            role="option"
-            :aria-selected="index === credentialPickerSelection"
-            @mouseenter="credentialPickerSelection = index"
-            @click="fillSelectedCredential(credential)"
-          >
-            <span class="credential-picker-mark" aria-hidden="true"><IconKey /></span>
-            <span><strong>{{ credential.username || t('credentialPicker.unnamed') }}</strong><small>{{ credential.origin }}</small></span>
-            <IconKeyboardArrowRight aria-hidden="true" />
-          </button>
-        </div>
-        <div v-else class="credential-picker-empty"><IconSearch aria-hidden="true" /><strong>{{ t('credentialPicker.empty') }}</strong><span>{{ t('credentialPicker.tryAnother') }}</span></div>
-        <footer><span><IconShieldLock aria-hidden="true" /> {{ t('credentialPicker.paused') }}</span><span><kbd>↑</kbd><kbd>↓</kbd> {{ t('credentialPicker.select') }} · <kbd>Enter</kbd> {{ t('credentialPicker.fill') }}</span></footer>
-      </section>
-    </div>
+    <CredentialPicker
+      ref="credentialPicker"
+      v-model:open="credentialPickerOpen"
+      :credentials="credentials"
+      :origin="activeOrigin"
+      :fill-credential="fillSelectedCredential"
+    />
     <CommandPalette
       ref="commandPalette"
       v-model:open="commandPaletteOpen"
