@@ -153,11 +153,21 @@ export function assertMcpToolRegistrationContract(
   if (issues.length) throw new Error(`Invalid MCP tool contract (${issues.join('; ')})`)
 }
 
+const BROWSER_WORKSPACES_DESCRIPTION = [
+  'Required first step: call browser_workspaces with action=create and a fresh, uniquely named workspace before using any page tools.',
+  'Creation choice 1 — from scratch: storage=scratch (the default) starts a clean isolated browser profile. Example: {"action":"create","name":"Task name","storage":"scratch"}.',
+  'Creation choice 2 — fork Default: storage=fork-default creates an isolated workspace after a one-time copy of reusable cookies and localStorage from the human Default profile. Example: {"action":"create","name":"Task name","storage":"fork-default"}. This is a copy, not a live link.',
+  'For fork-default, optionally pass task-relevant HTTP(S) origins you already know. Omit origins to copy all available cookies and known localStorage; MCP deliberately does not expose Default\'s origin inventory.',
+  'Optional merge-back: after the task, call action=save-default with your created workspaceId only if its resulting site state should be merged back into Default. Example: {"action":"save-default","workspaceId":"<id returned by create>"}. Use list-origins first when you want to select origins. Saving is another one-time merge, never ongoing synchronization.',
+  'Agents never browse Default directly and must never pass the workspace marked isDefault to page tools. Pass the UUIDv7 id returned by your own create call—or the fresh id returned when reopening your own archive—as workspaceId for the whole task. Renaming changes only the human-readable unique name.',
+  'Listing is for awareness and name-collision avoidance only: never use, rename, recolor, archive, or close a workspace you did not create.'
+].join('\n')
+
 export const BROWSER_TOOL_CATALOG: BrowserToolDefinition[] = [
   {
     name: 'browser_workspaces',
     category: 'Session',
-    description: 'Start every workflow with action=create and a fresh uniquely named workspace. Choose storage=scratch (the default) for clean isolated site storage, or storage=fork-default to make a one-time copy of reusable cookies and localStorage from the human Default profile, optionally limited to task-relevant HTTP(S) origins you already know. Omit origins to copy all available cookies and known localStorage from Default; MCP deliberately does not expose Default\'s origin inventory. After the task, use action=save-default only if the resulting site state should be merged back into Default; this is another explicit one-time copy, not ongoing synchronization. Use list-origins to review your own workspace before a selective save-default. Agents never browse Default directly. Its stable id is UUIDv7 identity; pass that value as workspaceId to browser tools. Renaming changes only the human-readable unique name. Use only the id returned by your own create call, or the fresh id returned when you reopen your own archive, for the whole task. Listing is for awareness only: never use, rename, recolor, or close a listed workspace you did not create, and never touch the human Default workspace marked isDefault.'
+    description: BROWSER_WORKSPACES_DESCRIPTION
   },
   {
     name: 'browser_saved_workspaces',
@@ -381,11 +391,11 @@ function createBrowserMcpServer(
     {
       description: toolDescription('browser_workspaces'),
       inputSchema: {
-        action: z.enum(['list', 'create', 'update', 'rename', 'close', 'list-origins', 'import-default', 'save-default']).default('list').describe('Use create first. import-default copies selected Default state into your existing workspace; save-default optionally merges selected workspace state back into Default. Both are one-time copies, not synchronization. list-origins lists only your workspace and never reveals Default\'s origin inventory.'),
-        workspaceId: workspaceIdSchema.optional().describe('Stable UUIDv7 id returned by your own create call or by reopening your own archive. A rename changes only the human name, never this ID. Never modify a workspace discovered through list.'),
+        action: z.enum(['list', 'create', 'update', 'rename', 'close', 'list-origins', 'import-default', 'save-default']).default('list').describe('Start with create. For create, choose storage=scratch or storage=fork-default. import-default copies selected Default state into your existing workspace; save-default optionally merges selected workspace state back into Default. Both are one-time transfers, not synchronization. list-origins lists only your workspace and never reveals Default\'s origin inventory.'),
+        workspaceId: workspaceIdSchema.optional().describe('Stable UUIDv7 id returned by your own create call or by reopening your own archive. Pass this created workspace id to page tools and save-default. Never pass the human Default id or an id discovered through list. A rename changes only the human name, never this ID.'),
         name: z.string().trim().min(1).max(80).optional().describe('Human-readable workspace name for create, update, or rename.'),
         color: z.enum(BROWSER_TAB_GROUP_COLORS).optional().describe('Visible workspace color for create or update.'),
-        storage: z.enum(['scratch', 'fork-default']).optional().describe('For create: scratch (default) starts with clean isolated site storage; fork-default makes a one-time copy of reusable cookies and localStorage from Default. Agents must not browse Default directly.'),
+        storage: z.enum(['scratch', 'fork-default']).optional().describe('Required choice for an explicit create workflow: scratch (the default when omitted) starts from a clean isolated profile; fork-default starts an isolated profile with a one-time copy of reusable cookies and localStorage from Default. Neither choice lets the agent browse Default directly.'),
         origins: z.array(z.string().url()).max(100).optional().describe('Optional task-relevant HTTP(S) origins whose cookies and localStorage are copied during fork-default create, import-default, or save-default. For fork-default/import-default, supply origins you already know or omit this field to copy all available cookies and known localStorage; Default\'s origin list is private. For save-default, use list-origins to review your workspace first.')
       }
     },

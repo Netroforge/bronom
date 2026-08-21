@@ -112,22 +112,29 @@ test('requires visible workspaces and keeps each tool inside its selected worksp
   try {
     const availableTools = await first.listTools()
     const groupsTool = availableTools.tools.find((tool) => tool.name === 'browser_workspaces')
-    expect(groupsTool?.description).toContain('storage=scratch (the default) for clean isolated site storage')
-    expect(groupsTool?.description).toContain('storage=fork-default to make a one-time copy')
-    expect(groupsTool?.description).toContain('use action=save-default only if the resulting site state should be merged back into Default')
-    expect(groupsTool?.description).toContain('not ongoing synchronization')
+    expect(groupsTool?.description).toContain('Required first step: call browser_workspaces with action=create')
+    expect(groupsTool?.description).toContain('Creation choice 1 — from scratch: storage=scratch (the default)')
+    expect(groupsTool?.description).toContain('{"action":"create","name":"Task name","storage":"scratch"}')
+    expect(groupsTool?.description).toContain('Creation choice 2 — fork Default: storage=fork-default')
+    expect(groupsTool?.description).toContain('{"action":"create","name":"Task name","storage":"fork-default"}')
+    expect(groupsTool?.description).toContain('Optional merge-back: after the task, call action=save-default with your created workspaceId')
+    expect(groupsTool?.description).toContain('{"action":"save-default","workspaceId":"<id returned by create>"}')
+    expect(groupsTool?.description).toContain('never ongoing synchronization')
     expect(groupsTool?.description).toContain("MCP deliberately does not expose Default's origin inventory")
-    expect(groupsTool?.description).toContain('Use list-origins to review your own workspace before a selective save-default')
-    expect(groupsTool?.description).toContain('Use only the id returned by your own create call, or the fresh id returned when you reopen your own archive')
-    expect(groupsTool?.description).toContain('never touch the human Default workspace')
+    expect(groupsTool?.description).toContain('Use list-origins first when you want to select origins')
+    expect(groupsTool?.description).toContain('Pass the UUIDv7 id returned by your own create call—or the fresh id returned when reopening your own archive—as workspaceId')
+    expect(groupsTool?.description).toContain('must never pass the workspace marked isDefault to page tools')
     expect(groupsTool?.inputSchema).toMatchObject({
       properties: {
         action: {
-          description: expect.stringContaining("list-origins lists only your workspace and never reveals Default's origin inventory")
+          description: expect.stringContaining('For create, choose storage=scratch or storage=fork-default')
+        },
+        workspaceId: {
+          description: expect.stringContaining('Never pass the human Default id')
         },
         storage: {
           enum: ['scratch', 'fork-default'],
-          description: expect.stringContaining('scratch (default) starts with clean isolated site storage')
+          description: expect.stringContaining('scratch (the default when omitted) starts from a clean isolated profile')
         },
         origins: {
           type: 'array',
