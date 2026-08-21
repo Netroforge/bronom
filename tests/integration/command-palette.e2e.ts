@@ -76,3 +76,24 @@ test('finds global and website commands from the accessible command palette', as
   await paletteSearch.press('Enter')
   await expect(appWindow.getByRole('tab')).toHaveCount(2)
 })
+
+test('preserves a selected global command when live tab state removes website commands', async ({ appWindow }) => {
+  await appWindow.getByRole('button', { name: 'New tab' }).click()
+  await expect(appWindow.locator('.toolbar')).toBeVisible()
+  await appWindow.getByRole('button', { name: 'Open command palette' }).click()
+
+  const palette = appWindow.getByRole('dialog', { name: 'Commands' })
+  const settingsCommand = palette.getByRole('option', { name: /Open Settings/ })
+  await settingsCommand.hover()
+  await expect(palette.locator('[role="option"][aria-selected="true"]')).toHaveAttribute('id', 'command-palette-settings')
+  await expect(palette.getByRole('option', { name: /Capture area screenshot/ })).toBeVisible()
+
+  await appWindow.evaluate('window.bronom.openHome()')
+  await expect(appWindow.locator('.toolbar')).toBeHidden()
+  await expect(palette.getByRole('option', { name: /Capture area screenshot/ })).toHaveCount(0)
+  await expect(palette.locator('[role="option"][aria-selected="true"]')).toHaveAttribute('id', 'command-palette-settings')
+  await expect(palette.getByRole('combobox', { name: 'Search commands' })).toBeFocused()
+
+  await palette.getByRole('combobox', { name: 'Search commands' }).press('Enter')
+  await expect(appWindow.getByRole('dialog', { name: 'Settings' })).toBeVisible()
+})

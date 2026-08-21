@@ -122,6 +122,7 @@ import {
 } from '../../shared/tab-groups'
 import UpdateNotification from './components/UpdateNotification.vue'
 import AppearanceSettings from './components/AppearanceSettings.vue'
+import CommandPalette from './components/CommandPalette.vue'
 import ConsolePanelContainer from './components/ConsolePanelContainer.vue'
 import DiagnosticsPanels from './components/DiagnosticsPanels.vue'
 import NetworkPanel from './components/NetworkPanel.vue'
@@ -141,12 +142,7 @@ import {
   UPDATE_STATUS_DISMISS_MS
 } from '../../shared/update-presentation'
 import { browserShortcutAction, type BrowserShortcutAction } from '../../shared/browser-shortcuts'
-import {
-  COMMAND_PALETTE_COMMANDS,
-  filterCommandPaletteCommands,
-  type CommandPaletteCommand,
-  type CommandPaletteCommandId
-} from '../../shared/command-palette'
+import type { CommandPaletteCommandId } from '../../shared/command-palette'
 import {
   DEFAULT_MEMORY_SAVER_TIMEOUT_MINUTES,
   MEMORY_SAVER_TIMEOUT_MINUTES,
@@ -332,9 +328,7 @@ const { summary: siteDataSummary, state: siteDataState, message: siteDataMessage
 const tabSearchOpen = ref(false)
 const tabSearchPanel = ref<InstanceType<typeof TabSearchPanel> | null>(null)
 const commandPaletteOpen = ref(false)
-const commandPaletteQuery = ref('')
-const commandPaletteInput = ref<HTMLInputElement | null>(null)
-const commandPaletteSelection = ref(0)
+const commandPalette = ref<InstanceType<typeof CommandPalette> | null>(null)
 const draggedTabId = ref<string | null>(null)
 const tabDropTargetId = ref<string | null>(null)
 const tabDropPlacement = ref<'before' | 'after' | null>(null)
@@ -942,18 +936,6 @@ const filteredVisitHistory = computed(() => {
     entry.title.toLocaleLowerCase().includes(query) || entry.url.toLocaleLowerCase().includes(query)
   ))
 })
-const localizedCommandPaletteCommands = computed<CommandPaletteCommand[]>(() => COMMAND_PALETTE_COMMANDS.map((command) => ({
-  ...command,
-  label: t(`commandCatalog.commands.${command.id}.label`),
-  description: t(`commandCatalog.commands.${command.id}.description`),
-  category: t(`commandCatalog.categories.${command.category}`) as CommandPaletteCommand['category']
-})))
-const commandPaletteCommands = computed(() => filterCommandPaletteCommands(
-  commandPaletteQuery.value,
-  Boolean(activeTab.value && !activeIsHome.value),
-  localizedCommandPaletteCommands.value
-))
-const selectedCommandPaletteCommand = computed(() => commandPaletteCommands.value[commandPaletteSelection.value])
 const addressSuggestions = computed(() => buildLocalAddressSuggestions({
   query: address.value,
   bookmarks: bookmarks.value,
@@ -1389,54 +1371,14 @@ async function toggleTabSearch(): Promise<void> {
 
 async function toggleCommandPalette(): Promise<void> {
   if (commandPaletteOpen.value) {
+    commandPalette.value?.close()
     commandPaletteOpen.value = false
     return
   }
   settingsOpen.value = false
   helpDialog.value = null
   closeTransientPanels()
-  commandPaletteQuery.value = ''
-  commandPaletteSelection.value = 0
-  commandPaletteOpen.value = true
-  await nextTick()
-  commandPaletteInput.value?.focus()
-  revealSelectedCommandPaletteCommand()
-}
-
-function commandPaletteCommandId(command: CommandPaletteCommand): string {
-  return `command-palette-${command.id}`
-}
-
-function revealSelectedCommandPaletteCommand(): void {
-  const command = selectedCommandPaletteCommand.value
-  if (!command) return
-  document.getElementById(commandPaletteCommandId(command))?.scrollIntoView({ block: 'nearest' })
-}
-
-async function moveCommandPaletteSelection(offset: -1 | 1): Promise<void> {
-  if (!commandPaletteCommands.value.length) return
-  commandPaletteSelection.value = (
-    commandPaletteSelection.value + offset + commandPaletteCommands.value.length
-  ) % commandPaletteCommands.value.length
-  await nextTick()
-  revealSelectedCommandPaletteCommand()
-}
-
-function handleCommandPaletteKeydown(event: KeyboardEvent): void {
-  if (event.key === 'ArrowDown') {
-    event.preventDefault()
-    void moveCommandPaletteSelection(1)
-    return
-  }
-  if (event.key === 'ArrowUp') {
-    event.preventDefault()
-    void moveCommandPaletteSelection(-1)
-    return
-  }
-  if (event.key === 'Enter' && selectedCommandPaletteCommand.value) {
-    event.preventDefault()
-    void runCommandPaletteCommand(selectedCommandPaletteCommand.value.id)
-  }
+  await commandPalette.value?.openPanel()
 }
 
 function openSettingsSection(section: typeof settingsSection.value): void {
@@ -1942,21 +1884,6 @@ watch(
 watch(fullModalOpen, (open) => {
   if (open) closeAddressSuggestions()
 }, { flush: 'sync' })
-
-watch(commandPaletteQuery, async () => {
-  commandPaletteSelection.value = 0
-  await nextTick()
-  revealSelectedCommandPaletteCommand()
-})
-
-watch(
-  () => commandPaletteCommands.value.length,
-  async (length) => {
-    commandPaletteSelection.value = Math.min(commandPaletteSelection.value, Math.max(0, length - 1))
-    await nextTick()
-    revealSelectedCommandPaletteCommand()
-  }
-)
 
 watch(
   () => addressSuggestions.value.length,
@@ -5395,75 +5322,13 @@ onBeforeUnmount(() => {
         <footer><span><IconShieldLock aria-hidden="true" /> {{ t('credentialPicker.paused') }}</span><span><kbd>↑</kbd><kbd>↓</kbd> {{ t('credentialPicker.select') }} · <kbd>Enter</kbd> {{ t('credentialPicker.fill') }}</span></footer>
       </section>
     </div>
-    <div v-if="commandPaletteOpen" class="settings-overlay command-palette-overlay" @click.self="commandPaletteOpen = false">
-      <section
-        class="command-palette"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="command-palette-title"
-      >
-        <header class="command-palette-header">
-          <IconKeyboardCommandKey aria-hidden="true" />
-          <div>
-            <span class="eyebrow">{{ t('commandPalette.kicker') }}</span>
-            <h2 id="command-palette-title">{{ t('commandPalette.heading') }}</h2>
-          </div>
-          <button class="panel-close" type="button" :aria-label="t('commandPalette.close')" @click="commandPaletteOpen = false"><IconClose aria-hidden="true" /></button>
-        </header>
-        <div class="command-palette-field">
-          <IconSearch aria-hidden="true" />
-          <input
-            ref="commandPaletteInput"
-            v-model="commandPaletteQuery"
-            type="search"
-            role="combobox"
-            :aria-label="t('commandPalette.search')"
-            aria-autocomplete="list"
-            aria-controls="command-palette-results"
-            :aria-expanded="commandPaletteCommands.length > 0"
-            :aria-activedescendant="selectedCommandPaletteCommand ? commandPaletteCommandId(selectedCommandPaletteCommand) : undefined"
-            autocomplete="off"
-            spellcheck="false"
-            :placeholder="t('commandPalette.placeholder')"
-            @keydown="handleCommandPaletteKeydown"
-          />
-          <kbd>⌃/⌘ ⇧ P</kbd>
-        </div>
-        <span class="sr-only" role="status" aria-live="polite">
-          {{ t('commandPalette.matches', { count: localNumber(commandPaletteCommands.length) }, commandPaletteCommands.length) }}<template v-if="selectedCommandPaletteCommand"> {{ t('commandPalette.selected', { label: selectedCommandPaletteCommand.label }) }}</template>
-        </span>
-        <div v-if="commandPaletteCommands.length" id="command-palette-results" class="command-palette-results" role="listbox" :aria-label="t('commandPalette.available')">
-          <button
-            v-for="(command, index) in commandPaletteCommands"
-            :id="commandPaletteCommandId(command)"
-            :key="command.id"
-            class="command-palette-item"
-            :class="{ selected: index === commandPaletteSelection }"
-            type="button"
-            role="option"
-            :aria-selected="index === commandPaletteSelection"
-            @mouseenter="commandPaletteSelection = index"
-            @click="runCommandPaletteCommand(command.id)"
-          >
-            <span class="command-palette-mark" aria-hidden="true">›</span>
-            <span class="command-palette-copy">
-              <strong>{{ command.label }}</strong>
-              <small>{{ command.description }}</small>
-            </span>
-            <span class="command-palette-meta">
-              <kbd v-if="command.shortcut">{{ command.shortcut }}</kbd>
-              <small>{{ command.category }}</small>
-            </span>
-          </button>
-        </div>
-        <div v-else class="command-palette-empty">
-          <IconSearch aria-hidden="true" />
-          <strong>{{ t('commandPalette.empty') }}</strong>
-          <span>{{ t('commandPalette.emptyDescription') }}</span>
-        </div>
-        <footer><span><kbd>↑</kbd><kbd>↓</kbd> {{ t('commandPalette.navigate') }}</span><span><kbd>Enter</kbd> {{ t('commandPalette.run') }}</span><span><kbd>Esc</kbd> {{ t('common.close') }}</span></footer>
-      </section>
-    </div>
+    <CommandPalette
+      ref="commandPalette"
+      v-model:open="commandPaletteOpen"
+      :website-available="Boolean(activeTab && !activeIsHome)"
+      :format-number="localNumber"
+      :run-command="runCommandPaletteCommand"
+    />
     <div v-if="settingsOpen" class="settings-overlay" @click.self="settingsOpen = false">
       <section
         ref="settingsPanel"

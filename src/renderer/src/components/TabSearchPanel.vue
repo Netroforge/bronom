@@ -47,7 +47,7 @@ const {
   selectedResult,
   resultLabel,
   resultIndex,
-  openPanel,
+  openPanel: openControllerPanel,
   close,
   handleKeydown,
   selectOpenTab,
@@ -77,6 +77,20 @@ const {
   formatError: props.formatError,
   showError: props.showError
 })
+
+let lastPointerPosition: { x: number; y: number } | null = null
+
+async function openPanel(): Promise<void> {
+  lastPointerPosition = null
+  await openControllerPanel()
+}
+
+function selectFromPointer(event: PointerEvent, index: number): void {
+  const position = { x: event.clientX, y: event.clientY }
+  if (lastPointerPosition?.x === position.x && lastPointerPosition.y === position.y) return
+  lastPointerPosition = position
+  selection.value = index
+}
 
 function tabGroupColorStyle(color: BrowserTabGroupColor): Record<string, string> {
   return { '--tab-group-color': BROWSER_TAB_GROUP_COLOR_HEX[color] }
@@ -137,7 +151,7 @@ onBeforeUnmount(dispose)
             class="tab-search-item saved-group"
             :class="{ selected: resultIndex('saved', group.id) === selection }"
             role="listitem"
-            @mouseenter="selection = resultIndex('saved', group.id)"
+            @pointermove="selectFromPointer($event, resultIndex('saved', group.id))"
           >
             <button class="tab-search-open" type="button" :title="group.tabs.map((tab) => tab.url).join('\n')" @click="restoreSavedGroup(group)">
               <span class="tab-search-site-icon saved" :style="tabGroupColorStyle(group.color)" aria-hidden="true"><IconFolderOpen /></span>
@@ -162,7 +176,7 @@ onBeforeUnmount(dispose)
             class="tab-search-item"
             :class="{ selected: resultIndex('open', tab.id) === selection, active: tab.active }"
             role="listitem"
-            @mouseenter="selection = resultIndex('open', tab.id)"
+            @pointermove="selectFromPointer($event, resultIndex('open', tab.id))"
           >
             <button class="tab-search-open" type="button" :title="tab.url" @click="selectOpenTab(tab)">
               <span class="tab-search-site-icon" aria-hidden="true">
@@ -200,7 +214,7 @@ onBeforeUnmount(dispose)
             class="tab-search-item closed"
             :class="{ selected: resultIndex('closed', tab.id) === selection }"
             role="listitem"
-            @mouseenter="selection = resultIndex('closed', tab.id)"
+            @pointermove="selectFromPointer($event, resultIndex('closed', tab.id))"
           >
             <button class="tab-search-open" type="button" :title="tab.url" @click="restoreClosedTab(tab)">
               <span class="tab-search-site-icon closed" aria-hidden="true"><IconHistory /></span>
