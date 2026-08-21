@@ -8,6 +8,10 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 - Define the Bronom-wide human lock as an all-tabs safety lock: block website input and every human tab-closing path while leaving browser chrome, Settings, diagnostics, and tab switching available.
 
+### Fixed
+
+- Restore the exact original tab set when deleting the only isolated workspace fails, without leaving a phantom blank Default tab behind after rollback.
+
 ## [1.6.6] - 2026-08-21
 
 ### Fixed

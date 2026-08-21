@@ -1231,7 +1231,7 @@ export class BrowserTabsManager {
       this.changed()
     }
     try {
-      await this.closeTabs(tabSnapshots.map((tab) => tab.id))
+      await this.closeTabs(tabSnapshots.map((tab) => tab.id), false)
       if (!preserveStorage && group.storageId) {
         await destroyWorkspaceStorage(
           workspacePartition(this.options.partition, group.storageId),
@@ -1254,6 +1254,9 @@ export class BrowserTabsManager {
     }
     removeClosedWorkspaceTabs()
     this.mcpTabGroups.delete(groupId)
+    if (!this.tabs.size) {
+      await this.createTab({ url: 'about:blank', active: true, mcpGroupId: this.ensureDefaultHumanGroup() })
+    }
     this.changed()
     return this.listMcpTabGroups()
   }
@@ -2522,6 +2525,10 @@ export class BrowserTabsManager {
   }
 
   async closeTab(tabId: string): Promise<BrowserState> {
+    return this.closeTabInternal(tabId, true)
+  }
+
+  private async closeTabInternal(tabId: string, ensureReplacement: boolean): Promise<BrowserState> {
     const tab = this.getTab(tabId)
     const webContents = tab.webContents
     const wasActive = tab.id === this.activeTabId
@@ -2584,7 +2591,7 @@ export class BrowserTabsManager {
       webContents.close()
     }
 
-    if (!this.tabs.size || (wasActive && !nextId)) {
+    if ((!this.tabs.size || (wasActive && !nextId)) && ensureReplacement) {
       for (const candidate of [...this.tabs.values()]) {
         if (!candidate.webContents.isDestroyed()) continue
         this.rememberClosedTab(candidate)
@@ -2592,15 +2599,16 @@ export class BrowserTabsManager {
       }
       await this.createTab({ url: 'about:blank', active: true, mcpGroupId: this.ensureDefaultHumanGroup() })
     } else {
+      if (!this.tabs.size || (wasActive && !nextId)) this.activeTabId = null
       this.layout()
       this.changed()
     }
     return this.getState()
   }
 
-  private async closeTabs(tabIds: string[]): Promise<BrowserState> {
+  private async closeTabs(tabIds: string[], ensureReplacement = true): Promise<BrowserState> {
     for (const tabId of tabIds) {
-      if (this.tabs.has(tabId)) await this.closeTab(tabId)
+      if (this.tabs.has(tabId)) await this.closeTabInternal(tabId, ensureReplacement)
     }
     return this.getState()
   }

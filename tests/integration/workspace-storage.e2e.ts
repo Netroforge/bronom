@@ -305,6 +305,74 @@ test('isolates workspace profiles and explicitly forks or saves data through Def
   }
 })
 
+test('restores the only workspace without leaving a phantom Default tab when profile deletion fails', async ({
+  appWindow,
+  electronApp
+}) => {
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+    response.end('<!doctype html><title>Only workspace fixture</title>')
+  })
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => resolve())
+  })
+
+  try {
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('Only-workspace fixture did not expose a port')
+    const url = `http://127.0.0.1:${address.port}/only-workspace`
+    const created = await appWindow.evaluate(`window.bronom.createWorkspace({ name: 'Only isolated workspace', storage: 'scratch' })`) as {
+      activeTabId: string
+      tabs: Array<{ id: string; mcpGroupId?: string }>
+      mcpTabGroups: Array<{ id: string; name: string }>
+    }
+    const workspaceId = created.mcpTabGroups.find((workspace) => workspace.name === 'Only isolated workspace')!.id
+    const workspaceTabId = created.activeTabId
+    await appWindow.evaluate(`window.bronom.navigate({ tabId: ${JSON.stringify(workspaceTabId)}, url: ${JSON.stringify(url)} })`)
+    await expect.poll(() => electronApp.evaluate(({ webContents }, targetUrl) => (
+      webContents.getAllWebContents().some((contents) => contents.getURL() === targetUrl)
+    ), url)).toBe(true)
+
+    const otherTabIds = created.tabs.filter((tab) => tab.id !== workspaceTabId).map((tab) => tab.id)
+    await appWindow.evaluate(`(async () => {
+      for (const tabId of ${JSON.stringify(otherTabIds)}) await window.bronom.closeTab(tabId)
+    })()`)
+    await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.tabs.map((tab) => tab.id))')).toEqual([workspaceTabId])
+
+    await electronApp.evaluate(({ webContents }, targetUrl) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === targetUrl)
+      if (!contents) throw new Error('Only-workspace page was not found')
+      const browserSession = contents.session
+      const originalClearData = browserSession.clearData.bind(browserSession)
+      browserSession.clearData = async (...args: Parameters<Electron.Session['clearData']>) => {
+        browserSession.clearData = originalClearData
+        throw new Error('simulated only-workspace deletion failure')
+      }
+    }, url)
+
+    const failedClose = await appWindow.evaluate(`window.bronom.closeWorkspace(${JSON.stringify(workspaceId)}).then(() => 'closed', (error) => String(error.message ?? error))`)
+    expect(failedClose).toContain('simulated only-workspace deletion failure')
+    await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => ({
+      activeTabId: state.activeTabId,
+      tabs: state.tabs.map((tab) => ({ id: tab.id, mcpGroupId: tab.mcpGroupId })),
+      workspaceTabCount: state.mcpTabGroups.find((workspace) => workspace.id === ${JSON.stringify(workspaceId)})?.tabCount
+    }))`)).toEqual({
+      activeTabId: workspaceTabId,
+      tabs: [{ id: workspaceTabId, mcpGroupId: workspaceId }],
+      workspaceTabCount: 1
+    })
+
+    await appWindow.evaluate(`window.bronom.closeWorkspace(${JSON.stringify(workspaceId)})`)
+    await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => ({ tabCount: state.tabs.length, workspaceCount: state.mcpTabGroups.length }))')).toEqual({
+      tabCount: 1,
+      workspaceCount: 1
+    })
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+})
+
 test('keeps an isolated workspace profile across restart until the workspace is closed', async ({
   profileDirectory,
   mcpPort
