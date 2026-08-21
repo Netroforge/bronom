@@ -4,9 +4,13 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ## [Unreleased]
 
+## [1.6.6] - 2026-08-21
+
 ### Fixed
 
+- Allow people to switch between tabs with clicks or Ctrl+Tab while Bronom-wide human interaction is locked, without re-enabling page controls, tab actions, or website input.
 - Count every cookie belonging to a website origin in Privacy & browsing data and `browser_site_data`, including cookies scoped to a different path than the page currently open.
+- Restore a workspace's tabs and active page when closing its isolated profile fails, instead of reporting failure after silently discarding the working pages.
 
 ## [1.6.5] - 2026-08-21
 

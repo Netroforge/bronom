@@ -1,6 +1,6 @@
 {
   "name": "bronom",
-  "version": "1.6.5",
+  "version": "1.6.6",
   "description": "A persistent, visible Electron browser controlled through MCP",
   "desktopName": "Bronom",
   "author": "Netroforge",

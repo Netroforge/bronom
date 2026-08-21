@@ -2312,14 +2312,15 @@ test('shows live download progress with cancel, clear, and reveal-in-folder acti
   }
 })
 
-test('blocks human page clicks per tab or across Bronom while preserving agent actions', async ({
+test('blocks human page clicks per tab or across Bronom while preserving agent actions and tab switching', async ({
   appWindow,
   electronApp
 }) => {
-  const server = createServer((_request, response) => {
+  const server = createServer((request, response) => {
+    const fixtureTitle = request.url?.includes('second') ? 'Interaction lock second' : 'Interaction lock first'
     response.writeHead(200, { 'content-type': 'text/html' })
     response.end(`<!doctype html>
-      <title>Interaction lock fixture</title>
+      <title>${fixtureTitle}</title>
       <button id="action" style="position:fixed;left:20px;top:20px;width:160px;height:48px">Take action</button>
       <output id="count">0</output>
       <script>
@@ -2395,9 +2396,17 @@ test('blocks human page clicks per tab or across Bronom while preserving agent a
     await clickFixture(secondPath)
     await expect.poll(() => fixtureClicks(secondPath)).toBe(0)
     const firstTabId = await appWindow.evaluate(`window.bronom.getState().then((state) => state.tabs.find((tab) => tab.url.includes(${JSON.stringify(firstPath)})).id)`)
-    await appWindow.evaluate(`window.bronom.selectTab(${JSON.stringify(firstTabId)})`)
+    const secondTabId = await appWindow.evaluate(`window.bronom.getState().then((state) => state.tabs.find((tab) => tab.url.includes(${JSON.stringify(secondPath)})).id)`)
+    await appWindow.getByRole('tab', { name: /Interaction lock first/ }).click()
+    await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')).toBe(firstTabId)
     await clickFixture(firstPath)
     await expect.poll(() => fixtureClicks(firstPath)).toBe(2)
+
+    await appWindow.keyboard.press('Control+Tab')
+    await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')).toBe(secondTabId)
+    await appWindow.keyboard.press('Control+Shift+Tab')
+    await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')).toBe(firstTabId)
+
     await appWindow.getByRole('button', { name: 'Allow human interaction in Bronom' }).click()
     await expect(appWindow.getByRole('button', { name: 'Block human interaction in Bronom' })).toHaveAttribute('aria-pressed', 'false')
   } finally {

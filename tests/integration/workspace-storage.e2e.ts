@@ -36,6 +36,7 @@ test('isolates workspace profiles and explicitly forks or saves data through Def
     const defaultUrl = `${origin}/seed-default`
     const secondaryDefaultUrl = `${secondaryOrigin}/seed-secondary`
     const scratchUrl = `${origin}/inspect-scratch`
+    const scratchReferenceUrl = `${origin}/inspect-scratch-reference`
     const forkUrl = `${origin}/inspect-fork`
     const freshUrl = `${origin}/inspect-fresh`
 
@@ -82,6 +83,19 @@ test('isolates workspace profiles and explicitly forks or saves data through Def
     expect(scratchData).toEqual({ localStorage: null, cookies: [] })
     expect(requestCookies.get('/inspect-scratch')).not.toContain('workspace-cookie=default')
 
+    const scratchReferenceState = await appWindow.evaluate(`window.bronom.newTab({
+      url: ${JSON.stringify(scratchReferenceUrl)},
+      active: false,
+      mcpGroupId: ${JSON.stringify(scratchWorkspace!.id)}
+    })`) as { tabs: Array<{ id: string; url: string }> }
+    const scratchReferenceTabId = scratchReferenceState.tabs.find((tab) => tab.url === scratchReferenceUrl)?.id
+    if (!scratchReferenceTabId) throw new Error('Scratch reference tab was not created')
+    await appWindow.evaluate(`window.bronom.setTabPinned(${JSON.stringify(scratchReferenceTabId)}, true)`)
+    await appWindow.evaluate(`window.bronom.setTabHumanInteractionLocked(${JSON.stringify(scratchReferenceTabId)}, true)`)
+    await expect.poll(() => electronApp.evaluate(({ webContents }, url) => (
+      webContents.getAllWebContents().some((contents) => contents.getURL() === url)
+    ), scratchReferenceUrl)).toBe(true)
+
     await electronApp.evaluate(async ({ webContents }, url) => {
       const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === url)
       if (!contents) throw new Error('Scratch workspace page was not found')
@@ -104,10 +118,21 @@ test('isolates workspace profiles and explicitly forks or saves data through Def
     })
     const failedClose = await appWindow.evaluate(`window.bronom.closeWorkspace(${JSON.stringify(scratchWorkspace!.id)}).then(() => 'closed', (error) => String(error.message ?? error))`)
     expect(failedClose).toContain('simulated workspace storage deletion failure')
-    await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => state.mcpTabGroups.find((workspace) => workspace.id === ${JSON.stringify(scratchWorkspace!.id)}))`)).toMatchObject({
-      name: 'Scratch isolation',
-      tabCount: 0,
-      storageKind: 'isolated'
+    await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => ({
+      workspace: state.mcpTabGroups.find((workspace) => workspace.id === ${JSON.stringify(scratchWorkspace!.id)}),
+      tabs: state.tabs.filter((tab) => tab.mcpGroupId === ${JSON.stringify(scratchWorkspace!.id)}),
+      activeTabId: state.activeTabId
+    }))`)).toMatchObject({
+      workspace: {
+        name: 'Scratch isolation',
+        tabCount: 2,
+        storageKind: 'isolated'
+      },
+      tabs: expect.arrayContaining([
+        expect.objectContaining({ id: scratchState.activeTabId, url: scratchUrl, active: true }),
+        expect.objectContaining({ id: scratchReferenceTabId, url: scratchReferenceUrl, pinned: true, humanInteractionLocked: true })
+      ]),
+      activeTabId: scratchState.activeTabId
     })
     await appWindow.evaluate(`window.bronom.closeWorkspace(${JSON.stringify(scratchWorkspace!.id)})`)
     await expect.poll(() => electronApp.evaluate(async (_electron, input) => {

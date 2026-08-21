@@ -1196,25 +1196,63 @@ export class BrowserTabsManager {
     const group = this.mcpTabGroups.get(groupId)
     if (!group) throw new Error(`Unknown workspace: ${groupId}.`)
     if (groupId === this.defaultHumanGroupId) throw new Error('The Default workspace cannot be closed or deleted.')
-    const tabIds = [...this.tabs.values()].filter((tab) => tab.mcpGroupId === groupId).map((tab) => tab.id)
-    await this.closeTabs(tabIds)
-    for (let index = this.closedTabs.length - 1; index >= 0; index -= 1) {
-      if (this.closedTabs[index]?.mcpGroupId === groupId) this.closedTabs.splice(index, 1)
+    const previousActiveTabId = this.activeTabId
+    const previousGroupActiveTabId = group.activeTabId
+    const tabs = this.orderedTabs().filter((tab) => tab.mcpGroupId === groupId)
+    const tabSnapshots = tabs.map((tab) => ({
+      id: tab.id,
+      title: tab.title,
+      url: tab.url,
+      pinned: tab.pinned,
+      humanInteractionLocked: tab.humanInteractionLocked,
+      navigationHistory: this.navigationHistorySnapshot(tab)
+    }))
+    const removeClosedWorkspaceTabs = (): void => {
+      for (let index = this.closedTabs.length - 1; index >= 0; index -= 1) {
+        if (this.closedTabs[index]?.mcpGroupId === groupId) this.closedTabs.splice(index, 1)
+      }
     }
-    if (!preserveStorage && group.storageId) {
-      try {
+    const restoreWorkspaceTabs = async (): Promise<void> => {
+      for (const tab of tabSnapshots) {
+        if (this.tabs.has(tab.id)) continue
+        await this.createTab({
+          ...tab,
+          suppressInitialHistory: true,
+          active: false,
+          mcpGroupId: groupId,
+          allowBusyWorkspace: true
+        })
+      }
+      if (previousGroupActiveTabId && this.tabs.get(previousGroupActiveTabId)?.mcpGroupId === groupId) {
+        group.activeTabId = previousGroupActiveTabId
+      }
+      if (previousActiveTabId && this.tabs.has(previousActiveTabId)) this.selectTab(previousActiveTabId)
+      removeClosedWorkspaceTabs()
+      this.changed()
+    }
+    try {
+      await this.closeTabs(tabSnapshots.map((tab) => tab.id))
+      if (!preserveStorage && group.storageId) {
         await destroyWorkspaceStorage(
           workspacePartition(this.options.partition, group.storageId),
           this.options.configureSession
         )
-      } catch (error) {
-        // Keep the now-empty workspace addressable so deletion can be retried;
-        // dropping it here would orphan private profile data on disk.
-        group.activeTabId = null
-        this.changed()
-        throw error
       }
+    } catch (error) {
+      try {
+        await restoreWorkspaceTabs()
+      } catch (restoreError) {
+        // Keep both the workspace metadata and any recoverable recently closed
+        // entries when an Electron failure prevents a complete rollback.
+        this.changed()
+        throw new AggregateError(
+          [error, restoreError],
+          `Workspace "${group.name}" could not be closed and all of its tabs could not be restored. Recoverable tabs remain in tab search.`
+        )
+      }
+      throw error
     }
+    removeClosedWorkspaceTabs()
     this.mcpTabGroups.delete(groupId)
     this.changed()
     return this.listMcpTabGroups()

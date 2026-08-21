@@ -3493,7 +3493,11 @@ async function selectRelativeTab(offset: -1 | 1): Promise<void> {
 }
 
 async function runBrowserShortcut(action: BrowserShortcutAction): Promise<void> {
-  if (state.value.allHumanInteractionLocked) return
+  if (
+    state.value.allHumanInteractionLocked
+    && action !== 'next-tab'
+    && action !== 'previous-tab'
+  ) return
   switch (action) {
     case 'focus-address': return focusAddress()
     case 'find': return openFind()
@@ -5839,19 +5843,26 @@ async function resetCurrentSection(): Promise<void> {
   await applySettingsChange(window.bronomSettings.setCheckForUpdatesOnStartup(true))
 }
 
-function isAllInteractionLockTarget(target: EventTarget | null): boolean {
-  return target instanceof Element && target.closest('.all-lock-button') !== null
+function isTabActivationTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element) || target.closest('button.tab') === null) return false
+  return target.closest('.tab-close, .tab-audio') === null
+}
+
+function isAllInteractionLockTarget(event: Event): boolean {
+  if (!(event.target instanceof Element)) return false
+  if (event.target.closest('.all-lock-button') !== null) return true
+  if (!isTabActivationTarget(event.target)) return false
+  if (event.type === 'click' || event.type === 'pointerdown') return true
+  return event instanceof KeyboardEvent && (event.key === 'Enter' || event.key === ' ')
 }
 
 function guardShellInteraction(event: Event): void {
-  if (!state.value.allHumanInteractionLocked || isAllInteractionLockTarget(event.target)) return
+  if (!state.value.allHumanInteractionLocked || isAllInteractionLockTarget(event)) return
   event.preventDefault()
   event.stopImmediatePropagation()
 }
 
 function handleKeyDown(event: KeyboardEvent): void {
-  guardShellInteraction(event)
-  if (event.defaultPrevented) return
   const shortcut = browserShortcutAction({
     key: event.key,
     control: event.ctrlKey,
@@ -5861,6 +5872,10 @@ function handleKeyDown(event: KeyboardEvent): void {
     repeat: event.repeat,
     composing: event.isComposing
   })
+  const lockedTabSwitch = state.value.allHumanInteractionLocked
+    && (shortcut === 'next-tab' || shortcut === 'previous-tab')
+  if (!lockedTabSwitch) guardShellInteraction(event)
+  if (event.defaultPrevented) return
   if (commandPaletteOpen.value && shortcut !== 'command-palette') {
     if (event.key === 'Escape') commandPaletteOpen.value = false
     return

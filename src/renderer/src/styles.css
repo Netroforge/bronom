@@ -947,7 +947,7 @@ button { color: inherit; }
 :root:not([data-theme="light"]) .interaction-lock-button.locked { color: #ffc56e; }
 .interaction-lock-button:disabled { opacity: 0.52; cursor: default; }
 .shell.all-human-interaction-locked .app-home-button,
-.shell.all-human-interaction-locked .tabs-strip > *,
+.shell.all-human-interaction-locked .tabs-strip > :not(.tab),
 .shell.all-human-interaction-locked .topbar-actions > :not(.all-lock-button),
 .shell.all-human-interaction-locked .toolbar > *,
 .shell.all-human-interaction-locked .page-problem-bar > *,
