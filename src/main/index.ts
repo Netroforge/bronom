@@ -1001,7 +1001,7 @@ async function flushPanelWindowState(): Promise<void> {
 
 async function flushBrowserProfile(): Promise<void> {
   if (!persistentSession) return
-  persistentSession.flushStorageData()
+  await persistentSession.flushStorageData()
   await persistentSession.cookies.flushStore()
 }
 
