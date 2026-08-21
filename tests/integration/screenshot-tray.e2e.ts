@@ -11,6 +11,71 @@ function text(result: CallToolResult): string {
   return content?.type === 'text' ? content.text : ''
 }
 
+test('keeps a tab visible when it is selected during an offscreen capture', async ({
+  appWindow,
+  electronApp
+}) => {
+  const targetUrl = 'data:text/html,<title>Offscreen capture target</title><main>Target</main>'
+  const otherUrl = 'data:text/html,<title>Offscreen capture current</title><main>Current</main>'
+  const targetState = await appWindow.evaluate(`window.bronom.newTab({ url: ${JSON.stringify(targetUrl)}, active: true })`) as {
+    activeTabId: string
+  }
+  const targetTabId = targetState.activeTabId
+  await appWindow.evaluate(`window.bronom.newTab({ url: ${JSON.stringify(otherUrl)}, active: true })`)
+  await expect.poll(() => electronApp.evaluate(({ webContents }, url) => (
+    webContents.getAllWebContents().some((contents) => contents.getURL() === url)
+  ), targetUrl)).toBe(true)
+  const shellWindowId = await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.id)
+
+  await electronApp.evaluate(({ webContents }, url) => {
+    const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === url)
+    if (!contents) throw new Error('Offscreen capture target was not found')
+    const globals = globalThis as typeof globalThis & {
+      __offscreenCaptureStarted?: boolean
+      __releaseOffscreenCapture?: () => void
+    }
+    let releaseCapture = (): void => undefined
+    const captureGate = new Promise<void>((resolve) => { releaseCapture = resolve })
+    const originalCapturePage = contents.capturePage.bind(contents)
+    globals.__offscreenCaptureStarted = false
+    globals.__releaseOffscreenCapture = releaseCapture
+    contents.capturePage = async (...args: Parameters<Electron.WebContents['capturePage']>) => {
+      contents.capturePage = originalCapturePage
+      globals.__offscreenCaptureStarted = true
+      await captureGate
+      return originalCapturePage(...args)
+    }
+  }, targetUrl)
+
+  const pendingCapture = appWindow.evaluate(`window.bronom.capturePage({ tabId: ${JSON.stringify(targetTabId)} })`)
+  try {
+    await expect.poll(() => electronApp.evaluate(() => (
+      (globalThis as typeof globalThis & { __offscreenCaptureStarted?: boolean }).__offscreenCaptureStarted
+    ))).toBe(true)
+    await appWindow.evaluate(`window.bronom.selectTab(${JSON.stringify(targetTabId)})`)
+  } finally {
+    await electronApp.evaluate(() => {
+      const globals = globalThis as typeof globalThis & { __releaseOffscreenCapture?: () => void }
+      globals.__releaseOffscreenCapture?.()
+      delete globals.__releaseOffscreenCapture
+    })
+  }
+  await pendingCapture
+
+  await expect.poll(() => appWindow.evaluate('window.bronom.getState().then((state) => state.activeTabId)')).toBe(targetTabId)
+  await expect.poll(() => electronApp.evaluate(({ BrowserWindow, WebContentsView, webContents }, input) => {
+    const shellWindow = BrowserWindow.getAllWindows().find((window) => window.id === input.shellWindowId)
+    const target = webContents.getAllWebContents().find((contents) => contents.getURL() === input.targetUrl)
+    if (!shellWindow || !target) return false
+    return shellWindow.contentView.children.some((child) => (
+      child instanceof WebContentsView && child.webContents.id === target.id
+    ))
+  }, { shellWindowId, targetUrl })).toBe(true)
+  await expect.poll(() => electronApp.evaluate(({ BrowserWindow }) => (
+    BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed()).length
+  ))).toBe(1)
+})
+
 test('captures hidden pages and survives tab teardown during offscreen rendering', async ({
   electronApp,
   mcpToken,
