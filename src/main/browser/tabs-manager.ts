@@ -267,6 +267,7 @@ import {
   type BrowserFormField
 } from './page-scripts.js'
 import { TAB_STATE_VERSION, TabStateStore, type PersistedBrowserState } from './tab-store.js'
+import { normalizeTabTitle } from './tab-metadata.js'
 import { normalizeAddress } from './url.js'
 import {
   destroyWorkspaceStorage,
@@ -5248,7 +5249,9 @@ export class BrowserTabsManager {
     view.setBackgroundColor('#ffffff')
     const tab: BrowserTab = {
       id,
-      title: options.title || (url === BRONOM_HOME_URL ? 'Bronom Home' : url === 'about:blank' ? 'New tab' : url),
+      title: normalizeTabTitle(
+        options.title || (url === BRONOM_HOME_URL ? 'Bronom Home' : url === 'about:blank' ? 'New tab' : url)
+      ),
       url,
       loading: true,
       pinned: options.pinned === true && !isBronomHomeUrl(url),
@@ -5727,13 +5730,13 @@ export class BrowserTabsManager {
     }
     const recordPendingHistory = (): void => {
       if (tab.suppressInitialHistory || tab.pendingHistoryUrl !== tab.url) return
-      tab.title = webContents.getTitle() || tab.title
+      tab.title = normalizeTabTitle(webContents.getTitle(), tab.title)
       this.recordVisit(tab)
       tab.pendingHistoryUrl = null
     }
     webContents.on('page-title-updated', (_event, title) => {
       if (tab.sleeping) return
-      tab.title = title || tab.title
+      tab.title = normalizeTabTitle(title, tab.title)
       this.changed()
     })
     webContents.on('did-start-loading', () => {

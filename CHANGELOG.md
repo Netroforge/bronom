@@ -15,6 +15,7 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 - Restore the exact original tab set when deleting the only isolated workspace fails, without leaving a phantom blank Default tab behind after rollback.
 - Detach and reset the native address-suggestion surface when Electron destroys its renderer so a stale topmost child view cannot linger above the website or make CI timing-dependent.
 - Keep a failed archived-workspace restore under one recoverable active owner when its rollback also fails, instead of re-adding an archive that shares the same persistent browser profile.
+- Bound and normalize website-controlled tab titles before broadcasting, archiving, closing, or persisting them, preventing a page from amplifying every browser-state update with an oversized title.
 
 ## [1.6.6] - 2026-08-21
 

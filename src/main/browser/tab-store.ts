@@ -7,6 +7,7 @@ import {
   type BrowserSplitViewState
 } from '../../shared/split-view.js'
 import { isUuidV7 } from '../uuid-v7.js'
+import { normalizeTabTitle } from './tab-metadata.js'
 
 export const TAB_STATE_VERSION = 2 as const
 
@@ -180,7 +181,10 @@ export class TabStateStore {
           storageId,
           origins: persistedWorkspaceOrigins(candidate.origins),
           tabs: candidate.tabs.map((tab) => ({
-            title: (tab as Record<string, unknown>).title as string,
+            title: normalizeTabTitle(
+              (tab as Record<string, unknown>).title as string,
+              (tab as Record<string, unknown>).url as string
+            ),
             url: (tab as Record<string, unknown>).url as string,
             pinned: (tab as Record<string, unknown>).pinned === true
           }))
@@ -204,7 +208,7 @@ export class TabStateStore {
         usedTabIds.add(candidate.id)
         tabs.push({
           id: candidate.id,
-          title: candidate.title,
+          title: normalizeTabTitle(candidate.title, candidate.url),
           url: candidate.url,
           pinned: candidate.pinned === true,
           humanInteractionLocked: candidate.humanInteractionLocked === true,

@@ -7,6 +7,7 @@ import {
   TabStateStore,
   type PersistedBrowserState
 } from '../src/main/browser/tab-store.js'
+import { MAX_TAB_TITLE_CHARS } from '../src/main/browser/tab-metadata.js'
 
 const DEFAULT_WORKSPACE_ID = '01912345-6789-7abc-8def-0123456789ab'
 const ACTIVE_WORKSPACE_ID = '01912345-678a-7abc-8def-0123456789ab'
@@ -146,6 +147,21 @@ describe('TabStateStore', () => {
     await writeFile(path, JSON.stringify(state), 'utf8')
 
     expect(await store.load()).toBeNull()
+  })
+
+  it('repairs untrusted active and archived page titles without dropping current state', async () => {
+    const { path, store } = await createStore()
+    const state = currentState()
+    state.tabs[1]!.title = `  Checkout\n${'x'.repeat(MAX_TAB_TITLE_CHARS * 4)}  `
+    state.savedTabGroups![0]!.tabs[0]!.title = `  Orders\t${'y'.repeat(MAX_TAB_TITLE_CHARS * 4)}  `
+    await mkdir(join(path, '..'), { recursive: true })
+    await writeFile(path, JSON.stringify(state), 'utf8')
+
+    const restored = await store.load()
+    expect(restored?.tabs[1]?.title).toHaveLength(MAX_TAB_TITLE_CHARS)
+    expect(restored?.tabs[1]?.title).toMatch(/^Checkout x+$/)
+    expect(restored?.savedTabGroups?.[0]?.tabs[0]?.title).toHaveLength(MAX_TAB_TITLE_CHARS)
+    expect(restored?.savedTabGroups?.[0]?.tabs[0]?.title).toMatch(/^Orders y+$/)
   })
 
   it.each([

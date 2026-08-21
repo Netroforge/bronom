@@ -388,15 +388,16 @@ test('keeps a failed archive restore under one active owner when rollback also f
       }
       const originalRemoveChildView = contentView.removeChildView
       const originalSetBounds = viewPrototype.setBounds
-      let removeCalls = 0
+      const existingViews = new Set(mainWindow.contentView.children)
       let layoutFailed = false
+      let restoredView: Electron.WebContentsView | null = null
       contentView.removeChildView = function (view): void {
-        removeCalls += 1
-        if (layoutFailed && removeCalls >= 2) throw new Error('Injected archive rollback detach failure')
+        if (layoutFailed && view === restoredView) throw new Error('Injected archive rollback detach failure')
         return originalRemoveChildView.call(this, view)
       }
-      viewPrototype.setBounds = function (bounds): void {
-        if (!layoutFailed) {
+      viewPrototype.setBounds = function (this: Electron.WebContentsView, bounds): void {
+        if (!layoutFailed && !existingViews.has(this)) {
+          restoredView = this
           layoutFailed = true
           throw new Error('Injected archive restore layout failure')
         }
