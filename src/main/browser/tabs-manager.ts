@@ -1339,8 +1339,18 @@ export class BrowserTabsManager {
         return this.requireMcpTabGroup(restored.id)
       } catch (error) {
         // Restoring an archive must not destroy its durable workspace storage if
-        // one of the tabs fails to reopen. The archive remains available to retry.
-        await this.closeMcpTabGroupInternal(restored.id, true).catch(() => undefined)
+        // one of the tabs fails to reopen. Re-add the archive only after the
+        // temporary active owner is completely removed; otherwise the active
+        // workspace and archive would both claim the same persistent partition.
+        try {
+          await this.closeMcpTabGroupInternal(restored.id, true)
+        } catch (rollbackError) {
+          this.changed()
+          throw new AggregateError(
+            [error, rollbackError],
+            `Archived workspace "${saved.name}" could not be restored or rolled back. Its recoverable active workspace remains open; close or archive it before retrying.`
+          )
+        }
         this.savedTabGroups.set(savedGroupId, saved)
         this.changed()
         throw error

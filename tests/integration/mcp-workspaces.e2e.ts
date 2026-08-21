@@ -356,6 +356,124 @@ test('archives an agent workspace and reopens it with a fresh workspace id', asy
   }
 })
 
+test('keeps a failed archive restore under one active owner when rollback also fails', async ({
+  appWindow,
+  electronApp,
+  mcpPort,
+  mcpToken,
+  profileDirectory
+}) => {
+  const client = await connectClient('saved-group-rollback-test', mcpPort, mcpToken)
+  try {
+    const workspaceId = await createWorkspace(client, 'Recoverable archive', 'orange')
+    await client.callTool({
+      name: 'browser_new_tab',
+      arguments: { workspaceId, url: 'data:text/html,<title>Recoverable tab</title><h1>Keep me</h1>' }
+    })
+    const savedResult = await client.callTool({
+      name: 'browser_saved_workspaces',
+      arguments: { action: 'save', workspaceId }
+    }) as CallToolResult
+    expect(savedResult.isError, text(savedResult)).not.toBe(true)
+    const savedWorkspaceId = (JSON.parse(text(savedResult)) as { id: string }).id
+
+    await electronApp.evaluate(({ BrowserWindow, WebContentsView }) => {
+      const mainWindow = BrowserWindow.getAllWindows()[0]
+      if (!mainWindow) throw new Error('Main window is unavailable')
+      const contentView = mainWindow.contentView as unknown as {
+        removeChildView: (view: Electron.WebContentsView) => void
+      }
+      const viewPrototype = WebContentsView.prototype as unknown as {
+        setBounds: (bounds: Electron.Rectangle) => void
+      }
+      const originalRemoveChildView = contentView.removeChildView
+      const originalSetBounds = viewPrototype.setBounds
+      let removeCalls = 0
+      let layoutFailed = false
+      contentView.removeChildView = function (view): void {
+        removeCalls += 1
+        if (layoutFailed && removeCalls >= 2) throw new Error('Injected archive rollback detach failure')
+        return originalRemoveChildView.call(this, view)
+      }
+      viewPrototype.setBounds = function (bounds): void {
+        if (!layoutFailed) {
+          layoutFailed = true
+          throw new Error('Injected archive restore layout failure')
+        }
+        return originalSetBounds.call(this, bounds)
+      }
+      ;(globalThis as typeof globalThis & {
+        __bronomArchiveRestoreFault?: {
+          contentView: typeof contentView
+          viewPrototype: typeof viewPrototype
+          originalRemoveChildView: typeof originalRemoveChildView
+          originalSetBounds: typeof originalSetBounds
+        }
+      }).__bronomArchiveRestoreFault = {
+        contentView,
+        viewPrototype,
+        originalRemoveChildView,
+        originalSetBounds
+      }
+    })
+
+    const openedResult = await client.callTool({
+      name: 'browser_saved_workspaces',
+      arguments: { action: 'open', savedWorkspaceId }
+    }) as CallToolResult
+    expect(openedResult.isError).toBe(true)
+    expect(text(openedResult)).toContain('could not be restored or rolled back')
+
+    await electronApp.evaluate(() => {
+      const state = (globalThis as typeof globalThis & {
+        __bronomArchiveRestoreFault?: {
+          contentView: { removeChildView: (view: Electron.WebContentsView) => void }
+          viewPrototype: { setBounds: (bounds: Electron.Rectangle) => void }
+          originalRemoveChildView: (view: Electron.WebContentsView) => void
+          originalSetBounds: (bounds: Electron.Rectangle) => void
+        }
+      }).__bronomArchiveRestoreFault
+      if (!state) return
+      state.contentView.removeChildView = state.originalRemoveChildView
+      state.viewPrototype.setBounds = state.originalSetBounds
+      delete (globalThis as typeof globalThis & { __bronomArchiveRestoreFault?: unknown }).__bronomArchiveRestoreFault
+    })
+
+    await expect.poll(() => appWindow.evaluate(`window.bronom.getState().then((state) => ({
+      active: state.mcpTabGroups.filter((workspace) => workspace.name === 'Recoverable archive').length,
+      archived: state.savedTabGroups.filter((workspace) => workspace.name === 'Recoverable archive').length
+    }))`)).toEqual({ active: 1, archived: 0 })
+    await expect.poll(async () => {
+      const source = await readFile(join(profileDirectory, 'tabs.json'), 'utf8').catch(() => '')
+      if (!source) return null
+      const persisted = JSON.parse(source) as {
+        mcpTabGroups: Array<{ name: string }>
+        savedTabGroups?: Array<{ name: string }>
+      }
+      return {
+        active: persisted.mcpTabGroups.filter((workspace) => workspace.name === 'Recoverable archive').length,
+        archived: (persisted.savedTabGroups ?? []).filter((workspace) => workspace.name === 'Recoverable archive').length
+      }
+    }).toEqual({ active: 1, archived: 0 })
+  } finally {
+    await electronApp.evaluate(() => {
+      const state = (globalThis as typeof globalThis & {
+        __bronomArchiveRestoreFault?: {
+          contentView: { removeChildView: (view: Electron.WebContentsView) => void }
+          viewPrototype: { setBounds: (bounds: Electron.Rectangle) => void }
+          originalRemoveChildView: (view: Electron.WebContentsView) => void
+          originalSetBounds: (bounds: Electron.Rectangle) => void
+        }
+      }).__bronomArchiveRestoreFault
+      if (!state) return
+      state.contentView.removeChildView = state.originalRemoveChildView
+      state.viewPrototype.setBounds = state.originalSetBounds
+      delete (globalThis as typeof globalThis & { __bronomArchiveRestoreFault?: unknown }).__bronomArchiveRestoreFault
+    }).catch(() => undefined)
+    await client.close()
+  }
+})
+
 test('restores workspace identity and tabs after an application restart', async ({ profileDirectory, mcpPort }) => {
   let instance = await launchBronom(profileDirectory, mcpPort)
   const token = (await readFile(join(profileDirectory, 'mcp-token'), 'utf8')).trim()
