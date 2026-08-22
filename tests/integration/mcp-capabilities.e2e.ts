@@ -2671,7 +2671,7 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
       baseline: { width: expect.any(Number), height: expect.any(Number) }
     })
     expect(visualBaselineResult.content.some((item) => item.type === 'image')).toBe(false)
-    await client.callTool({
+    const visualMutationResult = await client.callTool({
       name: 'browser_evaluate',
       arguments: {
         tabId,
@@ -2687,10 +2687,11 @@ test('exposes production interaction and diagnostics capabilities over MCP', asy
           return true;
         })()`
       }
-    })
+    }) as CallToolResult
+    expect(visualMutationResult.isError, text(visualMutationResult)).not.toBe(true)
     const visualCompareResult = await client.callTool({
       name: 'browser_visual_compare',
-      arguments: { tabId, action: 'compare', settleMs: 0 }
+      arguments: { tabId, action: 'compare', settleMs: 100 }
     }) as CallToolResult
     expect(visualCompareResult.isError, text(visualCompareResult)).not.toBe(true)
     const visualReport = JSON.parse(text(visualCompareResult)) as {
