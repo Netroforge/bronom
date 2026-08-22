@@ -175,6 +175,14 @@ export function useNetworkController(options: NetworkControllerOptions) {
     requestDetailsSequence += 1
   }
 
+  function beginRouteMutation(): number {
+    // A route list read can capture the pre-mutation snapshot and still resolve
+    // after the mutation. Invalidate it so it cannot replace authoritative
+    // mutation results with stale routes.
+    routeRequestSequence += 1
+    return ++routeMutationSequence
+  }
+
   function resetReplayFeedback(): void {
     if (replayConfirmTimer !== undefined) {
       window.clearTimeout(replayConfirmTimer)
@@ -306,7 +314,7 @@ export function useNetworkController(options: NetworkControllerOptions) {
     const tab = options.activeTab.value
     if (!tab) return
     const expectedGeneration = generation
-    const sequence = ++routeMutationSequence
+    const sequence = beginRouteMutation()
     routeState.value = 'saving'
     routeError.value = ''
     try {
@@ -347,7 +355,7 @@ export function useNetworkController(options: NetworkControllerOptions) {
     const tab = options.activeTab.value
     if (!tab) return
     const expectedGeneration = generation
-    const sequence = ++routeMutationSequence
+    const sequence = beginRouteMutation()
     routeState.value = 'saving'
     routeError.value = ''
     try {
@@ -369,7 +377,7 @@ export function useNetworkController(options: NetworkControllerOptions) {
     const tab = options.activeTab.value
     if (!tab) return
     const expectedGeneration = generation
-    const sequence = ++routeMutationSequence
+    const sequence = beginRouteMutation()
     routeState.value = 'saving'
     routeError.value = ''
     try {
@@ -388,7 +396,7 @@ export function useNetworkController(options: NetworkControllerOptions) {
     const tab = options.activeTab.value
     if (!tab?.networkRouteCount) return
     const expectedGeneration = generation
-    const sequence = ++routeMutationSequence
+    const sequence = beginRouteMutation()
     routeState.value = 'saving'
     routeError.value = ''
     try {

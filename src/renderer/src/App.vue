@@ -128,6 +128,7 @@ import HistoryPanel from './components/HistoryPanel.vue'
 import NetworkPanel from './components/NetworkPanel.vue'
 import PanelDockPicker from './components/PanelDockPicker.vue'
 import ResponsivePreviewPanel from './components/ResponsivePreviewPanel.vue'
+import SiteControlsPanel from './components/SiteControlsPanel.vue'
 import SiteStoragePanel from './components/SiteStoragePanel.vue'
 import TabSearchPanel from './components/TabSearchPanel.vue'
 import WorkspaceEditor from './components/WorkspaceEditor.vue'
@@ -3701,64 +3702,24 @@ onBeforeUnmount(() => {
           <span>{{ t('shell.pageTools.routeCount', { count: localNumber(activeNetworkRouteCount) }, activeNetworkRouteCount) }}</span>
           <IconKeyboardArrowRight aria-hidden="true" />
         </button>
-        <section
-          v-if="siteControlsOpen"
-          id="site-controls-panel"
-          class="site-controls-panel"
-          data-shell-docked-panel
-          role="dialog"
-          aria-modal="false"
-          aria-labelledby="site-controls-title"
-        >
-          <header>
-            <span class="site-controls-mark" aria-hidden="true"><IconTune /></span>
-            <span class="site-controls-heading">
-              <strong id="site-controls-title">{{ activeHostname }}</strong>
-              <small>{{ activeAddressKind }} · {{ activeOrigin }}</small>
-            </span>
-            <div class="panel-header-actions">
-              <PanelDockPicker v-model="panelDock" :label="t('runtime.tabs.dockSiteControls')" />
-              <button class="panel-close" type="button" :aria-label="t('shell.siteControls.close')" @click="siteControlsOpen = false"><IconClose aria-hidden="true" /></button>
-            </div>
-          </header>
-          <div class="site-data-summary" :aria-busy="siteDataState === 'loading'">
-            <article :aria-label="siteDataSummary ? t('runtime.tabs.cookieAvailable', { count: localNumber(siteDataSummary.cookieCount) }, siteDataSummary.cookieCount) : t('runtime.tabs.loadingCookies')">
-              <IconPrivacy aria-hidden="true" />
-              <span><strong>{{ siteDataSummary?.cookieCount ?? '…' }}</strong><small>{{ siteDataSummary?.cookieCount === 1 ? t('shell.siteControls.cookie') : t('shell.siteControls.cookies') }}</small></span>
-            </article>
-            <article :aria-label="siteDataSummary ? t('runtime.tabs.historyAvailable', { pages: localNumber(siteDataSummary.historyEntries), visits: localNumber(siteDataSummary.historyVisits) }, siteDataSummary.historyEntries) : t('runtime.tabs.loadingHistory')">
-              <IconHistory aria-hidden="true" />
-              <span><strong>{{ siteDataSummary?.historyEntries ?? '…' }}</strong><small>{{ siteDataSummary?.historyEntries === 1 ? t('shell.siteControls.historyPage') : t('shell.siteControls.historyPages') }}<template v-if="siteDataSummary"> · {{ siteDataSummary.historyVisits }} {{ siteDataSummary.historyVisits === 1 ? t('shell.siteControls.visit') : t('shell.siteControls.visits') }}</template></small></span>
-            </article>
-          </div>
-          <output v-if="siteDataState === 'error'" class="site-controls-error" aria-live="polite">{{ siteDataMessage }}</output>
-          <section class="site-permission-controls" aria-labelledby="site-permission-controls-title">
-            <div class="site-controls-section-heading">
-              <strong id="site-permission-controls-title">{{ t('shell.siteControls.permissions') }}</strong>
-              <span>{{ activeSitePermissions.length ? `${activeSitePermissions.length} customized` : t('shell.siteControls.defaults') }}</span>
-            </div>
-            <div v-if="activeSitePermissions.length" class="site-permission-list">
-              <div v-for="permission in activeSitePermissions" :key="permission.permission" class="site-permission-control">
-                <label :for="`site-control-${permission.permission}`">{{ permissionLabel(permission.permission) }}</label>
-                <select
-                  :id="`site-control-${permission.permission}`"
-                  :value="permission.decision"
-                  :aria-label="t('runtimeActions.permission.aria', { permission: permissionLabel(permission.permission), origin: permission.origin })"
-                  @change="setSitePermission(permission, $event)"
-                >
-                  <option value="allow">{{ t('shell.siteControls.allow') }}</option>
-                  <option value="deny">{{ t('shell.siteControls.block') }}</option>
-                </select>
-                <button type="button" :aria-label="t('runtimeActions.permission.resetAria', { permission: permissionLabel(permission.permission), origin: permission.origin })" :title="t('shell.siteControls.reset')" @click="resetSitePermissionFromControls(permission)"><IconClose aria-hidden="true" /></button>
-              </div>
-            </div>
-            <p v-else>{{ t('shell.siteControls.empty') }}</p>
-          </section>
-          <footer>
-            <button class="site-controls-secondary" type="button" @click="openSitePermissionSettings">{{ t('shell.siteControls.allSettings') }}</button>
-            <button class="site-controls-primary" type="button" @click="openSitePrivacySettings">{{ activeTabUsesDefaultProfile ? t('shell.siteControls.clearData') : t('panels.siteStorage') }}</button>
-          </footer>
-        </section>
+        <SiteControlsPanel
+          v-model:open="siteControlsOpen"
+          v-model:dock="panelDock"
+          :hostname="activeHostname"
+          :address-kind="activeAddressKind"
+          :origin="activeOrigin"
+          :summary="siteDataSummary"
+          :state="siteDataState"
+          :message="siteDataMessage"
+          :permissions="activeSitePermissions"
+          :uses-default-profile="activeTabUsesDefaultProfile"
+          :locale="resolvedLocale"
+          :permission-label="permissionLabel"
+          :set-permission="setSitePermission"
+          :reset-permission="resetSitePermissionFromControls"
+          :open-permission-settings="openSitePermissionSettings"
+          :open-privacy-settings="openSitePrivacySettings"
+        />
         <section
           v-if="addressSuggestionsVisible"
           id="address-suggestions"

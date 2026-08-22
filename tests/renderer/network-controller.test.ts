@@ -4,6 +4,7 @@ import { useNetworkController } from '../../src/renderer/src/composables/useNetw
 import type {
   BrowserNetworkRequest,
   BrowserNetworkRequestDetails,
+  BrowserNetworkRouteSummary,
   BrowserNetworkSearchResult,
   BrowserState,
   BrowserTabState
@@ -49,6 +50,17 @@ function details(id: string, method = 'GET'): BrowserNetworkRequestDetails {
     ...request(id, method),
     request: { headers: {} },
     response: { headers: {}, body: { available: true, text: '{}' } }
+  }
+}
+
+function route(id: string): BrowserNetworkRouteSummary {
+  return {
+    id,
+    urlPattern: `https://example.test/api/${id}`,
+    behavior: 'abort',
+    remainingMatches: 1,
+    createdAt: '2026-08-21T12:00:00.000Z',
+    abort: 'BlockedByClient'
   }
 }
 
@@ -117,10 +129,10 @@ function createController() {
       sanitized: true as const,
       includesBodies: false
     })),
-    listNetworkRoutes: vi.fn(async () => []),
-    addNetworkRoute: vi.fn(async () => []),
-    moveNetworkRoute: vi.fn(async () => []),
-    removeNetworkRoute: vi.fn(async () => []),
+    listNetworkRoutes: vi.fn(async (): Promise<BrowserNetworkRouteSummary[]> => []),
+    addNetworkRoute: vi.fn(async (): Promise<BrowserNetworkRouteSummary[]> => []),
+    moveNetworkRoute: vi.fn(async (): Promise<BrowserNetworkRouteSummary[]> => []),
+    removeNetworkRoute: vi.fn(async (): Promise<BrowserNetworkRouteSummary[]> => []),
     clearNetworkRoutes: vi.fn(async () => state(tab('tab-1'))),
     getState: vi.fn(async () => state(tab('tab-1'))),
     setDiagnosticLogPreservation: vi.fn(async () => state(tab('tab-1')))
@@ -198,6 +210,22 @@ describe('network controller', () => {
     expect(browser.clearNetworkRoutes).toHaveBeenCalledWith('tab-1')
     expect(accepted).toEqual([next])
     expect(controller.routes.value).toEqual([])
+    expect(controller.routeState.value).toBe('ready')
+  })
+
+  it('does not let a pre-mutation route refresh overwrite newly added routes', async () => {
+    const staleRefresh = deferred<BrowserNetworkRouteSummary[]>()
+    const { browser, controller } = createController()
+    browser.listNetworkRoutes.mockImplementationOnce(() => staleRefresh.promise)
+    browser.addNetworkRoute.mockResolvedValue([route('new')])
+
+    const refreshing = controller.refreshRoutes()
+    controller.routePattern.value = 'https://example.test/api/new'
+    await controller.addRouteFromDraft()
+    staleRefresh.resolve([route('stale')])
+    await refreshing
+
+    expect(controller.routes.value).toEqual([route('new')])
     expect(controller.routeState.value).toBe('ready')
   })
 })
