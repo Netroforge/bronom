@@ -155,6 +155,12 @@ export const esES = {
       "help": "Al eliminar una decisión, Bronom volverá a preguntar la próxima vez que el sitio necesite el permiso."
     },
     "passwords": {
+      "importHeading": "Importar desde otro navegador",
+      "importDescription": "Exporta las contraseñas como CSV desde Chrome, Edge, Firefox u otro gestor y elige ese archivo.",
+      "importButton": "Elegir CSV del navegador…",
+      "importing": "Importando…",
+      "imported": "{added} nuevas y {updated} actualizadas; {skipped} omitidas.",
+      "importPlaintext": "Las exportaciones CSV del navegador contienen contraseñas legibles. Bronom lee el archivo elegido solo en el proceso principal, cifra de inmediato las cuentas aceptadas y nunca expone contraseñas a MCP. Elimina el CSV después de importarlo.",
       "heading": "Contraseñas guardadas",
       "description": "Guarda accesos con consentimiento explícito y rellénalos desde el botón de contraseña de la barra.",
       "emptyHeading": "No hay contraseñas guardadas",
@@ -2729,6 +2735,12 @@ export const esES = {
       "outOfMemory": "La página se quedó sin memoria."
     },
     "errors": {
+      "passwordImportRead": "No se pudo leer el archivo de contraseñas seleccionado.",
+      "passwordImportTooLarge": "El archivo supera el límite de importación de 10 MB.",
+      "passwordImportInvalid": "El archivo seleccionado no es una exportación CSV UTF-8 válida.",
+      "passwordImportColumns": "El CSV debe contener las columnas url, username y password.",
+      "passwordImportRows": "El CSV contiene más de 3.000 filas. Divídelo en archivos más pequeños.",
+      "passwordImportEmpty": "No se encontraron contraseñas HTTP o HTTPS válidas en el CSV.",
       "clipboard": "El portapapeles del sistema no aceptó el texto.",
       "tabUnavailable": "La pestaña ya no está disponible.",
       "actionFailed": "No se pudo completar la acción solicitada del navegador.",
@@ -2748,6 +2760,13 @@ export const esES = {
       "wrongProduct": "Esta clave de colaborador no es para Bronom."
     },
     "dialog": {
+      "importPasswordsFile": "Elegir CSV de contraseñas del navegador",
+      "choosePasswordFile": "Elegir CSV",
+      "importPasswordsTitle": "¿Importar contraseñas guardadas?",
+      "importPasswordsMessage": "¿Importar {count} cuentas guardadas en Bronom?",
+      "importPasswordsDetail": "Nuevas: {added} · actualizaciones: {updated} · omitidas: {skipped}\n\nLas contraseñas aceptadas se volverán a cifrar con {backend}. El CSV seleccionado seguirá siendo legible en el disco; elimínalo después de importarlo.",
+      "cancel": "Cancelar",
+      "importPasswords": "Importar contraseñas",
       "pageDestroyedTitle": "Esta página ya no está disponible",
       "pageDestroyedMessage": "Cierra esta pestaña y vuelve a abrirla desde Cerradas recientemente.",
       "pageUnavailable": "Página no disponible",

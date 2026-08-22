@@ -155,6 +155,12 @@ export const deDE = {
       "help": "Nach dem Entfernen fragt Bronom beim nächsten Berechtigungsbedarf erneut."
     },
     "passwords": {
+      "importHeading": "Aus einem anderen Browser importieren",
+      "importDescription": "Passwörter aus Chrome, Edge, Firefox oder einem anderen Passwortmanager als CSV exportieren und diese Datei auswählen.",
+      "importButton": "Browser-CSV auswählen…",
+      "importing": "Importieren…",
+      "imported": "{added} neu importiert und {updated} aktualisiert; {skipped} übersprungen.",
+      "importPlaintext": "Browser-CSV-Exporte enthalten lesbare Passwörter. Bronom liest die gewählte Datei nur im Hauptprozess, verschlüsselt akzeptierte Konten sofort und gibt Passwörter niemals über MCP weiter. Löschen Sie die CSV nach dem Import.",
       "heading": "Gespeicherte Passwörter",
       "description": "Website-Anmeldungen nur mit ausdrücklicher Zustimmung speichern und über die Passwortschaltfläche ausfüllen.",
       "emptyHeading": "Keine gespeicherten Passwörter",
@@ -2729,6 +2735,12 @@ export const deDE = {
       "outOfMemory": "Der Seite ging der Speicher aus."
     },
     "errors": {
+      "passwordImportRead": "Die ausgewählte Passwortdatei konnte nicht gelesen werden.",
+      "passwordImportTooLarge": "Die Passwortdatei überschreitet das Importlimit von 10 MB.",
+      "passwordImportInvalid": "Die ausgewählte Datei ist kein gültiger UTF-8-CSV-Passwortexport.",
+      "passwordImportColumns": "Die CSV muss die Spalten url, username und password enthalten.",
+      "passwordImportRows": "Die CSV enthält mehr als 3.000 Passwortzeilen. Teilen Sie sie in kleinere Dateien auf.",
+      "passwordImportEmpty": "In der ausgewählten CSV wurden keine gültigen HTTP- oder HTTPS-Passwörter gefunden.",
       "clipboard": "Die Systemzwischenablage hat den Text nicht angenommen.",
       "tabUnavailable": "Der Tab ist nicht mehr verfügbar.",
       "actionFailed": "Die angeforderte Browseraktion konnte nicht abgeschlossen werden.",
@@ -2748,6 +2760,13 @@ export const deDE = {
       "wrongProduct": "Dieser Unterstützerschlüssel ist nicht für Bronom bestimmt."
     },
     "dialog": {
+      "importPasswordsFile": "Browser-Passwort-CSV auswählen",
+      "choosePasswordFile": "CSV auswählen",
+      "importPasswordsTitle": "Gespeicherte Passwörter importieren?",
+      "importPasswordsMessage": "{count} gespeicherte Konten in Bronom importieren?",
+      "importPasswordsDetail": "Neu: {added} · Aktualisierungen: {updated} · Übersprungen: {skipped}\n\nAkzeptierte Passwörter werden mit {backend} neu verschlüsselt. Die ausgewählte CSV bleibt auf dem Datenträger lesbar; löschen Sie sie nach dem Import.",
+      "cancel": "Abbrechen",
+      "importPasswords": "Passwörter importieren",
       "pageDestroyedTitle": "Diese Seite ist nicht mehr verfügbar",
       "pageDestroyedMessage": "Schließen Sie diesen Tab und öffnen Sie ihn über „Kürzlich geschlossen“ erneut.",
       "pageUnavailable": "Seite nicht verfügbar",

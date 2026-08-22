@@ -1,4 +1,4 @@
-import { mkdir, readFile } from 'node:fs/promises'
+import { mkdir, open, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
@@ -35,6 +35,7 @@ import { flushBrowserSessionStorage } from './browser/workspace-storage.js'
 import { BookmarkStore } from './bookmark-store.js'
 import { HistoryStore } from './history-store.js'
 import { CredentialStore } from './credential-store.js'
+import { CredentialImportError, parseCredentialImportCsv } from './credential-import.js'
 import { CommercialLicenseClient, CommercialLicenseError } from './commercial-license-client.js'
 import { CommercialLicenseStore } from './commercial-license-store.js'
 import { buildBrowsingDataWebsiteInventory, cookieAvailableToOrigin } from './browsing-data-websites.js'
@@ -100,6 +101,7 @@ import {
   type BrowsingDataSummary,
   type BrowsingDataWebsiteSummary,
   type CredentialStorageStatus,
+  type CredentialImportResult,
   type CommercialLicenseState,
   type DetachablePanelId,
   type HelpMenuAction,
@@ -606,6 +608,92 @@ async function handleCredentialCandidate(candidate: BrowserCredentialCandidate):
   if (response !== 1) return
   await credentialStore.save(candidate.origin, candidate.username, candidate.password)
   publishCredentials()
+}
+
+const MAX_CREDENTIAL_IMPORT_BYTES = 10 * 1024 * 1024
+
+function credentialImportErrorMessage(error: unknown): string {
+  if (!(error instanceof CredentialImportError)) return text('native.errors.passwordImportInvalid')
+  const keys = {
+    invalid_csv: 'native.errors.passwordImportInvalid',
+    missing_columns: 'native.errors.passwordImportColumns',
+    too_many_rows: 'native.errors.passwordImportRows',
+    no_credentials: 'native.errors.passwordImportEmpty'
+  } as const
+  return text(keys[error.code])
+}
+
+async function importCredentialsFromCsv(): Promise<CredentialImportResult> {
+  const canceled: CredentialImportResult = { canceled: true, added: 0, updated: 0, skipped: 0 }
+  if (!credentialStorageStatus.available || !credentialStore) {
+    throw new Error(credentialStorageStatus.reason || text('native.errors.secureStorage'))
+  }
+  if (!mainWindow || mainWindow.isDestroyed()) throw new Error(text('native.errors.actionFailed'))
+  const selection = await dialog.showOpenDialog(mainWindow, {
+    title: text('native.dialog.importPasswordsFile'),
+    buttonLabel: text('native.dialog.choosePasswordFile'),
+    filters: [{ name: 'CSV', extensions: ['csv'] }],
+    properties: ['openFile', 'dontAddToRecent']
+  })
+  const path = selection.filePaths[0]
+  if (selection.canceled || !path) return canceled
+
+  let source: string
+  try {
+    const handle = await open(path, 'r')
+    try {
+      const file = await handle.stat()
+      if (!file.isFile()) throw new Error('not-file')
+      if (file.size > MAX_CREDENTIAL_IMPORT_BYTES) throw new Error('too-large')
+      const contents = await handle.readFile()
+      if (contents.byteLength > MAX_CREDENTIAL_IMPORT_BYTES) throw new Error('too-large')
+      source = new TextDecoder('utf-8', { fatal: true }).decode(contents)
+    } finally {
+      await handle.close()
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message === 'too-large') {
+      throw new Error(text('native.errors.passwordImportTooLarge'))
+    }
+    throw new Error(text('native.errors.passwordImportRead'))
+  }
+
+  let parsed
+  try {
+    parsed = parseCredentialImportCsv(source)
+  } catch (error) {
+    throw new Error(credentialImportErrorMessage(error))
+  }
+  const current = new Set(credentialStore.list().map((entry) => `${entry.origin}\u0000${entry.username}`))
+  const unique = new Set(parsed.credentials.map((entry) => `${entry.origin}\u0000${entry.username}`))
+  const updated = [...unique].filter((identity) => current.has(identity)).length
+  const added = unique.size - updated
+  const skipped = parsed.skippedRows + parsed.credentials.length - unique.size
+  const confirmation = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    title: text('native.dialog.importPasswordsTitle'),
+    message: text('native.dialog.importPasswordsMessage', { count: unique.size }),
+    detail: text('native.dialog.importPasswordsDetail', {
+      added,
+      updated,
+      skipped,
+      backend: credentialStorageStatus.backend || text('common.system')
+    }),
+    buttons: [text('native.dialog.cancel'), text('native.dialog.importPasswords')],
+    defaultId: 1,
+    cancelId: 0,
+    noLink: true
+  })
+  if (confirmation.response !== 1) return canceled
+
+  const result = await credentialStore.importMany(parsed.credentials)
+  publishCredentials()
+  return {
+    canceled: false,
+    added: result.added,
+    updated: result.updated,
+    skipped: parsed.skippedRows + result.duplicateRows
+  }
 }
 
 async function configureCredentialStore(): Promise<void> {
@@ -2709,6 +2797,10 @@ function registerIpc(): void {
   ipcMain.handle('credentials:list', (event) => {
     assertTrustedShellSender(event)
     return credentialStore?.list() ?? []
+  })
+  ipcMain.handle('credentials:import-csv', async (event) => {
+    assertTrustedShellSender(event)
+    return importCredentialsFromCsv()
   })
   ipcMain.handle('credentials:fill', async (event, tabId: unknown, credentialId: unknown) => {
     assertTrustedShellSender(event)

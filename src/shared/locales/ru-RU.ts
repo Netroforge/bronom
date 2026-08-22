@@ -155,6 +155,12 @@ export const ruRU = {
       "help": "После удаления решения Bronom снова спросит разрешение при следующем запросе сайта."
     },
     "passwords": {
+      "importHeading": "Импорт из другого браузера",
+      "importDescription": "Экспортируйте пароли в CSV из Chrome, Edge, Firefox или другого менеджера, затем выберите этот файл.",
+      "importButton": "Выбрать CSV браузера…",
+      "importing": "Импорт…",
+      "imported": "Добавлено: {added}, обновлено: {updated}, пропущено: {skipped}.",
+      "importPlaintext": "CSV-экспорт браузера содержит пароли в открытом виде. Bronom читает выбранный файл только в основном процессе, сразу шифрует принятые учётные записи и никогда не передаёт пароли через MCP. Удалите CSV после импорта.",
       "heading": "Сохранённые пароли",
       "description": "Сохраняйте логины сайтов с явного согласия и заполняйте их кнопкой пароля на панели.",
       "emptyHeading": "Сохранённых паролей нет",
@@ -2729,6 +2735,12 @@ export const ruRU = {
       "outOfMemory": "Странице не хватило памяти."
     },
     "errors": {
+      "passwordImportRead": "Не удалось прочитать выбранный файл паролей.",
+      "passwordImportTooLarge": "Файл паролей превышает лимит импорта 10 МБ.",
+      "passwordImportInvalid": "Выбранный файл не является корректным UTF-8 CSV-экспортом паролей.",
+      "passwordImportColumns": "CSV должен содержать столбцы url, username и password.",
+      "passwordImportRows": "CSV содержит более 3000 строк паролей. Разделите его на меньшие файлы.",
+      "passwordImportEmpty": "В выбранном CSV не найдено корректных паролей HTTP или HTTPS.",
       "clipboard": "Системный буфер обмена не принял текст.",
       "tabUnavailable": "Вкладка больше недоступна.",
       "actionFailed": "Не удалось выполнить запрошенное действие браузера.",
@@ -2748,6 +2760,13 @@ export const ruRU = {
       "wrongProduct": "Этот ключ сторонника предназначен не для Bronom."
     },
     "dialog": {
+      "importPasswordsFile": "Выбрать CSV паролей браузера",
+      "choosePasswordFile": "Выбрать CSV",
+      "importPasswordsTitle": "Импортировать сохранённые пароли?",
+      "importPasswordsMessage": "Импортировать {count} сохранённых учётных записей в Bronom?",
+      "importPasswordsDetail": "Новых: {added} · обновлений: {updated} · пропущено: {skipped}\n\nПринятые пароли будут заново зашифрованы через {backend}. Выбранный CSV останется читаемым на диске; удалите его после импорта.",
+      "cancel": "Отмена",
+      "importPasswords": "Импортировать пароли",
       "pageDestroyedTitle": "Страница больше недоступна",
       "pageDestroyedMessage": "Закройте эту вкладку и откройте её снова из недавно закрытых.",
       "pageUnavailable": "Страница недоступна",

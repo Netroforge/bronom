@@ -1,3 +1,5 @@
+import { readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { expect, test } from './fixtures.js'
 import type { BrowserState, CredentialStorageStatus, CredentialSummary } from '../../src/shared/types.js'
 
@@ -30,4 +32,56 @@ test('exposes metadata-only password controls and fails closed without secure st
   } else {
     await expect(appWindow.getByText(state.status.reason!)).toBeVisible()
   }
+})
+
+test('imports a confirmed browser CSV without exposing plaintext outside the main process', async ({
+  appWindow,
+  electronApp,
+  profileDirectory
+}) => {
+  const status = await appWindow.evaluate('window.bronomCredentials.status()') as CredentialStorageStatus
+  if (!status.available) {
+    await expect(appWindow.evaluate('window.bronomCredentials.importFromCsv()')).rejects.toThrow(status.reason)
+    return
+  }
+
+  const csvPath = join(profileDirectory, 'browser-passwords.csv')
+  await writeFile(csvPath, [
+    'name,url,username,password,note',
+    'Existing,https://example.test/login,person,first-browser-secret,',
+    'Existing duplicate,https://example.test/account,person,final-browser-secret,',
+    'New,https://new.example/sign-in,new-person,new-browser-secret,',
+    'Unsafe,javascript:alert(1),attacker,unsafe-browser-secret,'
+  ].join('\n'), { encoding: 'utf8', mode: 0o600 })
+
+  await electronApp.evaluate(({ dialog }, selectedPath) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selectedPath] })
+    dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false })
+  }, csvPath)
+  expect(await appWindow.evaluate('window.bronomCredentials.importFromCsv()')).toEqual({
+    canceled: true,
+    added: 0,
+    updated: 0,
+    skipped: 0
+  })
+  expect(await appWindow.evaluate('window.bronomCredentials.list()')).toEqual([])
+
+  await electronApp.evaluate(({ dialog }) => {
+    dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false })
+  })
+  expect(await appWindow.evaluate('window.bronomCredentials.importFromCsv()')).toEqual({
+    canceled: false,
+    added: 2,
+    updated: 0,
+    skipped: 2
+  })
+  const imported = await appWindow.evaluate('window.bronomCredentials.list()') as CredentialSummary[]
+  expect(imported).toEqual([
+    expect.objectContaining({ origin: 'https://example.test', username: 'person' }),
+    expect.objectContaining({ origin: 'https://new.example', username: 'new-person' })
+  ])
+  expect(imported.every((entry) => Object.keys(entry).every((key) => key !== 'password' && key !== 'encryptedPassword'))).toBe(true)
+  const persisted = await readFile(join(profileDirectory, 'credentials.json'), 'utf8')
+  expect(persisted).not.toContain('browser-secret')
+  expect(persisted).not.toContain(csvPath)
 })

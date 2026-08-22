@@ -17,6 +17,18 @@ export interface CredentialEncryption {
   decrypt(value: Buffer): Promise<{ result: string; shouldReEncrypt: boolean }>
 }
 
+export interface CredentialStoreImportEntry {
+  origin: string
+  username: string
+  password: string
+}
+
+export interface CredentialStoreImportResult {
+  added: number
+  updated: number
+  duplicateRows: number
+}
+
 function normalizedOrigin(value: string): string | null {
   try {
     const url = new URL(value)
@@ -120,6 +132,47 @@ export class CredentialStore {
       this.replaceEntries(nextEntries)
       const { encryptedPassword: _encryptedPassword, ...summary } = entry
       return { ...summary }
+    })
+  }
+
+  async importMany(entries: readonly CredentialStoreImportEntry[]): Promise<CredentialStoreImportResult> {
+    const uniqueEntries = new Map<string, CredentialStoreImportEntry>()
+    for (const entry of entries) {
+      const origin = normalizedOrigin(entry.origin)
+      if (!origin) throw new TypeError('Credential origin must be an HTTP or HTTPS origin')
+      if (entry.username.length > 512) throw new TypeError('Credential username is too long')
+      if (!entry.password || entry.password.length > 16_384) {
+        throw new TypeError('Credential password must be between 1 and 16384 characters')
+      }
+      const normalized = { origin, username: entry.username, password: entry.password }
+      uniqueEntries.set(credentialIdentity(normalized), normalized)
+    }
+    return this.queueMutation(async () => {
+      const nextEntries = new Map(this.entries)
+      const existingByIdentity = new Map(
+        [...nextEntries.values()].map((entry) => [credentialIdentity(entry), entry] as const)
+      )
+      const now = new Date().toISOString()
+      let added = 0
+      let updated = 0
+      for (const [identity, imported] of uniqueEntries) {
+        const existing = existingByIdentity.get(identity)
+        const entry: PersistedCredential = {
+          id: existing?.id ?? randomUUID(),
+          origin: imported.origin,
+          username: imported.username,
+          encryptedPassword: (await this.encryption.encrypt(imported.password)).toString('base64'),
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now
+        }
+        nextEntries.set(entry.id, entry)
+        existingByIdentity.set(identity, entry)
+        if (existing) updated += 1
+        else added += 1
+      }
+      await this.persist(nextEntries.values())
+      this.replaceEntries(nextEntries)
+      return { added, updated, duplicateRows: entries.length - uniqueEntries.size }
     })
   }
 

@@ -155,6 +155,12 @@ export const plPL = {
       "help": "Po usunięciu decyzji Bronom zapyta ponownie przy następnej prośbie witryny."
     },
     "passwords": {
+      "importHeading": "Importuj z innej przeglądarki",
+      "importDescription": "Wyeksportuj hasła jako CSV z Chrome, Edge, Firefox lub innego menedżera, a następnie wybierz ten plik.",
+      "importButton": "Wybierz CSV przeglądarki…",
+      "importing": "Importowanie…",
+      "imported": "Dodano {added}, zaktualizowano {updated}, pominięto {skipped}.",
+      "importPlaintext": "Eksporty CSV przeglądarek zawierają czytelne hasła. Bronom odczytuje wybrany plik tylko w procesie głównym, natychmiast szyfruje przyjęte konta i nigdy nie udostępnia haseł przez MCP. Usuń CSV po imporcie.",
       "heading": "Zapisane hasła",
       "description": "Zapisuj loginy za wyraźną zgodą i wypełniaj je przyciskiem hasła na pasku.",
       "emptyHeading": "Brak zapisanych haseł",
@@ -2729,6 +2735,12 @@ export const plPL = {
       "outOfMemory": "Stronie zabrakło pamięci."
     },
     "errors": {
+      "passwordImportRead": "Nie udało się odczytać wybranego pliku haseł.",
+      "passwordImportTooLarge": "Plik haseł przekracza limit importu 10 MB.",
+      "passwordImportInvalid": "Wybrany plik nie jest prawidłowym eksportem haseł CSV UTF-8.",
+      "passwordImportColumns": "CSV musi zawierać kolumny url, username i password.",
+      "passwordImportRows": "CSV zawiera ponad 3000 wierszy haseł. Podziel go na mniejsze pliki.",
+      "passwordImportEmpty": "W wybranym CSV nie znaleziono prawidłowych haseł HTTP ani HTTPS.",
       "clipboard": "Schowek systemowy nie przyjął tekstu.",
       "tabUnavailable": "Karta nie jest już dostępna.",
       "actionFailed": "Nie udało się ukończyć żądanego działania przeglądarki.",
@@ -2748,6 +2760,13 @@ export const plPL = {
       "wrongProduct": "Ten klucz wspierającego nie jest przeznaczony dla Bronom."
     },
     "dialog": {
+      "importPasswordsFile": "Wybierz CSV haseł przeglądarki",
+      "choosePasswordFile": "Wybierz CSV",
+      "importPasswordsTitle": "Importować zapisane hasła?",
+      "importPasswordsMessage": "Importować {count} zapisanych kont do Bronom?",
+      "importPasswordsDetail": "Nowe: {added} · aktualizacje: {updated} · pominięte: {skipped}\n\nPrzyjęte hasła zostaną ponownie zaszyfrowane przez {backend}. Wybrany CSV pozostaje czytelny na dysku; usuń go po imporcie.",
+      "cancel": "Anuluj",
+      "importPasswords": "Importuj hasła",
       "pageDestroyedTitle": "Ta strona nie jest już dostępna",
       "pageDestroyedMessage": "Zamknij tę kartę i otwórz ją ponownie z listy Ostatnio zamknięte.",
       "pageUnavailable": "Strona niedostępna",

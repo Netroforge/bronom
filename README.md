@@ -91,6 +91,10 @@ When you manually submit a website password form, Bronom can ask whether to save
 
 Saved-account metadata can be reviewed or removed under **Settings → Passwords**. Bronom never exposes stored passwords through its preload API, Settings, Home dashboard, or MCP tools. Use the password button in the toolbar to fill an account for the active website. Bronom pauses new MCP commands before decrypting and filling, waits for active requests to finish, and remains paused until you explicitly resume agents.
 
+To migrate accounts from an installed browser, export its passwords as CSV, then choose **Settings → Passwords → Choose browser CSV…**. Chrome, Edge, Firefox, and compatible password managers use or can produce the required `url`, `username`, and `password` columns. Bronom opens the file through a native picker, parses at most 3,000 rows and 10 MB in the main process, shows counts before changing the vault, and imports only after explicit confirmation. Valid HTTP(S) accounts are re-encrypted atomically with Bronom's operating-system-backed vault; later duplicate rows win, existing origin-and-username matches are updated, and invalid rows are reported as skipped. Password values and the selected file path never cross the preload boundary or reach MCP.
+
+Browser CSV exports contain readable passwords. Delete the export after confirming the import. Bronom deliberately does not read or decrypt another browser's live profile database: those stores are protected by browser- and OS-specific credential systems, may require a primary password or biometric approval, and increasingly bind secrets to the source application. The browser's authenticated export flow is the supported consent boundary.
+
 ## Prevent accidental human interaction
 
 Use **Tab** beside the address bar to lock the current tab, or **Bronom** in the tab strip to lock the entire app. Both block human mouse, wheel, context-menu, and keyboard input. A full-app lock leaves only its own unlock button active, so it is still easy to release. MCP inspection and interaction continue to work while human input is locked.

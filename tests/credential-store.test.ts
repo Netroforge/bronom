@@ -45,6 +45,51 @@ describe('CredentialStore', () => {
     expect(await store.password(original.id)).toBe('new password')
   })
 
+  it('atomically imports unique browser accounts and keeps the last duplicate row', async () => {
+    const { path, store } = await createStore()
+    const existing = await store.save('https://example.com', 'person', 'old password')
+
+    const result = await store.importMany([
+      { origin: 'https://example.com/login', username: 'person', password: 'first imported password' },
+      { origin: 'https://new.example/sign-in', username: 'new person', password: 'first new password' },
+      { origin: 'https://example.com/account', username: 'person', password: 'final imported password' },
+      { origin: 'https://new.example/other', username: 'new person', password: 'final new password' }
+    ])
+
+    expect(result).toEqual({ added: 1, updated: 1, duplicateRows: 2 })
+    expect(store.list()).toHaveLength(2)
+    expect(store.list().find((entry) => entry.origin === 'https://example.com')?.id).toBe(existing.id)
+    expect(await store.password(existing.id)).toBe('final imported password')
+    const added = store.list().find((entry) => entry.origin === 'https://new.example')!
+    expect(await store.password(added.id)).toBe('final new password')
+
+    const persisted = await readFile(path, 'utf8')
+    expect(persisted).not.toContain('imported password')
+    expect(persisted).not.toContain('new password')
+  })
+
+  it('keeps the complete vault unchanged when imported encryption fails', async () => {
+    const failingEncryption: CredentialEncryption = {
+      ...encryption,
+      encrypt: async (value) => {
+        if (value === 'cannot encrypt') throw new Error('encryption unavailable')
+        return encryption.encrypt(value)
+      }
+    }
+    const { path, store } = await createStore(failingEncryption)
+    const existing = await store.save('https://example.com', 'person', 'original password')
+    const before = await readFile(path, 'utf8')
+
+    await expect(store.importMany([
+      { origin: 'https://new.example', username: 'new', password: 'encryptable' },
+      { origin: 'https://broken.example', username: 'broken', password: 'cannot encrypt' }
+    ])).rejects.toThrow('encryption unavailable')
+
+    expect(store.list()).toEqual([existing])
+    expect(await store.password(existing.id)).toBe('original password')
+    expect(await readFile(path, 'utf8')).toBe(before)
+  })
+
   it('serializes overlapping saves for the same account and keeps the last password', async () => {
     let releaseEncryption: () => void = () => undefined
     const encryptionGate = new Promise<void>((resolve) => { releaseEncryption = resolve })

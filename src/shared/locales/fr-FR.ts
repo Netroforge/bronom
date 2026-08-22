@@ -155,6 +155,12 @@ export const frFR = {
       "help": "Après suppression, Bronom reposera la question lors de la prochaine demande du site."
     },
     "passwords": {
+      "importHeading": "Importer depuis un autre navigateur",
+      "importDescription": "Exportez les mots de passe au format CSV depuis Chrome, Edge, Firefox ou un autre gestionnaire, puis choisissez ce fichier.",
+      "importButton": "Choisir le CSV du navigateur…",
+      "importing": "Importation…",
+      "imported": "{added} ajoutés et {updated} mis à jour ; {skipped} ignorés.",
+      "importPlaintext": "Les exports CSV des navigateurs contiennent des mots de passe lisibles. Bronom lit le fichier choisi uniquement dans le processus principal, chiffre immédiatement les comptes acceptés et n’expose jamais les mots de passe à MCP. Supprimez le CSV après l’importation.",
       "heading": "Mots de passe enregistrés",
       "description": "Enregistrez les identifiants avec consentement explicite et renseignez-les depuis le bouton de la barre d’outils.",
       "emptyHeading": "Aucun mot de passe enregistré",
@@ -2729,6 +2735,12 @@ export const frFR = {
       "outOfMemory": "La page a manqué de mémoire."
     },
     "errors": {
+      "passwordImportRead": "Impossible de lire le fichier de mots de passe sélectionné.",
+      "passwordImportTooLarge": "Le fichier de mots de passe dépasse la limite d’importation de 10 Mo.",
+      "passwordImportInvalid": "Le fichier sélectionné n’est pas un export CSV UTF-8 valide.",
+      "passwordImportColumns": "Le CSV doit contenir les colonnes url, username et password.",
+      "passwordImportRows": "Le CSV contient plus de 3 000 lignes. Divisez-le en fichiers plus petits.",
+      "passwordImportEmpty": "Aucun mot de passe HTTP ou HTTPS valide n’a été trouvé dans le CSV.",
       "clipboard": "Le presse-papiers système n’a pas accepté le texte.",
       "tabUnavailable": "L’onglet n’est plus disponible.",
       "actionFailed": "Impossible de terminer l’action demandée au navigateur.",
@@ -2748,6 +2760,13 @@ export const frFR = {
       "wrongProduct": "Cette clé de soutien n’est pas destinée à Bronom."
     },
     "dialog": {
+      "importPasswordsFile": "Choisir le CSV de mots de passe du navigateur",
+      "choosePasswordFile": "Choisir le CSV",
+      "importPasswordsTitle": "Importer les mots de passe enregistrés ?",
+      "importPasswordsMessage": "Importer {count} comptes enregistrés dans Bronom ?",
+      "importPasswordsDetail": "Nouveaux : {added} · mises à jour : {updated} · ignorés : {skipped}\n\nLes mots de passe acceptés seront rechiffrés avec {backend}. Le CSV sélectionné reste lisible sur le disque ; supprimez-le après l’importation.",
+      "cancel": "Annuler",
+      "importPasswords": "Importer les mots de passe",
       "pageDestroyedTitle": "Cette page n’est plus disponible",
       "pageDestroyedMessage": "Fermez cet onglet et rouvrez-le depuis Fermés récemment.",
       "pageUnavailable": "Page indisponible",

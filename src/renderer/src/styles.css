@@ -3430,6 +3430,15 @@ button { color: inherit; }
 .permission-row select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .credential-row { display: grid; min-height: 64px; align-items: center; gap: 12px; padding: 10px 12px 10px 14px; grid-template-columns: minmax(0, 1fr) 28px; }
 .credential-remove { justify-self: end; }
+.credential-import-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px 18px; padding: 16px; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--surface-muted); }
+.credential-import-card h4 { margin: 0; font-size: 15px; }
+.credential-import-card > div > p { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.credential-import-card > button { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.credential-import-card > button svg { width: 17px; height: 17px; }
+.credential-import-status { grid-column: 1 / -1; color: var(--success); font-size: 12px; font-weight: 650; }
+.credential-import-status.error { color: var(--danger); }
+.credential-import-warning { display: flex; grid-column: 1 / -1; align-items: flex-start; gap: 7px; margin: 0; padding-top: 10px; border-top: 1px solid var(--border-soft); color: var(--muted); font-size: 11px; line-height: 1.5; }
+.credential-import-warning svg { width: 16px; height: 16px; flex: 0 0 auto; color: var(--warning); }
 .permission-remove { display: grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; font-size: 17px; }
 .permission-remove svg { width: 17px; height: 17px; }
 .permission-remove:hover { color: var(--text); background: var(--hover); }
@@ -3790,6 +3799,8 @@ button { color: inherit; }
   .search-engine-option:last-child:nth-child(odd) { grid-column: auto; }
   .download-location-row { align-items: stretch; flex-direction: column; gap: 12px; }
   .download-location-actions { flex-wrap: wrap; }
+  .credential-import-card { grid-template-columns: 1fr; }
+  .credential-import-card > button { justify-content: center; }
   .update-status-pill { max-width: 190px; }
   .accessibility-audit-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .performance-vitals { grid-template-columns: 1fr; }

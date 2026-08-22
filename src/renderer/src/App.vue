@@ -121,6 +121,7 @@ import BookmarksPanel from './components/BookmarksPanel.vue'
 import CommandPalette from './components/CommandPalette.vue'
 import ConsolePanelContainer from './components/ConsolePanelContainer.vue'
 import CredentialPicker from './components/CredentialPicker.vue'
+import CredentialImportCard from './components/CredentialImportCard.vue'
 import DiagnosticsPanels from './components/DiagnosticsPanels.vue'
 import DownloadsPanel from './components/DownloadsPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
@@ -211,6 +212,7 @@ const { state } = storeToRefs(browserStore)
 const { settings, systemTheme, resolvedLocale } = storeToRefs(settingsStore)
 const browser = window.bronom
 const bookmarksApi = window.bronomBookmarks
+const credentialsApi = window.bronomCredentials
 const downloadsApi = window.bronomDownloads
 const historyApi = window.bronomHistory
 const activeTab = computed(() => state.value.tabs.find((tab) => tab.id === state.value.activeTabId))
@@ -5289,12 +5291,13 @@ onBeforeUnmount(() => {
               <span class="info-dot" aria-hidden="true"><IconWarning /></span>
               <p>{{ credentialStorage.reason }}</p>
             </div>
-            <div v-else-if="!credentials.length" class="site-permissions-empty">
+            <CredentialImportCard v-if="credentialStorage.available" :import-from-csv="credentialsApi.importFromCsv" />
+            <div v-if="credentialStorage.available && !credentials.length" class="site-permissions-empty">
               <span class="empty-permission-icon" aria-hidden="true"><IconKey /></span>
               <strong>{{ t('settings.passwords.emptyHeading') }}</strong>
               <p>{{ t('settings.passwords.emptyDescription') }}</p>
             </div>
-            <div v-else class="permission-sites">
+            <div v-else-if="credentialStorage.available" class="permission-sites">
               <section v-for="credential in credentials" :key="credential.id" class="permission-site">
                 <div class="credential-row">
                   <span class="permission-name">

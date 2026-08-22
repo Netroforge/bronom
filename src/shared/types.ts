@@ -416,6 +416,13 @@ export interface CredentialStorageStatus {
   reason?: string
 }
 
+export interface CredentialImportResult {
+  canceled: boolean
+  added: number
+  updated: number
+  skipped: number
+}
+
 export type UpdateStatus =
   | 'idle'
   | 'checking'
@@ -2326,6 +2333,7 @@ export interface BronomPermissionsApi {
 export interface BronomCredentialsApi {
   status(): Promise<CredentialStorageStatus>
   list(): Promise<CredentialSummary[]>
+  importFromCsv(): Promise<CredentialImportResult>
   fill(tabId: string, credentialId: string): Promise<boolean>
   remove(id: string): Promise<boolean>
   clear(): Promise<void>
