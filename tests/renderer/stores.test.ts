@@ -156,6 +156,28 @@ describe('browser Pinia store lifecycle', () => {
     await nextTick()
     expect(store.state.activeTabId).toBe('selected')
   })
+
+  it('does not let a delayed action response overwrite a newer browser event', async () => {
+    const action = deferred<BrowserState>()
+    let listener: ((state: BrowserState) => void) | undefined
+    installBrowserApi({
+      getState: async () => browserState('initial'),
+      onStateChanged: (next) => {
+        listener = next
+        return vi.fn()
+      }
+    })
+    const store = useBrowserStore()
+    await store.initialize()
+
+    const syncing = store.syncOperation(action.promise)
+    listener?.(browserState('newer-event'))
+    action.resolve(browserState('stale-response'))
+    await syncing
+
+    expect(store.state.activeTabId).toBe('newer-event')
+    store.dispose()
+  })
 })
 
 describe('settings Pinia store lifecycle', () => {

@@ -106,6 +106,7 @@ import HistoryPanel from './components/HistoryPanel.vue'
 import NetworkPanel from './components/NetworkPanel.vue'
 import PageToolsPanel from './components/PageToolsPanel.vue'
 import PanelDockPicker from './components/PanelDockPicker.vue'
+import PerformanceSettingsPanel from './components/PerformanceSettingsPanel.vue'
 import PrivacySettingsPanel from './components/PrivacySettingsPanel.vue'
 import ResponsivePreviewPanel from './components/ResponsivePreviewPanel.vue'
 import SiteControlsPanel from './components/SiteControlsPanel.vue'
@@ -121,6 +122,7 @@ import { useCredentialsController } from './composables/useCredentialsController
 import { useDownloadSettingsController } from './composables/useDownloadSettingsController'
 import { useEnvironmentPanelController } from './composables/useEnvironmentPanelController'
 import { usePageExportController } from './composables/usePageExportController'
+import { usePerformanceSettingsController } from './composables/usePerformanceSettingsController'
 import { usePrivacySettingsController } from './composables/usePrivacySettingsController'
 import { useSiteDataSummaryController } from './composables/useSiteDataSummaryController'
 import { useSitePermissionsController } from './composables/useSitePermissionsController'
@@ -132,11 +134,6 @@ import {
 } from '../../shared/update-presentation'
 import { browserShortcutAction, type BrowserShortcutAction } from '../../shared/browser-shortcuts'
 import type { CommandPaletteCommandId } from '../../shared/command-palette'
-import {
-  DEFAULT_MEMORY_SAVER_TIMEOUT_MINUTES,
-  MEMORY_SAVER_TIMEOUT_MINUTES,
-  type MemorySaverTimeoutMinutes
-} from '../../shared/memory-saver'
 import {
   buildLocalAddressSuggestions,
   type AddressSuggestion,
@@ -380,8 +377,31 @@ const {
   reset: resetDownloadSettings,
   dispose: disposeDownloadSettingsController
 } = downloadSettingsController
+const performanceSettingsController = usePerformanceSettingsController({
+  settings,
+  browserState: state,
+  setEnabled: (enabled) => settingsStore.setMemorySaverEnabled(enabled),
+  setTimeout: (minutes) => settingsStore.setMemorySaverTimeoutMinutes(minutes),
+  sleepInactiveTabs: () => browser.sleepInactiveTabs(),
+  syncBrowserState: (operation) => browserStore.syncOperation(operation),
+  formatError: (error, operation) => friendlyUiError(
+    error,
+    t(operation === 'saving' ? 'runtime.toast.settingKept' : 'runtime.toast.actionFailed')
+  ),
+  onError: (error, operation) => showAppToast(
+    'error',
+    t(operation === 'saving' ? 'runtime.toast.settingNotSaved' : 'runtime.toast.actionFailed'),
+    friendlyUiError(error, t(operation === 'saving' ? 'runtime.toast.settingKept' : 'runtime.toast.actionFailed'))
+  )
+})
+const {
+  busy: performanceSettingsBusy,
+  reset: resetPerformanceSettings,
+  dispose: disposePerformanceSettingsController
+} = performanceSettingsController
 const settingsResetDisabled = computed(() => (
   (settingsSection.value === 'downloads' && downloadSettingsBusy.value)
+  || (settingsSection.value === 'performance' && performanceSettingsBusy.value)
   || (settingsSection.value === 'privacy' && privacySettingsController.clearing.value)
   || (settingsSection.value === 'permissions' && sitePermissionsBusy.value)
   || (settingsSection.value === 'mcp' && mcpPortState.value === 'saving')
@@ -788,7 +808,6 @@ const inspectorIssuesLabel = computed(() => {
 })
 const homeTab = computed(() => state.value.tabs.find((tab) => tab.url.startsWith('bronom://home')))
 const regularTabs = computed(() => state.value.tabs.filter((tab) => !tab.url.startsWith('bronom://home')))
-const sleepingTabsCount = computed(() => regularTabs.value.filter((tab) => tab.sleeping).length)
 function tabGroupStyle(tab: BrowserTabState): Record<string, string> | undefined {
   if (!tab.mcpGroupId) return undefined
   const color = state.value.mcpTabGroups.find((group) => group.id === tab.mcpGroupId)?.color ?? defaultTabGroupColor(tab.mcpGroupId)
@@ -2349,31 +2368,6 @@ async function selectSearchEngine(searchEngine: SearchEngineName): Promise<boole
   return applySettingsChange(window.bronomSettings.setSearchEngine(searchEngine))
 }
 
-async function setMemorySaverEnabled(event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement
-  if (!(await applySettingsChange(window.bronomSettings.setMemorySaverEnabled(input.checked)))) {
-    input.checked = settings.value.memorySaverEnabled
-  }
-}
-
-async function setMemorySaverTimeout(event: Event): Promise<void> {
-  const input = event.target as HTMLSelectElement
-  const timeoutMinutes = Number(input.value) as MemorySaverTimeoutMinutes
-  if (!(await applySettingsChange(window.bronomSettings.setMemorySaverTimeoutMinutes(timeoutMinutes)))) {
-    input.value = String(settings.value.memorySaverTimeoutMinutes)
-  }
-}
-
-async function sleepInactiveTabsNow(): Promise<void> {
-  state.value = await browser.sleepInactiveTabs()
-}
-
-function memorySaverTimeoutLabel(timeoutMinutes: number): string {
-  if (timeoutMinutes < 60) return t('runtimeActions.memory.minutes', { count: localNumber(timeoutMinutes) }, timeoutMinutes)
-  const hours = timeoutMinutes / 60
-  return t('runtimeActions.memory.hours', { count: localNumber(hours) }, hours)
-}
-
 function testAttentionSound(): void {
   playFoley(settings.value.attentionSoundCue, { volume: 0.65 })
 }
@@ -2745,8 +2739,7 @@ async function resetCurrentSection(): Promise<void> {
     return
   }
   if (settingsSection.value === 'performance') {
-    if (!(await applySettingsChange(window.bronomSettings.setMemorySaverEnabled(true)))) return
-    await applySettingsChange(window.bronomSettings.setMemorySaverTimeoutMinutes(DEFAULT_MEMORY_SAVER_TIMEOUT_MINUTES))
+    await resetPerformanceSettings()
     return
   }
   if (settingsSection.value === 'permissions') {
@@ -3086,6 +3079,7 @@ onBeforeUnmount(() => {
   if (areaCaptureResetTimer !== undefined) window.clearTimeout(areaCaptureResetTimer)
   disposePageExportController()
   disposeDownloadSettingsController()
+  disposePerformanceSettingsController()
   disposePrivacySettingsController()
   disposeSitePermissionsController()
   disposeCredentialsController()
@@ -4060,55 +4054,11 @@ onBeforeUnmount(() => {
             v-else-if="settingsSection === 'downloads'"
             :controller="downloadSettingsController"
           />
-          <main v-else-if="settingsSection === 'performance'" class="settings-content performance-settings">
-            <div class="setting-copy">
-              <h3>{{ t('settings.memory.heading') }}</h3>
-              <p>{{ t('settings.memory.description') }}</p>
-            </div>
-            <div class="memory-saver-summary" aria-live="polite">
-              <span class="settings-nav-icon" aria-hidden="true"><IconBedtime /></span>
-              <span><strong>{{ sleepingTabsCount }} {{ t('settings.memory.sleeping') }}</strong><small>{{ t('settings.memory.of') }} {{ regularTabs.length }} {{ t('settings.memory.websiteTabs') }}</small></span>
-            </div>
-            <div class="settings-rows">
-              <label class="settings-row" for="setting-memory-saver">
-                <span>
-                  <strong>{{ t('settings.memory.auto') }}</strong>
-                  <small>{{ t('settings.memory.autoDescription') }}</small>
-                </span>
-                <input
-                  id="setting-memory-saver"
-                  type="checkbox"
-                  :checked="settings.memorySaverEnabled"
-                  @change="setMemorySaverEnabled"
-                />
-              </label>
-              <label class="settings-row" for="setting-memory-saver-timeout">
-                <span>
-                  <strong>{{ t('settings.memory.sleepAfter') }}</strong>
-                  <small>{{ t('settings.memory.counted') }}</small>
-                </span>
-                <select
-                  id="setting-memory-saver-timeout"
-                  :value="settings.memorySaverTimeoutMinutes"
-                  :disabled="!settings.memorySaverEnabled"
-                  @change="setMemorySaverTimeout"
-                >
-                  <option v-for="timeout in MEMORY_SAVER_TIMEOUT_MINUTES" :key="timeout" :value="timeout">
-                    {{ memorySaverTimeoutLabel(timeout) }}
-                  </option>
-                </select>
-              </label>
-            </div>
-            <div class="memory-saver-actions">
-              <button class="secondary-button" type="button" :disabled="!settings.memorySaverEnabled" @click="sleepInactiveTabsNow">
-                <IconBedtime aria-hidden="true" /> {{ t('settings.memory.sleepNow') }}
-              </button>
-            </div>
-            <div class="settings-info">
-              <span class="info-dot" aria-hidden="true"><IconInfo /></span>
-              <p>{{ t('settings.memory.help') }}</p>
-            </div>
-          </main>
+          <PerformanceSettingsPanel
+            v-else-if="settingsSection === 'performance'"
+            :controller="performanceSettingsController"
+            :format-number="localNumber"
+          />
           <main v-else-if="settingsSection === 'mcp'" class="settings-content">
             <div class="setting-copy">
               <h3>{{ t('settings.mcp.heading') }}</h3>

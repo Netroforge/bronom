@@ -28,6 +28,7 @@ import { browserShortcutAction, type BrowserShortcutAction } from '../../shared/
 import { translate, type MessageKey, type MessageParameters } from '../../shared/i18n.js'
 import type { SupportedLocale } from '../../shared/locale.js'
 import { safeNavigationHistorySnapshot } from './navigation-history.js'
+import { MemorySaverSweepQueue } from '../memory-saver-sweep.js'
 import { accessibilityAuditPageScript, normalizeAccessibilityAuditOptions } from '../../shared/accessibility-audit.js'
 import { buildBrowserDebugReport, redactDiagnosticText, sanitizeConsoleMessage } from '../../shared/debug-report.js'
 import {
@@ -818,6 +819,7 @@ export class BrowserTabsManager {
   private restoringLayout = false
   private persistTimer: NodeJS.Timeout | null = null
   private memorySaverTimer: NodeJS.Timeout | null = null
+  private readonly memorySaverSweeps = new MemorySaverSweepQueue()
   private memorySaverEnabled: boolean
   private memorySaverTimeoutMinutes: MemorySaverTimeoutMinutes
   private readonly mcpActivitiesByTab = new Map<string, Set<string>>()
@@ -6317,6 +6319,10 @@ export class BrowserTabsManager {
   }
 
   private async sweepMemorySaver(force: boolean): Promise<void> {
+    return this.memorySaverSweeps.run(() => this.runMemorySaverSweep(force))
+  }
+
+  private async runMemorySaverSweep(force: boolean): Promise<void> {
     if (!this.memorySaverEnabled) return
     const cutoff = memorySaverCutoff(Date.now(), this.memorySaverTimeoutMinutes)
     for (const tab of this.tabs.values()) {
