@@ -34,7 +34,6 @@ import IconKeyboardArrowDown from '~icons/material-symbols/keyboard-arrow-down-r
 import IconKeyboardArrowRight from '~icons/material-symbols/keyboard-arrow-right-rounded'
 import IconKeyboardArrowUp from '~icons/material-symbols/keyboard-arrow-up-rounded'
 import IconKeyboardCommandKey from '~icons/material-symbols/keyboard-command-key-rounded'
-import IconCleaning from '~icons/material-symbols/cleaning-services-rounded'
 import IconKeep from '~icons/material-symbols/keep-rounded'
 import IconLanguage from '~icons/material-symbols/language-rounded'
 import IconKey from '~icons/material-symbols/key-rounded'
@@ -77,9 +76,6 @@ import {
   BrowserDownloadState,
   BrowserBookmark,
   BrowserHistoryEntry,
-  BrowsingDataClearOptions,
-  BrowsingDataSummary,
-  BrowsingDataWebsiteSummary,
   HelpMenuAction,
   McpTabActivity,
   McpControlState,
@@ -111,6 +107,7 @@ import HistoryPanel from './components/HistoryPanel.vue'
 import NetworkPanel from './components/NetworkPanel.vue'
 import PageToolsPanel from './components/PageToolsPanel.vue'
 import PanelDockPicker from './components/PanelDockPicker.vue'
+import PrivacySettingsPanel from './components/PrivacySettingsPanel.vue'
 import ResponsivePreviewPanel from './components/ResponsivePreviewPanel.vue'
 import SiteControlsPanel from './components/SiteControlsPanel.vue'
 import SiteStoragePanel from './components/SiteStoragePanel.vue'
@@ -122,6 +119,7 @@ import { useShellWindowLifecycle } from './composables/useShellWindowLifecycle'
 import { useDiagnosticsController } from './composables/useDiagnosticsController'
 import { useEnvironmentPanelController } from './composables/useEnvironmentPanelController'
 import { usePageExportController } from './composables/usePageExportController'
+import { usePrivacySettingsController } from './composables/usePrivacySettingsController'
 import { useSiteDataSummaryController } from './composables/useSiteDataSummaryController'
 import {
   shellHeightForBrowserContent,
@@ -280,15 +278,20 @@ const {
 } = environmentController
 const workspaceEditorOpen = ref(false)
 const workspaceEditor = ref<InstanceType<typeof WorkspaceEditor> | null>(null)
-const browsingDataSummary = ref<BrowsingDataSummary | null>(null)
-const browsingDataOptions = ref<BrowsingDataClearOptions>({ history: true, cookiesAndSiteData: false, cache: true })
-const browsingDataState = ref<'idle' | 'loading' | 'clearing' | 'cleared' | 'error'>('idle')
-const browsingDataMessage = ref('')
-const janitorWebsites = ref<BrowsingDataWebsiteSummary[]>([])
-const janitorSearch = ref('')
-const janitorState = ref<'idle' | 'loading' | 'clearing' | 'cleared' | 'error'>('idle')
-const janitorClearingOrigin = ref<string | null>(null)
-const janitorMessage = ref('')
+const privacySettingsController = usePrivacySettingsController({
+  api: window.bronomBrowsingData,
+  translate: (key, parameters, plural) => plural === undefined
+    ? t(key, parameters ?? {})
+    : t(key, parameters ?? {}, plural),
+  confirm: (message) => window.confirm(message),
+  formatNumber: localNumber
+})
+const {
+  search: janitorSearch,
+  refresh: refreshPrivacySettings,
+  resetSelection: resetPrivacySelection,
+  dispose: disposePrivacySettingsController
+} = privacySettingsController
 const siteControlsOpen = ref(false)
 const siteDataController = useSiteDataSummaryController({
   current: () => activeTab.value && activeWebUrl.value
@@ -857,26 +860,6 @@ const selectedAddressSuggestion = computed(() => (
     ? addressSuggestions.value[addressSuggestionSelection.value]
     : undefined
 ))
-const selectedBrowsingDataCount = computed(() => [
-  browsingDataOptions.value.history,
-  browsingDataOptions.value.cookiesAndSiteData,
-  browsingDataOptions.value.cache
-].filter(Boolean).length)
-const canClearBrowsingData = computed(() => (
-  selectedBrowsingDataCount.value > 0
-  && browsingDataState.value !== 'loading'
-  && browsingDataState.value !== 'clearing'
-  && janitorState.value !== 'clearing'
-))
-const filteredJanitorWebsites = computed(() => {
-  const query = janitorSearch.value.trim().toLocaleLowerCase()
-  if (!query) return janitorWebsites.value
-  return janitorWebsites.value.filter((site) => (
-    site.hostname.toLocaleLowerCase().includes(query)
-    || site.origin.toLocaleLowerCase().includes(query)
-    || site.title.toLocaleLowerCase().includes(query)
-  ))
-})
 const downloadButtonLabel = computed(() => {
   if (activeDownloads.value.length) return t('runtime.downloads.progress', { count: localNumber(activeDownloads.value.length) }, activeDownloads.value.length)
   if (downloads.value[0]?.state === 'completed') return t('runtime.downloads.complete', { filename: downloads.value[0].filename })
@@ -1085,89 +1068,6 @@ function closeWorkspaceEditor(): void {
 
 async function openHistoryEntry(entry: BrowserHistoryEntry): Promise<void> {
   await syncState(browser.newTab({ url: entry.url, active: true }))
-}
-
-async function refreshBrowsingDataSummary(): Promise<void> {
-  if (browsingDataState.value === 'clearing') return
-  browsingDataState.value = 'loading'
-  browsingDataMessage.value = ''
-  try {
-    browsingDataSummary.value = await window.bronomBrowsingData.summary()
-    browsingDataState.value = 'idle'
-  } catch (error) {
-    browsingDataState.value = 'error'
-    browsingDataMessage.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function refreshJanitorWebsites(): Promise<void> {
-  janitorState.value = 'loading'
-  janitorMessage.value = ''
-  try {
-    janitorWebsites.value = await window.bronomBrowsingData.websites()
-    janitorState.value = 'idle'
-  } catch (error) {
-    janitorState.value = 'error'
-    janitorMessage.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function clearSelectedBrowsingData(): Promise<void> {
-  const selected: string[] = []
-  if (browsingDataOptions.value.history) selected.push(t('privacyActions.historyAll'))
-  if (browsingDataOptions.value.cookiesAndSiteData) {
-    selected.push(t('privacyActions.cookiesAll'))
-  }
-  if (browsingDataOptions.value.cache) selected.push(t('privacyActions.cache'))
-  if (!selected.length) return
-  const confirmed = window.confirm(t('runtimeActions.browsingData.confirm', { items: selected.map((item) => t('runtimeActions.browsingData.item', { item })).join('\n') }))
-  if (!confirmed) return
-  browsingDataState.value = 'clearing'
-  browsingDataMessage.value = ''
-  try {
-    browsingDataSummary.value = await window.bronomBrowsingData.clear(browsingDataOptions.value)
-    janitorWebsites.value = await window.bronomBrowsingData.websites()
-    browsingDataState.value = 'cleared'
-    browsingDataMessage.value = t('runtime.browsingData.cleared', {}, selected.length)
-  } catch (error) {
-    browsingDataState.value = 'error'
-    browsingDataMessage.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-function janitorWebsiteMeta(site: BrowsingDataWebsiteSummary): string[] {
-  const items: string[] = []
-  if (site.cookieCount) items.push(t('runtimeActions.browsingData.cookieMeta', { count: localNumber(site.cookieCount) }, site.cookieCount))
-  if (site.historyEntries) items.push(t('privacyActions.historyWithVisits', { pages: localNumber(site.historyEntries), visits: localNumber(site.historyVisits) }, site.historyEntries))
-  if (site.openTabCount) items.push(t('privacyActions.openTabs', { count: localNumber(site.openTabCount) }, site.openTabCount))
-  if (site.bookmarkCount) items.push(t('privacyActions.bookmarksKept', { count: localNumber(site.bookmarkCount) }, site.bookmarkCount))
-  if (site.savedPasswordCount) items.push(t('privacyActions.accountsKept', { count: localNumber(site.savedPasswordCount) }, site.savedPasswordCount))
-  if (site.permissionDecisionCount) items.push(t('privacyActions.decisionsKept', { count: localNumber(site.permissionDecisionCount) }, site.permissionDecisionCount))
-  return items
-}
-
-async function clearJanitorWebsite(site: BrowsingDataWebsiteSummary): Promise<void> {
-  const selected: string[] = []
-  if (browsingDataOptions.value.history) selected.push(t('privacyActions.historySite'))
-  if (browsingDataOptions.value.cookiesAndSiteData) selected.push(t('privacyActions.cookiesSite'))
-  if (browsingDataOptions.value.cache) selected.push(t('privacyActions.cache'))
-  if (!selected.length) return
-  const confirmed = window.confirm(t('privacyActions.clearSiteConfirm', { origin: site.origin, items: selected.map((item) => t('runtimeActions.browsingData.item', { item })).join('\n') }))
-  if (!confirmed) return
-  janitorState.value = 'clearing'
-  janitorClearingOrigin.value = site.origin
-  janitorMessage.value = ''
-  try {
-    browsingDataSummary.value = await window.bronomBrowsingData.clear({ ...browsingDataOptions.value, origin: site.origin })
-    janitorWebsites.value = await window.bronomBrowsingData.websites()
-    janitorState.value = 'cleared'
-    janitorMessage.value = t('privacyActions.clearedSite', { origin: site.origin })
-  } catch (error) {
-    janitorState.value = 'error'
-    janitorMessage.value = error instanceof Error ? error.message : String(error)
-  } finally {
-    janitorClearingOrigin.value = null
-  }
 }
 
 async function toggleTabSearch(): Promise<void> {
@@ -1445,8 +1345,7 @@ watch(helpDialog, async () => {
 
 watch([settingsOpen, settingsSection], ([open, section]) => {
   if (open && section === 'privacy') {
-    void refreshBrowsingDataSummary()
-    void refreshJanitorWebsites()
+    void refreshPrivacySettings()
   }
 })
 
@@ -2898,9 +2797,7 @@ async function resetCurrentSection(): Promise<void> {
     return
   }
   if (settingsSection.value === 'privacy') {
-    browsingDataOptions.value = { history: true, cookiesAndSiteData: false, cache: true }
-    browsingDataMessage.value = ''
-    browsingDataState.value = 'idle'
+    resetPrivacySelection()
     return
   }
   if (settingsSection.value === 'mcp') {
@@ -3235,6 +3132,7 @@ onBeforeUnmount(() => {
   if (elementPickerResetTimer !== undefined) window.clearTimeout(elementPickerResetTimer)
   if (areaCaptureResetTimer !== undefined) window.clearTimeout(areaCaptureResetTimer)
   disposePageExportController()
+  disposePrivacySettingsController()
   disposeDiagnosticsController()
   for (const timer of mcpActivityTimers.values()) window.clearTimeout(timer)
   mcpActivityTimers.clear()
@@ -4354,97 +4252,12 @@ onBeforeUnmount(() => {
               <p v-else>{{ t('settings.mcp.warning') }}</p>
             </div>
           </main>
-          <main v-else-if="settingsSection === 'privacy'" class="settings-content privacy-settings">
-            <div class="setting-copy">
-              <h3>{{ t('settings.privacy.heading') }}</h3>
-              <p>{{ t('settings.privacy.description') }}</p>
-            </div>
-            <fieldset class="privacy-category-options" :disabled="browsingDataState === 'clearing' || janitorState === 'clearing'">
-              <legend>{{ t('settings.privacy.whatToClear') }}</legend>
-              <label for="clear-browsing-history">
-                <input id="clear-browsing-history" v-model="browsingDataOptions.history" type="checkbox" />
-                <span><strong>{{ t('settings.privacy.history') }}</strong><small>{{ t('settings.privacy.localVisits') }}</small></span>
-              </label>
-              <label for="clear-cookies-site-data">
-                <input id="clear-cookies-site-data" v-model="browsingDataOptions.cookiesAndSiteData" type="checkbox" />
-                <span><strong>{{ t('settings.privacy.cookies') }}</strong><small>{{ t('settings.privacy.signOut') }}</small></span>
-              </label>
-              <label for="clear-browser-cache">
-                <input id="clear-browser-cache" v-model="browsingDataOptions.cache" type="checkbox" />
-                <span><strong>{{ t('settings.privacy.cache') }}</strong><small>{{ t('settings.privacy.slower') }}</small></span>
-              </label>
-            </fieldset>
-            <div class="privacy-data-actions">
-              <button
-                class="clear-data-button"
-                type="button"
-                :disabled="!canClearBrowsingData"
-                @click="clearSelectedBrowsingData"
-              >
-                {{ browsingDataState === 'clearing' ? t('settings.privacy.clearingAll') : t('settings.privacy.clearAll', { count: localNumber(selectedBrowsingDataCount) }) }}
-              </button>
-              <output class="privacy-data-status" :class="browsingDataState" aria-live="polite">{{ browsingDataMessage || (browsingDataSummary ? t('settings.privacy.totalsDetail', { history: t('settings.privacy.totals', { history: localNumber(browsingDataSummary.historyEntries) }, browsingDataSummary.historyEntries), cookies: t(browsingDataSummary.cookieCount === 1 ? 'shell.siteControls.cookie' : 'shell.siteControls.cookies', { count: localNumber(browsingDataSummary.cookieCount) }), cache: formatBytes(browsingDataSummary.cacheBytes) }) : t('settings.privacy.loadingTotals')) }}</output>
-            </div>
-            <div class="privacy-websites-heading">
-              <div>
-                <h4>{{ t('settings.privacy.websites') }}</h4>
-                <p>{{ t('settings.privacy.websitesDescription') }}</p>
-              </div>
-              <button class="secondary-button janitor-refresh" type="button" :disabled="janitorState === 'loading' || janitorState === 'clearing'" @click="refreshJanitorWebsites">
-                <IconRefresh aria-hidden="true" />
-                {{ t('settings.privacy.refresh') }}
-              </button>
-            </div>
-            <div class="janitor-search-field">
-              <IconSearch aria-hidden="true" />
-              <input v-model="janitorSearch" type="search" :aria-label="t('settings.privacy.search')" autocomplete="off" spellcheck="false" :placeholder="t('settings.privacy.search')" />
-              <span>{{ t('settings.privacy.range', { shown: localNumber(filteredJanitorWebsites.length), total: localNumber(janitorWebsites.length) }) }}</span>
-            </div>
-            <div class="janitor-list" :aria-busy="janitorState === 'loading'">
-              <div v-if="janitorState === 'loading' && !janitorWebsites.length" class="site-permissions-empty janitor-empty">
-                <IconProgress class="state-spinner" aria-hidden="true" />
-                <strong>{{ t('settings.privacy.finding') }}</strong>
-                <p>{{ t('settings.privacy.checking') }}</p>
-              </div>
-              <div v-else-if="!janitorWebsites.length" class="site-permissions-empty janitor-empty">
-                <IconCleaning aria-hidden="true" />
-                <strong>{{ t('settings.privacy.empty') }}</strong>
-                <p>{{ t('settings.privacy.emptyDescription') }}</p>
-              </div>
-              <div v-else-if="!filteredJanitorWebsites.length" class="site-permissions-empty janitor-empty">
-                <IconSearch aria-hidden="true" />
-                <strong>{{ t('settings.privacy.noMatches') }}</strong>
-                <p>{{ t('settings.privacy.noMatchesDescription') }}</p>
-              </div>
-              <article v-for="site in filteredJanitorWebsites" v-else :key="site.origin" class="janitor-site">
-                <span class="janitor-site-icon" aria-hidden="true"><IconLanguage /></span>
-                <span class="janitor-site-copy">
-                  <strong :title="site.title">{{ site.hostname }}</strong>
-                  <small :title="site.origin">{{ site.origin }}</small>
-                  <span v-if="janitorWebsiteMeta(site).length" class="janitor-site-meta">
-                    <span v-for="item in janitorWebsiteMeta(site)" :key="item">{{ item }}</span>
-                  </span>
-                  <span v-else class="janitor-site-meta"><span>{{ t('settings.privacy.known') }}</span></span>
-                </span>
-                <button
-                  class="janitor-clear-button"
-                  type="button"
-                  :aria-label="t('settings.privacy.clearSiteAria', { origin: site.origin })"
-                  :disabled="selectedBrowsingDataCount === 0 || janitorState === 'clearing' || browsingDataState === 'clearing'"
-                  @click="clearJanitorWebsite(site)"
-                >
-                  <IconProgress v-if="janitorClearingOrigin === site.origin" class="state-spinner" aria-hidden="true" />
-                  <IconDelete v-else aria-hidden="true" />
-                  {{ janitorClearingOrigin === site.origin ? t('settings.privacy.clearing') : t('settings.privacy.clear') }}
-                </button>
-              </article>
-            </div>
-            <output class="privacy-data-status janitor-status" :class="janitorState" aria-live="polite">{{ janitorMessage }}</output>
-            <div class="settings-info">
-              <span class="info-dot" aria-hidden="true"><IconInfo /></span>
-              <p>{{ t('settings.privacy.exclusions', { bookmarks: browsingDataSummary?.bookmarkCount === undefined ? '…' : localNumber(browsingDataSummary.bookmarkCount), passwords: browsingDataSummary?.savedPasswordCount === undefined ? '…' : localNumber(browsingDataSummary.savedPasswordCount), permissions: browsingDataSummary?.permissionDecisionCount === undefined ? '…' : localNumber(browsingDataSummary.permissionDecisionCount) }) }}</p>
-            </div>
-          </main>
+          <PrivacySettingsPanel
+            v-else-if="settingsSection === 'privacy'"
+            :controller="privacySettingsController"
+            :format-bytes="formatBytes"
+            :format-number="localNumber"
+          />
           <main v-else-if="settingsSection === 'permissions'" class="settings-content permissions-settings">
             <div class="setting-copy">
               <h3>{{ t('settings.permissions.heading') }}</h3>
