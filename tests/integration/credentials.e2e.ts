@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, test } from './fixtures.js'
 import type { BrowserState, CredentialStorageStatus, CredentialSummary } from '../../src/shared/types.js'
@@ -84,4 +84,31 @@ test('imports a confirmed browser CSV without exposing plaintext outside the mai
   const persisted = await readFile(join(profileDirectory, 'credentials.json'), 'utf8')
   expect(persisted).not.toContain('browser-secret')
   expect(persisted).not.toContain(csvPath)
+
+  await appWindow.getByRole('button', { name: 'Settings' }).click()
+  await appWindow.getByRole('button', { name: 'Passwords' }).click()
+  const removeImportedCredential = appWindow.getByRole('button', {
+    name: 'Remove saved password for person on https://example.test'
+  })
+  await expect(removeImportedCredential).toBeVisible()
+
+  const blockedTemporaryPath = join(profileDirectory, 'credentials.json.tmp')
+  await rm(blockedTemporaryPath, { recursive: true, force: true })
+  await mkdir(blockedTemporaryPath)
+  try {
+    await removeImportedCredential.click()
+    await expect(appWindow.getByRole('alert', { name: 'Remove password failed' })).toBeVisible()
+    await expect(removeImportedCredential).toBeVisible()
+    await expect(removeImportedCredential).toBeEnabled()
+    await expect.poll(() => appWindow.evaluate('window.bronomCredentials.list()')).toEqual(imported)
+  } finally {
+    await rm(blockedTemporaryPath, { recursive: true, force: true })
+  }
+
+  await removeImportedCredential.click()
+  await expect(appWindow.getByRole('status', { name: 'Password removed' })).toBeVisible()
+  await expect(removeImportedCredential).toHaveCount(0)
+  await expect.poll(() => appWindow.evaluate('window.bronomCredentials.list()')).toEqual([
+    expect.objectContaining({ origin: 'https://new.example', username: 'new-person' })
+  ])
 })

@@ -78,7 +78,6 @@ import {
   HelpMenuAction,
   McpTabActivity,
   McpControlState,
-  CredentialStorageStatus,
   CredentialSummary,
   CommercialLicenseState,
   DetachablePanelId,
@@ -96,9 +95,9 @@ import UpdateNotification from './components/UpdateNotification.vue'
 import AppearanceSettings from './components/AppearanceSettings.vue'
 import BookmarksPanel from './components/BookmarksPanel.vue'
 import CommandPalette from './components/CommandPalette.vue'
+import CredentialsSettingsPanel from './components/CredentialsSettingsPanel.vue'
 import ConsolePanelContainer from './components/ConsolePanelContainer.vue'
 import CredentialPicker from './components/CredentialPicker.vue'
-import CredentialImportCard from './components/CredentialImportCard.vue'
 import DiagnosticsPanels from './components/DiagnosticsPanels.vue'
 import DownloadSettingsPanel from './components/DownloadSettingsPanel.vue'
 import DownloadsPanel from './components/DownloadsPanel.vue'
@@ -118,6 +117,7 @@ import { useBrowserStore } from './stores/browser'
 import { useSettingsStore } from './stores/settings'
 import { useShellWindowLifecycle } from './composables/useShellWindowLifecycle'
 import { useDiagnosticsController } from './composables/useDiagnosticsController'
+import { useCredentialsController } from './composables/useCredentialsController'
 import { useDownloadSettingsController } from './composables/useDownloadSettingsController'
 import { useEnvironmentPanelController } from './composables/useEnvironmentPanelController'
 import { usePageExportController } from './composables/usePageExportController'
@@ -195,7 +195,6 @@ const { state } = storeToRefs(browserStore)
 const { settings, systemTheme, resolvedLocale } = storeToRefs(settingsStore)
 const browser = window.bronom
 const bookmarksApi = window.bronomBookmarks
-const credentialsApi = window.bronomCredentials
 const downloadsApi = window.bronomDownloads
 const historyApi = window.bronomHistory
 const activeTab = computed(() => state.value.tabs.find((tab) => tab.id === state.value.activeTabId))
@@ -241,8 +240,29 @@ const {
   clear: clearSitePermissions,
   dispose: disposeSitePermissionsController
 } = sitePermissionsController
-const credentials = ref<CredentialSummary[]>([])
-const credentialStorage = ref<CredentialStorageStatus>({ available: false, reason: t('runtime.initializingStorage') })
+const credentialsController = useCredentialsController({
+  api: window.bronomCredentials,
+  initializingReason: t('runtime.initializingStorage'),
+  missingCredentialMessage: t('runtimeActions.credential.noLongerExists'),
+  formatError: (error) => friendlyUiError(error, t('runtime.toast.passwordRemoveDescription')),
+  onRemoved: () => showAppToast(
+    'success',
+    t('runtime.toast.passwordRemoved'),
+    t('runtime.toast.passwordRemovedDescription')
+  ),
+  onError: (error) => showAppToast(
+    'error',
+    t('runtime.toast.passwordRemoveFailed'),
+    friendlyUiError(error, t('runtime.toast.passwordRemoveDescription'))
+  )
+})
+const {
+  entries: credentials,
+  storage: credentialStorage,
+  initialize: initializeCredentials,
+  replace: replaceCredentials,
+  dispose: disposeCredentialsController
+} = credentialsController
 const credentialPickerOpen = ref(false)
 const credentialPicker = ref<InstanceType<typeof CredentialPicker> | null>(null)
 const credentialFillState = ref<'idle' | 'filling'>('idle')
@@ -2442,16 +2462,6 @@ async function fillSelectedCredential(credential: CredentialSummary): Promise<vo
   }
 }
 
-async function removeSavedCredential(id: string): Promise<void> {
-  try {
-    const removed = await window.bronomCredentials.remove(id)
-    if (!removed) throw new Error(t('runtimeActions.credential.noLongerExists'))
-    showAppToast('success', t('runtime.toast.passwordRemoved'), t('runtime.toast.passwordRemovedDescription'))
-  } catch (error) {
-    showAppToast('error', t('runtime.toast.passwordRemoveFailed'), friendlyUiError(error, t('runtime.toast.passwordRemoveDescription')))
-  }
-}
-
 function handleUpdateState(next: AppUpdateState): void {
   updateState.value = next
   if (next.status === 'available' || next.status === 'downloading' || next.status === 'downloaded' || next.status === 'up-to-date' || next.status === 'error' || next.status === 'install-error') {
@@ -2987,7 +2997,7 @@ onMounted(async () => {
     })
   }
   unsubscribePermissions = window.bronomPermissions.onChanged(replaceSitePermissions)
-  unsubscribeCredentials = window.bronomCredentials.onChanged((next) => (credentials.value = next))
+  unsubscribeCredentials = window.bronomCredentials.onChanged(replaceCredentials)
   unsubscribeLicense = window.bronomLicense.onChanged((next) => (commercialLicense.value = next))
   unsubscribeUpdates = window.bronomUpdates.onChanged(handleUpdateState)
   unsubscribeUpdateOpen = window.bronomUpdates.onOpenRequested(() => {
@@ -3022,13 +3032,12 @@ onMounted(async () => {
   unsubscribePanelClosed = window.bronomPanelWindow.onClosed(() => {
     if (!isDetachedPanelWindow) closeDockedPanels()
   })
-  const [systemDownloadDirectory, , appUpdateState, mcpControlState, credentialStatus, savedCredentials, savedDownloads, savedBookmarks, savedVisitHistory, savedCommercialLicense] = await Promise.all([
+  const [systemDownloadDirectory, , appUpdateState, mcpControlState, , savedDownloads, savedBookmarks, savedVisitHistory, savedCommercialLicense] = await Promise.all([
     window.bronomSettings.getDefaultDownloadDirectory(),
     initializeSitePermissions(window.bronomPermissions.list()),
     window.bronomUpdates.getState(),
     window.bronomMcp.getState(),
-    window.bronomCredentials.status(),
-    window.bronomCredentials.list(),
+    initializeCredentials(window.bronomCredentials.status(), window.bronomCredentials.list()),
     window.bronomDownloads.list(),
     window.bronomBookmarks.list(),
     window.bronomHistory.list(),
@@ -3037,8 +3046,6 @@ onMounted(async () => {
   defaultDownloadDirectory.value = systemDownloadDirectory
   updateState.value = appUpdateState
   mcpControl.value = mcpControlState
-  credentialStorage.value = credentialStatus
-  credentials.value = savedCredentials
   commercialLicense.value = savedCommercialLicense
   downloads.value = savedDownloads
   for (const download of savedDownloads) knownDownloadIds.add(download.id)
@@ -3081,6 +3088,7 @@ onBeforeUnmount(() => {
   disposeDownloadSettingsController()
   disposePrivacySettingsController()
   disposeSitePermissionsController()
+  disposeCredentialsController()
   disposeDiagnosticsController()
   for (const timer of mcpActivityTimers.values()) window.clearTimeout(timer)
   mcpActivityTimers.clear()
@@ -4174,45 +4182,10 @@ onBeforeUnmount(() => {
             v-else-if="settingsSection === 'permissions'"
             :controller="sitePermissionsController"
           />
-          <main v-else-if="settingsSection === 'credentials'" class="settings-content credentials-settings">
-            <div class="setting-copy">
-              <h3>{{ t('settings.passwords.heading') }}</h3>
-              <p>{{ t('settings.passwords.description') }}</p>
-            </div>
-            <div v-if="!credentialStorage.available" class="settings-info security-warning">
-              <span class="info-dot" aria-hidden="true"><IconWarning /></span>
-              <p>{{ credentialStorage.reason }}</p>
-            </div>
-            <CredentialImportCard v-if="credentialStorage.available" :import-from-csv="credentialsApi.importFromCsv" />
-            <div v-if="credentialStorage.available && !credentials.length" class="site-permissions-empty">
-              <span class="empty-permission-icon" aria-hidden="true"><IconKey /></span>
-              <strong>{{ t('settings.passwords.emptyHeading') }}</strong>
-              <p>{{ t('settings.passwords.emptyDescription') }}</p>
-            </div>
-            <div v-else-if="credentialStorage.available" class="permission-sites">
-              <section v-for="credential in credentials" :key="credential.id" class="permission-site">
-                <div class="credential-row">
-                  <span class="permission-name">
-                    <strong>{{ credential.username || t('credentialPicker.unnamed') }}</strong>
-                    <small>{{ credential.origin }}</small>
-                  </span>
-                  <button
-                    class="permission-remove credential-remove"
-                    type="button"
-                    :aria-label="t('settings.passwords.removeAria', { username: credential.username || t('settings.passwords.unnamed'), origin: credential.origin })"
-                    :title="t('settings.passwords.remove')"
-                    @click="removeSavedCredential(credential.id)"
-                  >
-                    <IconDelete aria-hidden="true" />
-                  </button>
-                </div>
-              </section>
-            </div>
-            <div v-if="credentialStorage.available" class="settings-info">
-              <span class="info-dot" aria-hidden="true"><IconInfo /></span>
-              <p>{{ t('settings.passwords.encryptedBy') }} {{ credentialStorage.backend }}. {{ t('settings.passwords.help') }}</p>
-            </div>
-          </main>
+          <CredentialsSettingsPanel
+            v-else-if="settingsSection === 'credentials'"
+            :controller="credentialsController"
+          />
           <main v-else-if="settingsSection === 'updates'" class="settings-content updates-settings">
             <div class="setting-copy">
               <h3>{{ t('settings.updates.heading') }}</h3>
