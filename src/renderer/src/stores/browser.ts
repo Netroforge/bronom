@@ -46,10 +46,10 @@ export const useBrowserStore = defineStore('browser', () => {
     const currentGeneration = ++generation
     initializing.value = true
     initializationError.value = null
+    const initialRevision = revision
     unsubscribe = window.bronom.onStateChanged((next) => {
       if (generation === currentGeneration) acceptAuthoritativeState(next)
     })
-    const initialRevision = revision
     initializePromise = window.bronom.getState()
       .then((next) => {
         if (generation !== currentGeneration) return

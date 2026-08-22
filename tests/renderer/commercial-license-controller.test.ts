@@ -21,7 +21,10 @@ function license(overrides: Partial<CommercialLicenseState> = {}): CommercialLic
   }
 }
 
-function createController(getState: () => Promise<CommercialLicenseState> = async () => license()) {
+function createController(
+  getState: () => Promise<CommercialLicenseState> = async () => license(),
+  onSubscribe?: (listener: (state: CommercialLicenseState) => void) => void
+) {
   let listener: ((state: CommercialLicenseState) => void) | undefined
   const activate = vi.fn(async () => license({ status: 'active', active: true, maskedKey: '••••-TEST' }))
   const refresh = vi.fn(async () => license({ status: 'active', active: true, maskedKey: '••••-TEST' }))
@@ -33,6 +36,7 @@ function createController(getState: () => Promise<CommercialLicenseState> = asyn
     deactivate,
     onChanged: vi.fn((next: (state: CommercialLicenseState) => void) => {
       listener = next
+      onSubscribe?.(next)
       return () => { listener = undefined }
     })
   }
@@ -64,6 +68,16 @@ describe('commercial license controller', () => {
     await initializing
 
     expect(controller.state.value).toMatchObject({ active: true, maskedKey: '••••-LIVE' })
+    controller.dispose()
+  })
+
+  it('preserves a license event delivered while the listener is being attached', async () => {
+    const live = license({ status: 'active', active: true, maskedKey: '••••-LIVE' })
+    const { controller } = createController(async () => license(), (listener) => listener(live))
+
+    await controller.initialize()
+
+    expect(controller.state.value).toEqual(live)
     controller.dispose()
   })
 

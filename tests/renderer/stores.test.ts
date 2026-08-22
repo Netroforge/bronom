@@ -115,6 +115,22 @@ describe('browser Pinia store lifecycle', () => {
     expect(unsubscribe).toHaveBeenCalledOnce()
   })
 
+  it('preserves a browser event delivered while the listener is being attached', async () => {
+    installBrowserApi({
+      getState: async () => browserState('stale-tab'),
+      onStateChanged: (next) => {
+        next(browserState('event-tab'))
+        return vi.fn()
+      }
+    })
+    const store = useBrowserStore()
+
+    await store.initialize()
+
+    expect(store.state.activeTabId).toBe('event-tab')
+    store.dispose()
+  })
+
   it('exposes initialization failure and retries with a fresh subscription', async () => {
     const failure = new Error('state unavailable')
     const getState = vi.fn()
@@ -200,6 +216,23 @@ describe('settings Pinia store lifecycle', () => {
     expect(store.resolvedLocale).toBe('uk-UA')
     expect(store.systemTheme).toBe('dark')
     expect(store.settings.languagePreference).toBe('uk-UA')
+  })
+
+  it('preserves settings delivered while the listener is being attached', async () => {
+    installSettingsApi({
+      getRendererState: async () => settingsState('en-US'),
+      onRendererStateChanged: (next) => {
+        next(settingsState('uk-UA'))
+        return vi.fn()
+      }
+    })
+    const store = useSettingsStore()
+
+    await store.initialize()
+
+    expect(store.resolvedLocale).toBe('uk-UA')
+    expect(store.settings.languagePreference).toBe('uk-UA')
+    store.dispose()
   })
 
   it('unsubscribes on failure and can retry', async () => {

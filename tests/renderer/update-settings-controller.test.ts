@@ -18,7 +18,10 @@ function update(status: AppUpdateState['status'], currentVersion = '1.7.1'): App
   return { status, currentVersion }
 }
 
-function createController(getState: () => Promise<AppUpdateState> = async () => update('idle')) {
+function createController(
+  getState: () => Promise<AppUpdateState> = async () => update('idle'),
+  onSubscribe?: (listener: (state: AppUpdateState) => void) => void
+) {
   const settings = ref<AppSettings>({ ...DEFAULT_RENDERER_SETTINGS })
   let listener: ((state: AppUpdateState) => void) | undefined
   const check = vi.fn(async () => update('up-to-date'))
@@ -30,6 +33,7 @@ function createController(getState: () => Promise<AppUpdateState> = async () => 
     install: vi.fn(async () => true),
     onChanged: vi.fn((next: (state: AppUpdateState) => void) => {
       listener = next
+      onSubscribe?.(next)
       return () => { listener = undefined }
     }),
     onOpenRequested: vi.fn(() => () => undefined)
@@ -77,6 +81,16 @@ describe('update settings controller', () => {
     await initializing
 
     expect(controller.state.value).toMatchObject({ status: 'available', availableVersion: '1.8.0' })
+    controller.dispose()
+  })
+
+  it('preserves an update event delivered while the listener is being attached', async () => {
+    const available = { ...update('available'), availableVersion: '1.8.0' }
+    const { controller } = createController(async () => update('idle'), (listener) => listener(available))
+
+    await controller.initialize()
+
+    expect(controller.state.value).toEqual(available)
     controller.dispose()
   })
 

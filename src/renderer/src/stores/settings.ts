@@ -66,10 +66,10 @@ export const useSettingsStore = defineStore('settings', () => {
     const currentGeneration = ++generation
     initializing.value = true
     initializationError.value = null
+    const initialRevision = revision
     unsubscribe = window.bronomSettings.onRendererStateChanged((next) => {
       if (generation === currentGeneration) acceptAuthoritativeState(next)
     })
-    const initialRevision = revision
     initializePromise = window.bronomSettings.getRendererState()
       .then((next) => {
         if (generation !== currentGeneration) return

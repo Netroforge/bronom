@@ -38,11 +38,11 @@ export function useCommercialLicenseController(options: CommercialLicenseControl
   function initialize(): Promise<void> {
     if (initializePromise) return initializePromise
     const currentGeneration = ++generation
+    const initialRevision = revision
     unsubscribe?.()
     unsubscribe = options.api.onChanged((next) => {
       if (generation === currentGeneration) accept(next)
     })
-    const initialRevision = revision
     initializePromise = options.api.getState()
       .then((next) => {
         if (generation === currentGeneration && revision === initialRevision) accept(next)
