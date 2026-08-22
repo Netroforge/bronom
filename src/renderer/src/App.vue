@@ -29,7 +29,6 @@ import IconDevices from '~icons/material-symbols/devices-rounded'
 import IconDifference from '~icons/material-symbols/difference-rounded'
 import IconDownload from '~icons/material-symbols/download-rounded'
 import IconDownloadDone from '~icons/material-symbols/download-done-rounded'
-import IconEdit from '~icons/material-symbols/edit-rounded'
 import IconError from '~icons/material-symbols/error-outline-rounded'
 import IconFavorite from '~icons/material-symbols/favorite-rounded'
 import IconFactCheck from '~icons/material-symbols/fact-check-rounded'
@@ -122,6 +121,7 @@ import {
 } from '../../shared/tab-groups'
 import UpdateNotification from './components/UpdateNotification.vue'
 import AppearanceSettings from './components/AppearanceSettings.vue'
+import BookmarksPanel from './components/BookmarksPanel.vue'
 import CommandPalette from './components/CommandPalette.vue'
 import ConsolePanelContainer from './components/ConsolePanelContainer.vue'
 import CredentialPicker from './components/CredentialPicker.vue'
@@ -218,6 +218,7 @@ const settingsStore = useSettingsStore()
 const { state } = storeToRefs(browserStore)
 const { settings, systemTheme, resolvedLocale } = storeToRefs(settingsStore)
 const browser = window.bronom
+const bookmarksApi = window.bronomBookmarks
 const downloadsApi = window.bronomDownloads
 const historyApi = window.bronomHistory
 const activeTab = computed(() => state.value.tabs.find((tab) => tab.id === state.value.activeTabId))
@@ -279,10 +280,7 @@ const downloads = ref<BrowserDownloadState[]>([])
 const downloadsOpen = ref(false)
 const bookmarks = ref<BrowserBookmark[]>([])
 const bookmarksOpen = ref(false)
-const bookmarkSearch = ref('')
-const bookmarkError = ref('')
-const editingBookmarkId = ref<string | null>(null)
-const editingBookmarkTitle = ref('')
+const bookmarksPanel = ref<InstanceType<typeof BookmarksPanel> | null>(null)
 const visitHistory = ref<BrowserHistoryEntry[]>([])
 const historyOpen = ref(false)
 const historyPanel = ref<InstanceType<typeof HistoryPanel> | null>(null)
@@ -913,13 +911,6 @@ const activeTabUsesDefaultProfile = computed(() => {
   return state.value.mcpTabGroups.find((workspace) => workspace.id === workspaceId)?.isDefault !== false
 })
 const currentBookmark = computed(() => bookmarks.value.find((bookmark) => bookmark.url === activeWebUrl.value))
-const filteredBookmarks = computed(() => {
-  const query = bookmarkSearch.value.trim().toLocaleLowerCase()
-  if (!query) return bookmarks.value
-  return bookmarks.value.filter((bookmark) => (
-    bookmark.title.toLocaleLowerCase().includes(query) || bookmark.url.toLocaleLowerCase().includes(query)
-  ))
-})
 const addressSuggestions = computed(() => buildLocalAddressSuggestions({
   query: address.value,
   bookmarks: bookmarks.value,
@@ -1075,29 +1066,17 @@ async function toggleBookmarks(): Promise<void> {
   downloadsOpen.value = false
   historyOpen.value = false
   tabSearchOpen.value = false
-  bookmarkError.value = ''
-  if (!bookmarksOpen.value) bookmarks.value = await window.bronomBookmarks.list()
-  bookmarksOpen.value = !bookmarksOpen.value
+  await bookmarksPanel.value?.toggle()
 }
 
 async function toggleCurrentBookmark(): Promise<void> {
-  bookmarkError.value = ''
-  bookmarksOpen.value = true
   downloadsOpen.value = false
   historyOpen.value = false
   tabSearchOpen.value = false
-  if (!activeTab.value || !activeWebUrl.value) return
-  try {
-    bookmarks.value = currentBookmark.value
-      ? await window.bronomBookmarks.remove(currentBookmark.value.id)
-      : await window.bronomBookmarks.add(activeWebUrl.value, activeTab.value.title || new URL(activeWebUrl.value).hostname)
-  } catch (error) {
-    bookmarkError.value = error instanceof Error ? error.message : String(error)
-  }
+  await bookmarksPanel.value?.toggleCurrent()
 }
 
 async function openBookmark(bookmark: BrowserBookmark): Promise<void> {
-  bookmarksOpen.value = false
   settingsOpen.value = false
   await syncState(browser.newTab({ url: bookmark.url, active: true }))
 }
@@ -1117,33 +1096,6 @@ async function openApplicationHome(): Promise<void> {
   zoomOpen.value = false
   if (findOpen.value) await closeFind()
   await syncState(browser.openHome())
-}
-
-function beginRenameBookmark(bookmark: BrowserBookmark): void {
-  editingBookmarkId.value = bookmark.id
-  editingBookmarkTitle.value = bookmark.title
-}
-
-function cancelRenameBookmark(): void {
-  editingBookmarkId.value = null
-  editingBookmarkTitle.value = ''
-}
-
-async function commitBookmarkRename(bookmarkId: string): Promise<void> {
-  if (editingBookmarkId.value !== bookmarkId) return
-  bookmarkError.value = ''
-  try {
-    bookmarks.value = await window.bronomBookmarks.rename(bookmarkId, editingBookmarkTitle.value)
-    cancelRenameBookmark()
-  } catch (error) {
-    bookmarkError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function removeBookmark(bookmarkId: string): Promise<void> {
-  bookmarkError.value = ''
-  if (editingBookmarkId.value === bookmarkId) cancelRenameBookmark()
-  bookmarks.value = await window.bronomBookmarks.remove(bookmarkId)
 }
 
 async function toggleVisitHistory(): Promise<void> {
@@ -3319,10 +3271,7 @@ function handleKeyDown(event: KeyboardEvent): void {
   else if (splitMenuOpen.value) splitMenuOpen.value = false
   else if (zoomOpen.value) zoomOpen.value = false
   else if (downloadsOpen.value) downloadsOpen.value = false
-  else if (bookmarksOpen.value) {
-    if (editingBookmarkId.value) cancelRenameBookmark()
-    else bookmarksOpen.value = false
-  }
+  else if (bookmarksOpen.value) bookmarksPanel.value?.handleEscape()
   else if (historyOpen.value) historyOpen.value = false
   else if (pageToolsOpen.value) pageToolsOpen.value = false
   else if (accessibilityPanelOpen.value) accessibilityPanelOpen.value = false
@@ -4992,61 +4941,20 @@ onBeforeUnmount(() => {
       :clear-finished="downloadsApi.clearFinished"
       :show-in-folder="downloadsApi.showInFolder"
     />
-    <section v-if="bookmarksOpen" class="bookmarks-panel" data-shell-docked-panel role="dialog" aria-modal="false" aria-labelledby="bookmarks-title">
-      <header>
-        <div>
-          <span class="eyebrow">{{ t('bookmarks.kicker') }}</span>
-          <h2 id="bookmarks-title">{{ t('bookmarks.heading') }}</h2>
-        </div>
-        <div class="bookmarks-header-actions">
-          <PanelDockPicker v-model="panelDock" :label="t('panels.dockNamed', { panel: t('bookmarks.heading') })" />
-          <button
-            type="button"
-            :disabled="!activeWebUrl"
-            @click="toggleCurrentBookmark"
-          >{{ currentBookmark ? t('bookmarks.removeCurrent') : t('bookmarks.addCurrent') }}</button>
-          <button class="panel-close" type="button" :aria-label="t('bookmarks.close')" @click="bookmarksOpen = false"><IconClose aria-hidden="true" /></button>
-        </div>
-      </header>
-      <div v-if="bookmarks.length" class="bookmark-search-field">
-        <IconSearch aria-hidden="true" />
-        <input v-model="bookmarkSearch" type="search" :aria-label="t('bookmarks.search')" autocomplete="off" spellcheck="false" :placeholder="t('bookmarks.search')" />
-      </div>
-      <div v-if="!bookmarks.length" class="bookmarks-empty">
-        <IconStarOutline aria-hidden="true" />
-        <strong>{{ t('bookmarks.empty') }}</strong>
-        <span>{{ t('bookmarks.emptyDescription') }}</span>
-      </div>
-      <div v-else-if="!filteredBookmarks.length" class="bookmarks-empty compact">
-        <IconSearch aria-hidden="true" />
-        <strong>{{ t('bookmarks.noMatches') }}</strong>
-        <span>{{ t('bookmarks.tryAnother') }}</span>
-      </div>
-      <div v-else class="bookmarks-list">
-        <article v-for="bookmark in filteredBookmarks" :key="bookmark.id" class="bookmark-item" :class="{ current: bookmark.id === currentBookmark?.id }">
-          <button class="bookmark-open" type="button" :title="bookmark.url" @click="openBookmark(bookmark)">
-            <span class="bookmark-site-icon" aria-hidden="true"><IconLanguage /></span>
-            <span class="bookmark-copy">
-              <input
-                v-if="editingBookmarkId === bookmark.id"
-                v-model="editingBookmarkTitle"
-                :aria-label="t('bookmarks.renameAria', { title: bookmark.title })"
-                maxlength="200"
-                @click.stop
-                @keydown.enter.prevent="commitBookmarkRename(bookmark.id)"
-                @keydown.escape.prevent="cancelRenameBookmark"
-              />
-              <strong v-else>{{ bookmark.title }}</strong>
-              <span>{{ bookmark.url }}</span>
-            </span>
-          </button>
-          <button v-if="editingBookmarkId === bookmark.id" class="bookmark-action confirm" type="button" :aria-label="t('bookmarks.saveAria', { title: bookmark.title })" :title="t('bookmarks.save')" @click="commitBookmarkRename(bookmark.id)"><IconCheck aria-hidden="true" /></button>
-          <button v-else class="bookmark-action" type="button" :aria-label="t('bookmarks.renameAria', { title: bookmark.title })" :title="t('bookmarks.rename')" @click="beginRenameBookmark(bookmark)"><IconEdit aria-hidden="true" /></button>
-          <button class="bookmark-action danger" type="button" :aria-label="t('bookmarks.removeAria', { title: bookmark.title })" :title="t('bookmarks.remove')" @click="removeBookmark(bookmark.id)"><IconDelete aria-hidden="true" /></button>
-        </article>
-      </div>
-      <p v-if="bookmarkError" class="bookmarks-error" role="alert">{{ bookmarkError }}</p>
-    </section>
+    <BookmarksPanel
+      ref="bookmarksPanel"
+      v-model:open="bookmarksOpen"
+      v-model:bookmarks="bookmarks"
+      v-model:dock="panelDock"
+      :active-url="activeWebUrl"
+      :active-title="activeTab?.title ?? ''"
+      :current-bookmark="currentBookmark"
+      :list-bookmarks="bookmarksApi.list"
+      :add-bookmark="bookmarksApi.add"
+      :rename-bookmark="bookmarksApi.rename"
+      :remove-bookmark="bookmarksApi.remove"
+      :open-bookmark="openBookmark"
+    />
     <HistoryPanel
       ref="historyPanel"
       v-model:open="historyOpen"

@@ -2634,6 +2634,7 @@ button { color: inherit; }
   text-align: left;
   cursor: pointer;
 }
+.bookmark-open.bookmark-editor { cursor: default; }
 .bookmark-site-icon { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 9px; color: var(--accent-text); background: var(--surface-muted); }
 .bookmark-site-icon svg { width: 18px; height: 18px; }
 .bookmark-copy { min-width: 0; }
