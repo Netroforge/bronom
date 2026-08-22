@@ -38,6 +38,12 @@ test('uses the selected search engine for address-bar and MCP searches', async (
     await searchSettings.getByTestId('search-engine-duckduckgo').click()
     await expect(searchSettings.getByTestId('search-engine-duckduckgo')).toHaveAttribute('aria-checked', 'true')
     await expect.poll(async () => JSON.parse(await readFile(join(profileDirectory, 'settings.json'), 'utf8')).searchEngine).toBe('duckduckgo')
+    await appWindow.getByRole('button', { name: 'Reset to default' }).click()
+    await expect(searchSettings.getByTestId('search-engine-google')).toHaveAttribute('aria-checked', 'true')
+    await expect.poll(async () => JSON.parse(await readFile(join(profileDirectory, 'settings.json'), 'utf8')).searchEngine).toBe('google')
+    await searchSettings.getByTestId('search-engine-duckduckgo').click()
+    await expect(searchSettings.getByTestId('search-engine-duckduckgo')).toHaveAttribute('aria-checked', 'true')
+    await expect.poll(async () => JSON.parse(await readFile(join(profileDirectory, 'settings.json'), 'utf8')).searchEngine).toBe('duckduckgo')
 
     await electronApp.evaluate(({ session }, localRedirectUrl) => {
       const globalState = globalThis as typeof globalThis & { __bronomCapturedSearchUrls?: string[] }

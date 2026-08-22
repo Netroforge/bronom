@@ -18,13 +18,10 @@ import IconArrowForward from '~icons/material-symbols/arrow-forward-rounded'
 import IconBedtime from '~icons/material-symbols/bedtime-rounded'
 import IconCheck from '~icons/material-symbols/check-rounded'
 import IconClose from '~icons/material-symbols/close-rounded'
-import IconContrast from '~icons/material-symbols/contrast-rounded'
-import IconDelete from '~icons/material-symbols/delete-outline-rounded'
 import IconDashboard from '~icons/material-symbols/space-dashboard-rounded'
 import IconDownload from '~icons/material-symbols/download-rounded'
 import IconDownloadDone from '~icons/material-symbols/download-done-rounded'
 import IconError from '~icons/material-symbols/error-outline-rounded'
-import IconFavorite from '~icons/material-symbols/favorite-rounded'
 import IconInfo from '~icons/material-symbols/info-rounded'
 import IconHistory from '~icons/material-symbols/history-rounded'
 import IconHandyman from '~icons/material-symbols/handyman-rounded'
@@ -35,12 +32,10 @@ import IconKeyboardArrowUp from '~icons/material-symbols/keyboard-arrow-up-round
 import IconKeyboardCommandKey from '~icons/material-symbols/keyboard-command-key-rounded'
 import IconKeep from '~icons/material-symbols/keep-rounded'
 import IconLanguage from '~icons/material-symbols/language-rounded'
-import IconKey from '~icons/material-symbols/key-rounded'
 import IconLock from '~icons/material-symbols/lock-rounded'
 import IconLockOpen from '~icons/material-symbols/lock-open-rounded'
 import IconRemove from '~icons/material-symbols/remove-rounded'
 import IconProgress from '~icons/material-symbols/progress-activity-rounded'
-import IconPrivacy from '~icons/material-symbols/privacy-tip-rounded'
 import IconRefresh from '~icons/material-symbols/refresh-rounded'
 import IconRoute from '~icons/material-symbols/route-rounded'
 import IconSearch from '~icons/material-symbols/search-rounded'
@@ -49,10 +44,8 @@ import IconSettings from '~icons/material-symbols/settings-rounded'
 import IconSpeed from '~icons/material-symbols/speed-rounded'
 import IconStar from '~icons/material-symbols/star-rounded'
 import IconStarOutline from '~icons/material-symbols/star-outline-rounded'
-import IconShieldLock from '~icons/material-symbols/shield-lock-rounded'
 import IconTune from '~icons/material-symbols/tune-rounded'
 import IconStop from '~icons/material-symbols/stop-rounded'
-import IconSystemUpdate from '~icons/material-symbols/system-update-alt-rounded'
 import IconTabSearch from '~icons/material-symbols/tab-search-rounded'
 import IconSwapHoriz from '~icons/material-symbols/swap-horiz-rounded'
 import IconVerticalSplit from '~icons/material-symbols/vertical-split-rounded'
@@ -77,40 +70,30 @@ import {
   DetachablePanelId,
   PanelDock,
   SitePermissionDecision,
-  SitePermissionEntry,
-  SearchEngineName,
-  ThemeName
+  SitePermissionEntry
 } from '../../shared/types'
 import {
   BROWSER_TAB_GROUP_COLOR_HEX,
   defaultTabGroupColor
 } from '../../shared/tab-groups'
 import UpdateNotification from './components/UpdateNotification.vue'
-import AppearanceSettings from './components/AppearanceSettings.vue'
 import BookmarksPanel from './components/BookmarksPanel.vue'
 import CommandPalette from './components/CommandPalette.vue'
-import CredentialsSettingsPanel from './components/CredentialsSettingsPanel.vue'
 import ConsolePanelContainer from './components/ConsolePanelContainer.vue'
 import CredentialPicker from './components/CredentialPicker.vue'
 import DiagnosticsPanels from './components/DiagnosticsPanels.vue'
-import DownloadSettingsPanel from './components/DownloadSettingsPanel.vue'
 import DownloadsPanel from './components/DownloadsPanel.vue'
 import EnvironmentPanel from './components/EnvironmentPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
-import McpSettingsPanel from './components/McpSettingsPanel.vue'
 import McpStatusControls from './components/McpStatusControls.vue'
 import NetworkPanel from './components/NetworkPanel.vue'
 import PageToolsPanel from './components/PageToolsPanel.vue'
 import PanelDockPicker from './components/PanelDockPicker.vue'
-import PerformanceSettingsPanel from './components/PerformanceSettingsPanel.vue'
-import PrivacySettingsPanel from './components/PrivacySettingsPanel.vue'
 import ResponsivePreviewPanel from './components/ResponsivePreviewPanel.vue'
+import SettingsDialog from './components/SettingsDialog.vue'
 import SiteControlsPanel from './components/SiteControlsPanel.vue'
-import SitePermissionsSettingsPanel from './components/SitePermissionsSettingsPanel.vue'
 import SiteStoragePanel from './components/SiteStoragePanel.vue'
-import SupportSettingsPanel from './components/SupportSettingsPanel.vue'
 import TabSearchPanel from './components/TabSearchPanel.vue'
-import UpdateSettingsPanel from './components/UpdateSettingsPanel.vue'
 import WorkspaceEditor from './components/WorkspaceEditor.vue'
 import { useBrowserStore } from './stores/browser'
 import { useSettingsStore } from './stores/settings'
@@ -124,6 +107,8 @@ import { useMcpStatusController } from './composables/useMcpStatusController'
 import { usePageExportController } from './composables/usePageExportController'
 import { usePerformanceSettingsController } from './composables/usePerformanceSettingsController'
 import { usePrivacySettingsController } from './composables/usePrivacySettingsController'
+import { useSearchSettingsController } from './composables/useSearchSettingsController'
+import { useSettingsDialogController, type SettingsSection } from './composables/useSettingsDialogController'
 import { useSiteDataSummaryController } from './composables/useSiteDataSummaryController'
 import { useSitePermissionsController } from './composables/useSitePermissionsController'
 import { useCommercialLicenseController } from './composables/useCommercialLicenseController'
@@ -142,7 +127,6 @@ import {
   type AddressSuggestionOverlayRequest,
   type AddressSuggestionOverlayTheme
 } from '../../shared/address-suggestions'
-import { SEARCH_ENGINE_OPTIONS } from '../../shared/search-engine'
 import { DEFAULT_INTERFACE_SCALE } from '../../shared/interface-scale'
 import type { BrowserSplitOrientation } from '../../shared/split-view'
 
@@ -340,16 +324,8 @@ const tabDropTargetId = ref<string | null>(null)
 const tabDropPlacement = ref<'before' | 'after' | null>(null)
 const lastWebTabId = ref<string | null>(null)
 const allInteractionLockButton = ref<HTMLButtonElement | null>(null)
-const settingsPanel = ref<HTMLElement | null>(null)
-const settingsOpen = ref(false)
-const settingsSection = ref<'appearance' | 'search' | 'downloads' | 'performance' | 'mcp' | 'privacy' | 'permissions' | 'credentials' | 'updates' | 'support'>('appearance')
 const helpDialog = ref<'shortcuts' | 'about' | null>(null)
 const helpDialogPanel = ref<HTMLElement | null>(null)
-const fullModalOpen = computed(() => settingsOpen.value
-  || commandPaletteOpen.value
-  || helpDialog.value !== null
-  || workspaceEditorOpen.value
-  || credentialPickerOpen.value)
 const updateNoticeOpen = ref(false)
 const updateSettingsController = useUpdateSettingsController({
   api: window.bronomUpdates,
@@ -465,14 +441,47 @@ const {
   reset: resetMcpSettings,
   dispose: disposeMcpSettingsController
 } = mcpSettingsController
-const settingsResetDisabled = computed(() => (
-  (settingsSection.value === 'downloads' && downloadSettingsBusy.value)
-  || (settingsSection.value === 'performance' && performanceSettingsBusy.value)
-  || (settingsSection.value === 'privacy' && privacySettingsController.clearing.value)
-  || (settingsSection.value === 'permissions' && sitePermissionsBusy.value)
-  || (settingsSection.value === 'mcp' && mcpSettingsBusy.value)
-  || (settingsSection.value === 'updates' && updateSettingsBusy.value)
-))
+const searchSettingsController = useSearchSettingsController({
+  settings,
+  setSearchEngine: (searchEngine) => settingsStore.setSearchEngine(searchEngine),
+  onError: handleExtractedSettingError
+})
+const {
+  busy: searchSettingsBusy,
+  reset: resetSearchSettings,
+  dispose: disposeSearchSettingsController
+} = searchSettingsController
+const settingsDialogController = useSettingsDialogController({
+  beforeOpen: () => {
+    commandPaletteOpen.value = false
+    helpDialog.value = null
+    closeTransientPanels()
+  },
+  resetSection: resetSettingsSection,
+  isResetDisabled: (section) => (
+    (section === 'search' && searchSettingsBusy.value)
+    || (section === 'downloads' && downloadSettingsBusy.value)
+    || (section === 'performance' && performanceSettingsBusy.value)
+    || (section === 'privacy' && privacySettingsController.clearing.value)
+    || (section === 'permissions' && sitePermissionsBusy.value)
+    || (section === 'mcp' && mcpSettingsBusy.value)
+    || (section === 'updates' && updateSettingsBusy.value)
+  ),
+  onResetError: handleExtractedSettingError
+})
+const {
+  open: settingsOpen,
+  section: settingsSection,
+  openSection: openSettingsSection,
+  close: closeSettings,
+  toggle: toggleSettings,
+  dispose: disposeSettingsDialogController
+} = settingsDialogController
+const fullModalOpen = computed(() => settingsOpen.value
+  || commandPaletteOpen.value
+  || helpDialog.value !== null
+  || workspaceEditorOpen.value
+  || credentialPickerOpen.value)
 type ElementPickerMode = 'context' | 'screenshot'
 type ScreenshotCaptureMode = 'area' | 'viewport' | 'full-page'
 type AppToastTone = 'error' | 'success' | 'info'
@@ -1214,14 +1223,6 @@ async function toggleCommandPalette(): Promise<void> {
   await commandPalette.value?.openPanel()
 }
 
-function openSettingsSection(section: typeof settingsSection.value): void {
-  commandPaletteOpen.value = false
-  helpDialog.value = null
-  closeTransientPanels()
-  settingsSection.value = section
-  settingsOpen.value = true
-}
-
 async function runCommandPaletteCommand(commandId: CommandPaletteCommandId): Promise<void> {
   commandPaletteOpen.value = false
   switch (commandId) {
@@ -1449,7 +1450,6 @@ watch(settingsOpen, async () => {
   if (!settingsOpen.value && settingsSection.value === 'privacy') janitorSearch.value = ''
   await nextTick()
   reportShellHeight()
-  if (settingsOpen.value) settingsPanel.value?.focus()
 })
 
 watch(helpDialog, async () => {
@@ -1788,8 +1788,7 @@ async function openSitePrivacySettings(): Promise<void> {
 
 function openSitePermissionSettings(): void {
   siteControlsOpen.value = false
-  settingsSection.value = 'permissions'
-  settingsOpen.value = true
+  openSettingsSection('permissions')
 }
 
 async function selectAddressSuggestion(suggestion: AddressSuggestion): Promise<void> {
@@ -2385,24 +2384,6 @@ function handleExtractedSettingError(error: unknown): void {
   showAppToast('error', t('runtime.toast.settingNotSaved'), friendlyUiError(error, t('runtime.toast.settingKept')))
 }
 
-async function applySettingsChange(operation: Promise<AppSettings>): Promise<boolean> {
-  try {
-    applyTheme(await operation)
-    return true
-  } catch (error) {
-    showAppToast('error', t('runtime.toast.settingNotSaved'), friendlyUiError(error, t('runtime.toast.settingKept')))
-    return false
-  }
-}
-
-async function selectTheme(theme: ThemeName): Promise<boolean> {
-  return applySettingsChange(window.bronomSettings.setTheme(theme))
-}
-
-async function selectSearchEngine(searchEngine: SearchEngineName): Promise<boolean> {
-  return applySettingsChange(window.bronomSettings.setSearchEngine(searchEngine))
-}
-
 function testAttentionSound(): void {
   playFoley(settings.value.attentionSoundCue, { volume: 0.65 })
 }
@@ -2481,8 +2462,7 @@ function openUpdateSettings(): void {
   downloadsOpen.value = false
   bookmarksOpen.value = false
   historyOpen.value = false
-  settingsSection.value = 'updates'
-  settingsOpen.value = true
+  openSettingsSection('updates')
 }
 
 async function openPrivacySettings(origin?: string): Promise<void> {
@@ -2495,8 +2475,7 @@ async function openPrivacySettings(origin?: string): Promise<void> {
   addressSuggestionsOpen.value = false
   if (findOpen.value) await closeFind()
   janitorSearch.value = origin ?? ''
-  settingsSection.value = 'privacy'
-  settingsOpen.value = true
+  openSettingsSection('privacy')
 }
 
 async function openSupport(url: string): Promise<void> {
@@ -2629,53 +2608,25 @@ async function toggleDeveloperTools(): Promise<void> {
 }
 
 function openSupportSettings(): void {
-  helpDialog.value = null
-  closeTransientPanels()
-  settingsSection.value = 'support'
-  settingsOpen.value = true
+  openSettingsSection('support')
 }
 
-function toggleSettings(): void {
-  const open = !settingsOpen.value
-  helpDialog.value = null
-  closeTransientPanels()
-  settingsOpen.value = open
-}
-
-async function resetCurrentSection(): Promise<void> {
-  if (settingsSection.value === 'appearance') {
-    if (!(await selectTheme('system'))) return
-    if (!(await applySettingsChange(window.bronomSettings.setInterfaceScale(DEFAULT_INTERFACE_SCALE)))) return
-    if (!(await applySettingsChange(window.bronomSettings.setHideInTray(true)))) return
-    if (!(await applySettingsChange(window.bronomSettings.setAttentionSound(true)))) return
-    await applySettingsChange(window.bronomSettings.setAttentionSoundCue('warning'))
-    return
+async function resetSettingsSection(section: SettingsSection): Promise<boolean | void> {
+  if (section === 'appearance') {
+    await settingsStore.setTheme('system')
+    await settingsStore.setInterfaceScale(DEFAULT_INTERFACE_SCALE)
+    await settingsStore.setHideInTray(true)
+    await settingsStore.setAttentionSound(true)
+    await settingsStore.setAttentionSoundCue('warning')
+    return true
   }
-  if (settingsSection.value === 'search') {
-    await selectSearchEngine('google')
-    return
-  }
-  if (settingsSection.value === 'downloads') {
-    await resetDownloadSettings()
-    return
-  }
-  if (settingsSection.value === 'performance') {
-    await resetPerformanceSettings()
-    return
-  }
-  if (settingsSection.value === 'permissions') {
-    await clearSitePermissions()
-    return
-  }
-  if (settingsSection.value === 'privacy') {
-    resetPrivacySelection()
-    return
-  }
-  if (settingsSection.value === 'mcp') {
-    await resetMcpSettings()
-    return
-  }
-  if (settingsSection.value === 'updates') await resetUpdateSettings()
+  if (section === 'search') return resetSearchSettings()
+  if (section === 'downloads') return resetDownloadSettings()
+  if (section === 'performance') return resetPerformanceSettings()
+  if (section === 'permissions') return clearSitePermissions()
+  if (section === 'privacy') resetPrivacySelection()
+  if (section === 'mcp') return resetMcpSettings()
+  if (section === 'updates') return resetUpdateSettings()
 }
 
 function guardShellInteraction(event: Event): void {
@@ -2744,7 +2695,7 @@ function handleKeyDown(event: KeyboardEvent): void {
   else if (areaCaptureState.value === 'picking') void toggleAreaCapture()
   else if (elementPickerState.value === 'picking') void cancelActiveElementPicker()
   else if (helpDialog.value) helpDialog.value = null
-  else if (settingsOpen.value) settingsOpen.value = false
+  else if (settingsOpen.value) closeSettings()
   else updateNoticeOpen.value = false
 }
 
@@ -2993,6 +2944,8 @@ onBeforeUnmount(() => {
   disposeDownloadSettingsController()
   disposePerformanceSettingsController()
   disposeMcpSettingsController()
+  disposeSearchSettingsController()
+  disposeSettingsDialogController()
   disposeUpdateSettingsController()
   disposeCommercialLicenseController()
   disposeMcpStatusController()
@@ -3762,245 +3715,24 @@ onBeforeUnmount(() => {
       :format-number="localNumber"
       :run-command="runCommandPaletteCommand"
     />
-    <div v-if="settingsOpen" class="settings-overlay" @click.self="settingsOpen = false">
-      <section
-        ref="settingsPanel"
-        class="settings-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="settings-title"
-        tabindex="-1"
-      >
-        <div class="settings-header">
-          <div>
-            <span class="eyebrow">{{ t('settings.kicker') }}</span>
-            <h2 id="settings-title">{{ t('settings.heading') }}</h2>
-          </div>
-          <button class="panel-close" type="button" :aria-label="t('settings.close')" @click="settingsOpen = false"><IconClose aria-hidden="true" /></button>
-        </div>
-
-        <div class="settings-layout">
-          <nav class="settings-sidebar" :aria-label="t('settings.sections')">
-            <button
-              class="settings-nav-item"
-              :class="{ active: settingsSection === 'appearance' }"
-              type="button"
-              :aria-current="settingsSection === 'appearance' ? 'page' : undefined"
-              @click="settingsSection = 'appearance'"
-            >
-              <span class="settings-nav-icon" aria-hidden="true"><IconContrast /></span>
-              <span>
-                <strong>{{ t('settings.nav.appearance') }}</strong>
-                <small>{{ t('settings.nav.appearanceDescription') }}</small>
-              </span>
-            </button>
-            <button
-              class="settings-nav-item"
-              :class="{ active: settingsSection === 'search' }"
-              type="button"
-              :aria-current="settingsSection === 'search' ? 'page' : undefined"
-              @click="settingsSection = 'search'"
-            >
-              <span class="settings-nav-icon" aria-hidden="true"><IconSearch /></span>
-              <span>
-                <strong>{{ t('settings.nav.search') }}</strong>
-                <small>{{ t('settings.nav.searchDescription') }}</small>
-              </span>
-            </button>
-            <button
-              class="settings-nav-item"
-              :class="{ active: settingsSection === 'downloads' }"
-              type="button"
-              :aria-current="settingsSection === 'downloads' ? 'page' : undefined"
-              @click="settingsSection = 'downloads'"
-            >
-              <span class="settings-nav-icon" aria-hidden="true"><IconDownload /></span>
-              <span>
-                <strong>{{ t('settings.nav.downloads') }}</strong>
-                <small>{{ t('settings.nav.downloadsDescription') }}</small>
-              </span>
-            </button>
-            <button
-              class="settings-nav-item"
-              :class="{ active: settingsSection === 'performance' }"
-              type="button"
-              :aria-current="settingsSection === 'performance' ? 'page' : undefined"
-              @click="settingsSection = 'performance'"
-            >
-              <span class="settings-nav-icon" aria-hidden="true"><IconBedtime /></span>
-              <span>
-                <strong>{{ t('settings.nav.performance') }}</strong>
-                <small>{{ t('settings.nav.performanceDescription') }}</small>
-              </span>
-            </button>
-            <button
-              class="settings-nav-item"
-              :class="{ active: settingsSection === 'mcp' }"
-              type="button"
-              :aria-current="settingsSection === 'mcp' ? 'page' : undefined"
-              @click="settingsSection = 'mcp'"
-            >
-              <span class="settings-nav-icon" aria-hidden="true"><IconShieldLock /></span>
-              <span>
-                <strong>{{ t('settings.nav.mcp') }}</strong>
-                <small>{{ t('settings.nav.mcpDescription') }}</small>
-              </span>
-            </button>
-            <button
-              class="settings-nav-item"
-              :class="{ active: settingsSection === 'privacy' }"
-              type="button"
-              :aria-current="settingsSection === 'privacy' ? 'page' : undefined"
-              @click="settingsSection = 'privacy'"
-            >
-              <span class="settings-nav-icon" aria-hidden="true"><IconDelete /></span>
-              <span>
-                <strong>{{ t('settings.nav.privacy') }}</strong>
-                <small>{{ t('settings.nav.privacyDescription') }}</small>
-              </span>
-            </button>
-            <button
-              class="settings-nav-item"
-              :class="{ active: settingsSection === 'permissions' }"
-              type="button"
-              :aria-current="settingsSection === 'permissions' ? 'page' : undefined"
-              @click="settingsSection = 'permissions'"
-            >
-              <span class="settings-nav-icon" aria-hidden="true"><IconPrivacy /></span>
-              <span>
-                <strong>{{ t('settings.nav.permissions') }}</strong>
-                <small>{{ t('settings.nav.permissionsDescription') }}</small>
-              </span>
-            </button>
-            <button
-              class="settings-nav-item"
-              :class="{ active: settingsSection === 'credentials' }"
-              type="button"
-              :aria-current="settingsSection === 'credentials' ? 'page' : undefined"
-              @click="settingsSection = 'credentials'"
-            >
-              <span class="settings-nav-icon" aria-hidden="true"><IconKey /></span>
-              <span>
-                <strong>{{ t('settings.nav.passwords') }}</strong>
-                <small>{{ t('settings.nav.passwordsDescription') }}</small>
-              </span>
-            </button>
-            <button
-              class="settings-nav-item"
-              :class="{ active: settingsSection === 'updates' }"
-              type="button"
-              :aria-current="settingsSection === 'updates' ? 'page' : undefined"
-              @click="settingsSection = 'updates'"
-            >
-              <span class="settings-nav-icon" aria-hidden="true"><IconSystemUpdate /></span>
-              <span>
-                <strong>{{ t('settings.nav.updates') }}</strong>
-                <small>{{ t('settings.nav.updatesDescription') }}</small>
-              </span>
-            </button>
-            <button
-              class="settings-nav-item"
-              :class="{ active: settingsSection === 'support' }"
-              type="button"
-              :aria-current="settingsSection === 'support' ? 'page' : undefined"
-              @click="settingsSection = 'support'"
-            >
-              <span class="settings-nav-icon" aria-hidden="true"><IconFavorite /></span>
-              <span>
-                <strong>{{ t('settings.nav.support') }}</strong>
-                <small>{{ t('settings.nav.supportDescription') }}</small>
-              </span>
-            </button>
-          </nav>
-
-          <AppearanceSettings
-            v-if="settingsSection === 'appearance'"
-            @test-sound="testAttentionSound"
-            @setting-error="handleExtractedSettingError"
-          />
-          <main v-else-if="settingsSection === 'search'" class="settings-content">
-            <div class="setting-copy">
-              <h3>{{ t('settings.search.heading') }}</h3>
-              <p>{{ t('settings.search.description') }}</p>
-            </div>
-            <div class="search-engine-options" role="radiogroup" :aria-label="t('settings.search.heading')">
-              <button
-                v-for="engine in SEARCH_ENGINE_OPTIONS"
-                :key="engine.id"
-                class="search-engine-option"
-                :class="{ selected: settings.searchEngine === engine.id }"
-                type="button"
-                role="radio"
-                :aria-checked="settings.searchEngine === engine.id"
-                :data-testid="`search-engine-${engine.id}`"
-                @click="selectSearchEngine(engine.id)"
-              >
-                <span class="search-engine-mark" aria-hidden="true">{{ engine.label.slice(0, 1) }}</span>
-                <span class="search-engine-copy">
-                  <strong>{{ engine.label }}</strong>
-                  <small>{{ engine.description }}</small>
-                  <code>{{ engine.hostname }}</code>
-                </span>
-                <span class="search-engine-check" aria-hidden="true"><IconCheck /></span>
-              </button>
-            </div>
-            <div class="settings-info">
-              <span class="info-dot" aria-hidden="true"><IconInfo /></span>
-              <p>{{ t('settings.search.privacy') }}</p>
-            </div>
-          </main>
-          <DownloadSettingsPanel
-            v-else-if="settingsSection === 'downloads'"
-            :controller="downloadSettingsController"
-          />
-          <PerformanceSettingsPanel
-            v-else-if="settingsSection === 'performance'"
-            :controller="performanceSettingsController"
-            :format-number="localNumber"
-          />
-          <McpSettingsPanel
-            v-else-if="settingsSection === 'mcp'"
-            :controller="mcpSettingsController"
-          />
-          <PrivacySettingsPanel
-            v-else-if="settingsSection === 'privacy'"
-            :controller="privacySettingsController"
-            :format-bytes="formatBytes"
-            :format-number="localNumber"
-          />
-          <SitePermissionsSettingsPanel
-            v-else-if="settingsSection === 'permissions'"
-            :controller="sitePermissionsController"
-          />
-          <CredentialsSettingsPanel
-            v-else-if="settingsSection === 'credentials'"
-            :controller="credentialsController"
-          />
-          <UpdateSettingsPanel
-            v-else-if="settingsSection === 'updates'"
-            :controller="updateSettingsController"
-          />
-          <SupportSettingsPanel
-            v-else
-            :controller="commercialLicenseController"
-            :format-number="localNumber"
-            :format-date-time="localDateTime"
-            @open-url="openSupport"
-          />
-        </div>
-
-        <footer class="settings-footer">
-          <button
-            v-if="settingsSection !== 'support' && settingsSection !== 'credentials'"
-            class="secondary-button"
-            type="button"
-            :disabled="settingsResetDisabled"
-            @click="resetCurrentSection"
-          >{{ t('settings.reset') }}</button>
-          <button class="primary-button" type="button" @click="settingsOpen = false">{{ t('common.close') }}</button>
-        </footer>
-      </section>
-    </div>
+    <SettingsDialog
+      :controller="settingsDialogController"
+      :search-controller="searchSettingsController"
+      :download-controller="downloadSettingsController"
+      :performance-controller="performanceSettingsController"
+      :mcp-controller="mcpSettingsController"
+      :privacy-controller="privacySettingsController"
+      :permissions-controller="sitePermissionsController"
+      :credentials-controller="credentialsController"
+      :update-controller="updateSettingsController"
+      :support-controller="commercialLicenseController"
+      :format-bytes="formatBytes"
+      :format-number="localNumber"
+      :format-date-time="localDateTime"
+      :test-sound="testAttentionSound"
+      :report-setting-error="handleExtractedSettingError"
+      :open-url="openSupport"
+    />
     <div v-if="helpDialog" class="settings-overlay help-overlay" @click.self="helpDialog = null">
       <section
         ref="helpDialogPanel"
