@@ -165,6 +165,7 @@ export function useDiagnosticsController(options: DiagnosticsControllerOptions) 
     return request.generation === generation
       && request.sequence === sequences[domain]
       && options.activeTab.value?.id === request.tab.id
+      && options.activeTab.value.url === request.tab.url
   }
 
   function scheduleFeedbackReset(callback: () => void): void {
@@ -660,27 +661,27 @@ export function useDiagnosticsController(options: DiagnosticsControllerOptions) 
     scheduleFeedbackReset(() => (qualityAuditCopied.value = false))
   }
 
-  function resetForTab(tabId: string | undefined): void {
+  function resetForContext(): void {
     generation += 1
     for (const domain of Object.keys(sequences) as Domain[]) sequences[domain] += 1
     const keepOpen = options.keepsSeparatePanelOpen()
-    const closeIfMismatched = <Value extends { tabId: string }>(open: Ref<boolean>, value: Value | null): void => {
-      if (!keepOpen && open.value && value?.tabId !== tabId) open.value = false
+    const closeForContextChange = (open: Ref<boolean>): void => {
+      if (!keepOpen && open.value) open.value = false
     }
-    closeIfMismatched(accessibilityPanelOpen, accessibilityAudit.value)
-    closeIfMismatched(qualityAuditPanelOpen, qualityAuditReport.value)
-    closeIfMismatched(performancePanelOpen, performanceReport.value)
-    closeIfMismatched(designOverviewPanelOpen, designOverviewReport.value)
-    closeIfMismatched(pageMetadataPanelOpen, pageMetadataReport.value)
-    closeIfMismatched(securityPanelOpen, securityReport.value)
-    closeIfMismatched(coveragePanelOpen, coverageResult.value)
-    closeIfMismatched(cpuProfilePanelOpen, cpuProfileResult.value)
-    closeIfMismatched(memoryPanelOpen, memoryReport.value)
-    closeIfMismatched(debugReportPanelOpen, debugReport.value)
-    closeIfMismatched(reproPanelOpen, reproRecording.value)
-    closeIfMismatched(domChangesPanelOpen, domChangesReport.value)
-    closeIfMismatched(visualComparePanelOpen, visualCompareReport.value)
-    closeIfMismatched(inspectorIssuesOpen, inspectorIssuesReport.value)
+    closeForContextChange(accessibilityPanelOpen)
+    closeForContextChange(qualityAuditPanelOpen)
+    closeForContextChange(performancePanelOpen)
+    closeForContextChange(designOverviewPanelOpen)
+    closeForContextChange(pageMetadataPanelOpen)
+    closeForContextChange(securityPanelOpen)
+    closeForContextChange(coveragePanelOpen)
+    closeForContextChange(cpuProfilePanelOpen)
+    closeForContextChange(memoryPanelOpen)
+    closeForContextChange(debugReportPanelOpen)
+    closeForContextChange(reproPanelOpen)
+    closeForContextChange(domChangesPanelOpen)
+    closeForContextChange(visualComparePanelOpen)
+    closeForContextChange(inspectorIssuesOpen)
     accessibilityAudit.value = null
     accessibilityAuditState.value = 'idle'
     accessibilityAuditError.value = ''
@@ -726,7 +727,14 @@ export function useDiagnosticsController(options: DiagnosticsControllerOptions) 
     inspectorIssuesError.value = ''
   }
 
-  const stopTabWatcher = watch(() => options.activeTab.value?.id, resetForTab, { immediate: true })
+  const stopTabWatcher = watch(
+    () => [options.activeTab.value?.id, options.activeTab.value?.url] as const,
+    ([tabId, url], previousContext) => {
+      if (previousContext && tabId === previousContext[0] && url === previousContext[1]) return
+      resetForContext()
+    },
+    { immediate: true }
+  )
   const stopReproWatcher = watch(
     () => [options.activeTab.value?.id, options.activeTab.value?.reproRecording?.active, options.activeTab.value?.reproRecording?.stepCount] as const,
     ([tabId]) => {
@@ -888,7 +896,7 @@ export function useDiagnosticsController(options: DiagnosticsControllerOptions) 
     runQualityAudit,
     toggleQualityAudit,
     copyQualityAudit,
-    resetForTab,
+    resetForContext,
     dispose
   }
 }

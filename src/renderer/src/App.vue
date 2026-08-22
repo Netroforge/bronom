@@ -369,61 +369,41 @@ const diagnosticsController = useDiagnosticsController({
 const {
   accessibilityAuditState,
   accessibilityAudit,
-  accessibilityAuditError,
   accessibilityPanelOpen,
   qualityAuditState,
   qualityAuditReport,
-  qualityAuditError,
   qualityAuditPanelOpen,
-  qualityAuditCopied,
   performanceState,
-  performanceReport,
-  performanceError,
   performancePanelOpen,
   designOverviewPanelOpen,
   designOverviewReport,
   designOverviewState,
-  designOverviewError,
   pageMetadataPanelOpen,
   pageMetadataReport,
   pageMetadataState,
-  pageMetadataError,
   securityPanelOpen,
   securityReport,
   securityReportState,
-  securityReportError,
   coveragePanelOpen,
   coverageResult,
   coverageState,
-  coverageError,
   cpuProfilePanelOpen,
   cpuProfileResult,
   cpuProfileState,
-  cpuProfileError,
   memoryState,
   memoryReport,
-  memoryError,
   memoryPanelOpen,
   debugReportState,
   debugReport,
-  debugReportError,
   debugReportPanelOpen,
   reproPanelOpen,
   reproRecording,
-  reproState,
-  reproError,
   domChangesPanelOpen,
   domChangesReport,
-  domChangesState,
-  domChangesError,
   visualComparePanelOpen,
   visualCompareReport,
   visualCompareState,
-  visualCompareError,
   inspectorIssuesOpen,
-  inspectorIssuesState,
-  inspectorIssuesReport,
-  inspectorIssuesError,
   runPerformanceReport,
   togglePerformanceReport,
   runDesignOverview,
@@ -1640,70 +1620,13 @@ watch(
       pageToolsOpen.value = false
       responsivePanelOpen.value = false
       environmentPanelOpen.value = false
-      accessibilityPanelOpen.value = false
-      qualityAuditPanelOpen.value = false
-      performancePanelOpen.value = false
-      designOverviewPanelOpen.value = false
-      pageMetadataPanelOpen.value = false
-      securityPanelOpen.value = false
-      coveragePanelOpen.value = false
-      cpuProfilePanelOpen.value = false
-      memoryPanelOpen.value = false
-      debugReportPanelOpen.value = false
-      reproPanelOpen.value = false
-      domChangesPanelOpen.value = false
-      visualComparePanelOpen.value = false
-      inspectorIssuesOpen.value = false
     }
     resetSiteStorageView(true)
     if (responsivePanelOpen.value && keepPanelOpen) loadResponsiveDraft(activeEmulation.value?.viewport)
     else resetResponsiveFeedback()
     if (environmentPanelOpen.value && keepPanelOpen) loadEnvironmentDraft(activeEmulation.value)
     else environmentController.resetFeedback()
-    accessibilityAudit.value = null
-    accessibilityAuditState.value = 'idle'
-    accessibilityAuditError.value = ''
-    qualityAuditReport.value = null
-    qualityAuditState.value = 'idle'
-    qualityAuditError.value = ''
-    qualityAuditCopied.value = false
-    performanceReport.value = null
-    performanceState.value = 'idle'
-    performanceError.value = ''
-    designOverviewReport.value = null
-    designOverviewState.value = 'idle'
-    designOverviewError.value = ''
-    pageMetadataReport.value = null
-    pageMetadataState.value = 'idle'
-    pageMetadataError.value = ''
-    securityReport.value = null
-    securityReportState.value = 'idle'
-    securityReportError.value = ''
-    coverageResult.value = null
-    coverageState.value = 'idle'
-    coverageError.value = ''
-    cpuProfileResult.value = null
-    cpuProfileState.value = 'idle'
-    cpuProfileError.value = ''
-    memoryReport.value = null
-    memoryState.value = 'idle'
-    memoryError.value = ''
     resetConsoleView(true)
-    debugReport.value = null
-    debugReportState.value = 'idle'
-    debugReportError.value = ''
-    reproRecording.value = null
-    reproState.value = 'idle'
-    reproError.value = ''
-    domChangesReport.value = null
-    domChangesState.value = 'idle'
-    domChangesError.value = ''
-    visualCompareReport.value = null
-    visualCompareState.value = 'idle'
-    visualCompareError.value = ''
-    inspectorIssuesReport.value = null
-    inspectorIssuesState.value = 'idle'
-    inspectorIssuesError.value = ''
     resetNetworkMonitorView(true)
     address.value = url === 'about:blank' || url?.startsWith('bronom://home') ? '' : url || ''
   },

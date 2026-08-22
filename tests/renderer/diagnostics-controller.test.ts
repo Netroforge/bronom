@@ -145,7 +145,7 @@ describe('diagnostics controller', () => {
     browser.measurePerformance.mockImplementationOnce(() => pending.promise)
 
     const loading = controller.runPerformanceReport()
-    controller.resetForTab('tab-1')
+    controller.resetForContext()
     pending.resolve(performanceReport())
     await loading
 
@@ -169,6 +169,41 @@ describe('diagnostics controller', () => {
     expect(controller.performancePanelOpen.value).toBe(false)
     expect(controller.performanceReport.value).toBeNull()
     expect(controller.performanceState.value).toBe('idle')
+    controller.dispose()
+  })
+
+  it('invalidates an in-flight report when the same tab navigates', async () => {
+    const pending = deferred<BrowserPerformanceReport>()
+    const { activeTab, browser, controller } = createController()
+    browser.measurePerformance.mockImplementationOnce(() => pending.promise)
+
+    const loading = controller.runPerformanceReport()
+    expect(controller.performancePanelOpen.value).toBe(true)
+    activeTab.value = { ...tab(), url: 'https://example.test/next' }
+    await nextTick()
+    pending.resolve(performanceReport())
+    await loading
+
+    expect(controller.performancePanelOpen.value).toBe(false)
+    expect(controller.performanceReport.value).toBeNull()
+    expect(controller.performanceState.value).toBe('idle')
+    controller.dispose()
+  })
+
+  it('keeps an in-flight report when same-page tab metadata changes', async () => {
+    const pending = deferred<BrowserPerformanceReport>()
+    const { activeTab, browser, controller } = createController()
+    browser.measurePerformance.mockImplementationOnce(() => pending.promise)
+
+    const loading = controller.runPerformanceReport()
+    activeTab.value = { ...tab(), preserveDiagnosticLogs: true }
+    await nextTick()
+
+    expect(controller.performancePanelOpen.value).toBe(true)
+    expect(controller.performanceState.value).toBe('running')
+    pending.resolve(performanceReport())
+    await loading
+    expect(controller.performanceState.value).toBe('complete')
     controller.dispose()
   })
 
