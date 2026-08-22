@@ -85,7 +85,6 @@ import {
   PANEL_DOCKS,
   AppSettings,
   AppUpdateState,
-  BrowserEnvironmentSettings,
   BrowserState,
   BrowserEmulationState,
   BrowserTabState,
@@ -124,6 +123,7 @@ import CredentialPicker from './components/CredentialPicker.vue'
 import CredentialImportCard from './components/CredentialImportCard.vue'
 import DiagnosticsPanels from './components/DiagnosticsPanels.vue'
 import DownloadsPanel from './components/DownloadsPanel.vue'
+import EnvironmentPanel from './components/EnvironmentPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
 import NetworkPanel from './components/NetworkPanel.vue'
 import PanelDockPicker from './components/PanelDockPicker.vue'
@@ -135,6 +135,7 @@ import { useBrowserStore } from './stores/browser'
 import { useSettingsStore } from './stores/settings'
 import { useShellWindowLifecycle } from './composables/useShellWindowLifecycle'
 import { useDiagnosticsController } from './composables/useDiagnosticsController'
+import { useEnvironmentPanelController } from './composables/useEnvironmentPanelController'
 import { useSiteDataSummaryController } from './composables/useSiteDataSummaryController'
 import {
   shellHeightForBrowserContent,
@@ -159,11 +160,6 @@ import { DEFAULT_MCP_PORT, MAX_MCP_PORT, MIN_MCP_PORT, isValidMcpPort } from '..
 import { SEARCH_ENGINE_OPTIONS } from '../../shared/search-engine'
 import { DEFAULT_INTERFACE_SCALE } from '../../shared/interface-scale'
 import type { BrowserSplitOrientation } from '../../shared/split-view'
-import {
-  browserEnvironmentFromEmulation,
-  browserEnvironmentOverrideCount,
-  isBrowserEnvironmentSettings
-} from '../../shared/browser-environment'
 
 function isPanelDock(value: string | null): value is PanelDock {
   return value !== null && (PANEL_DOCKS as readonly string[]).includes(value)
@@ -284,13 +280,20 @@ const pageToolsOpen = ref(false)
 const responsivePanelOpen = ref(false)
 const responsivePanel = ref<InstanceType<typeof ResponsivePreviewPanel> | null>(null)
 const environmentPanelOpen = ref(false)
-const environmentDraft = ref<BrowserEnvironmentSettings>(browserEnvironmentFromEmulation())
-const environmentLocationEnabled = ref(false)
-const environmentLatitude = ref(50.4501)
-const environmentLongitude = ref(30.5234)
-const environmentAccuracy = ref(100)
-const environmentState = ref<'idle' | 'applying' | 'applied' | 'error'>('idle')
-const environmentError = ref('')
+const environmentController = useEnvironmentPanelController({
+  open: environmentPanelOpen,
+  activeTab,
+  setTabEnvironment: (tabId, environment) => browser.setTabEnvironment(tabId, environment),
+  reloadIgnoringCache: (tabId) => browser.reloadIgnoringCache(tabId),
+  commitState: commitBrowserState,
+  beginMutation: beginEmulationMutation,
+  isMutationCurrent: isEmulationMutationCurrent,
+  closeTransientPanels
+})
+const {
+  state: environmentState,
+  activeOverrideCount: activeEnvironmentOverrideCount
+} = environmentController
 const workspaceEditorOpen = ref(false)
 const workspaceEditor = ref<InstanceType<typeof WorkspaceEditor> | null>(null)
 const browsingDataSummary = ref<BrowsingDataSummary | null>(null)
@@ -596,21 +599,6 @@ const responsivePreviewLabel = computed(() => {
   const viewport = activeEmulation.value?.viewport
   return viewport ? t('runtime.responsive.at', { size: `${viewport.width}×${viewport.height}`, scale: localNumber(viewport.deviceScaleFactor) }) : t('runtime.responsive.preview')
 })
-const environmentSettingsDraft = computed<BrowserEnvironmentSettings | null>(() => {
-  const candidate: BrowserEnvironmentSettings = {
-    ...environmentDraft.value,
-    renderingDebug: { ...environmentDraft.value.renderingDebug },
-    geolocation: environmentLocationEnabled.value ? {
-      latitude: environmentLatitude.value,
-      longitude: environmentLongitude.value,
-      accuracy: environmentAccuracy.value
-    } : null
-  }
-  return isBrowserEnvironmentSettings(candidate) ? candidate : null
-})
-const activeEnvironmentOverrideCount = computed(() => browserEnvironmentOverrideCount(
-  browserEnvironmentFromEmulation(activeEmulation.value)
-))
 const environmentLabel = computed(() => {
   if (environmentState.value === 'applying') return t('runtime.tool.environmentApplying')
   if (environmentState.value === 'error') return t('runtime.tool.environmentAttention')
@@ -1450,56 +1438,11 @@ function toggleResponsivePreview(): void {
 }
 
 function loadEnvironmentDraft(emulation = activeEmulation.value): void {
-  const environment = browserEnvironmentFromEmulation(emulation)
-  environmentDraft.value = environment
-  environmentLocationEnabled.value = environment.geolocation !== null
-  if (environment.geolocation) {
-    environmentLatitude.value = environment.geolocation.latitude
-    environmentLongitude.value = environment.geolocation.longitude
-    environmentAccuracy.value = environment.geolocation.accuracy
-  }
-  environmentState.value = 'idle'
-  environmentError.value = ''
+  environmentController.loadDraft(emulation)
 }
 
 function toggleEnvironment(): void {
-  if (environmentPanelOpen.value) {
-    environmentPanelOpen.value = false
-    return
-  }
-  closeTransientPanels()
-  loadEnvironmentDraft()
-  environmentPanelOpen.value = true
-}
-
-async function applyEnvironment(reload = false): Promise<void> {
-  const tab = activeTab.value
-  const environment = environmentSettingsDraft.value
-  if (!tab || !environment) return
-  const requestSequence = ++emulationMutationSequence
-  environmentState.value = 'applying'
-  environmentError.value = ''
-  try {
-    let nextState = await browser.setTabEnvironment(tab.id, environment)
-    if (requestSequence !== emulationMutationSequence || activeTab.value?.id !== tab.id) return
-    if (reload) {
-      nextState = await browser.reloadIgnoringCache(tab.id)
-      if (requestSequence !== emulationMutationSequence || activeTab.value?.id !== tab.id) return
-    }
-    state.value = nextState
-    loadEnvironmentDraft(activeTab.value?.emulation)
-    environmentState.value = 'applied'
-  } catch (error) {
-    if (requestSequence !== emulationMutationSequence || activeTab.value?.id !== tab.id) return
-    environmentState.value = 'error'
-    environmentError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function resetEnvironment(): Promise<void> {
-  environmentDraft.value = browserEnvironmentFromEmulation()
-  environmentLocationEnabled.value = false
-  await applyEnvironment(false)
+  environmentController.toggle()
 }
 
 watch(settingsOpen, async () => {
@@ -1715,10 +1658,7 @@ watch(
     if (responsivePanelOpen.value && keepPanelOpen) loadResponsiveDraft(activeEmulation.value?.viewport)
     else resetResponsiveFeedback()
     if (environmentPanelOpen.value && keepPanelOpen) loadEnvironmentDraft(activeEmulation.value)
-    else {
-      environmentState.value = 'idle'
-      environmentError.value = ''
-    }
+    else environmentController.resetFeedback()
     accessibilityAudit.value = null
     accessibilityAuditState.value = 'idle'
     accessibilityAuditError.value = ''
@@ -1808,10 +1748,7 @@ watch(
     if (environmentPanelOpen.value) {
       if (!keepPanelOpen) environmentPanelOpen.value = false
       else loadEnvironmentDraft(tab?.emulation)
-    } else {
-      environmentState.value = 'idle'
-      environmentError.value = ''
-    }
+    } else environmentController.resetFeedback()
   }
 )
 
@@ -4394,262 +4331,14 @@ onBeforeUnmount(() => {
       :is-mutation-current="isEmulationMutationCurrent"
       :close-transient-panels="closeTransientPanels"
     />
-    <section
-      v-if="environmentPanelOpen"
-      class="accessibility-panel environment-panel"
-      data-shell-docked-panel
-      role="dialog"
-      aria-modal="false"
-      aria-labelledby="environment-panel-title"
-      :aria-busy="environmentState === 'applying'"
-    >
-      <header>
-        <div>
-          <span class="eyebrow">{{ t('environment.kicker') }}</span>
-          <h2 id="environment-panel-title">{{ t('environment.heading') }}</h2>
-        </div>
-        <div class="panel-header-actions">
-          <PanelDockPicker v-model="panelDock" :label="t('panels.dockNamed', { panel: t('environment.heading') })" />
-          <button class="panel-close" type="button" :aria-label="t('environment.close')" @click="environmentPanelOpen = false"><IconClose aria-hidden="true" /></button>
-        </div>
-      </header>
-      <form class="environment-content" @submit.prevent="applyEnvironment(false)">
-        <section aria-labelledby="environment-speed-title">
-          <div class="environment-section-heading">
-            <div><h3 id="environment-speed-title">{{ t('environment.loading.heading') }}</h3><p>{{ t('environment.loading.description') }}</p></div>
-          </div>
-          <div class="environment-field-grid">
-            <label>
-              <span>{{ t('environment.network.label') }}</span>
-              <select v-model="environmentDraft.network" :aria-label="t('environment.network.label')" @change="environmentState = 'idle'">
-                <option value="none">{{ t('environment.network.none') }}</option>
-                <option value="fast-4g">{{ t('environment.network.fast4g') }}</option>
-                <option value="slow-4g">{{ t('environment.network.slow4g') }}</option>
-                <option value="slow-3g">{{ t('environment.network.slow3g') }}</option>
-                <option value="offline">{{ t('environment.network.offline') }}</option>
-              </select>
-              <small>{{ t('environment.network.help') }}</small>
-            </label>
-            <label>
-              <span>{{ t('environment.cpu.label') }}</span>
-              <select v-model.number="environmentDraft.cpuThrottlingRate" :aria-label="t('environment.cpu.label')" @change="environmentState = 'idle'">
-                <option :value="1">{{ t('environment.cpu.none') }}</option>
-                <option :value="2">{{ t('environment.cpu.x2') }}</option>
-                <option :value="4">{{ t('environment.cpu.x4') }}</option>
-                <option :value="6">{{ t('environment.cpu.x6') }}</option>
-                <option :value="20">{{ t('environment.cpu.x20') }}</option>
-              </select>
-              <small>{{ t('environment.cpu.help') }}</small>
-            </label>
-            <label class="environment-field-wide">
-              <span>{{ t('environment.dataSaver.label') }}</span>
-              <select v-model="environmentDraft.dataSaver" :aria-label="t('environment.dataSaver.label')" @change="environmentState = 'idle'">
-                <option value="auto">{{ t('environment.dataSaver.system') }}</option>
-                <option value="enabled">{{ t('environment.dataSaver.enabled') }}</option>
-                <option value="disabled">{{ t('environment.dataSaver.disabled') }}</option>
-              </select>
-              <small>{{ t('environment.dataSaver.help') }}</small>
-            </label>
-          </div>
-          <label class="environment-toggle">
-            <input v-model="environmentDraft.cacheDisabled" type="checkbox" @change="environmentState = 'idle'" />
-            <span><strong>{{ t('environment.cache.label') }}</strong><small>{{ t('environment.cache.help') }}</small></span>
-          </label>
-          <label class="environment-toggle">
-            <input v-model="environmentDraft.bypassServiceWorker" type="checkbox" @change="environmentState = 'idle'" />
-            <span><strong>{{ t('environment.serviceWorker.label') }}</strong><small>{{ t('environment.serviceWorker.help') }}</small></span>
-          </label>
-          <p v-if="environmentDraft.network === 'offline'" class="environment-warning"><IconWarning aria-hidden="true" /> {{ t('environment.serviceWorker.offline') }}</p>
-          <p v-if="environmentDraft.network === 'offline' && environmentDraft.bypassServiceWorker" class="environment-warning"><IconWarning aria-hidden="true" /> {{ t('environment.serviceWorker.combined') }}</p>
-        </section>
-        <section aria-labelledby="environment-runtime-title">
-          <div class="environment-section-heading">
-            <div><h3 id="environment-runtime-title">{{ t('environment.runtime.heading') }}</h3><p>{{ t('environment.runtime.description') }}</p></div>
-          </div>
-          <div class="environment-field-grid">
-            <label class="environment-field-wide">
-              <span>{{ t('environment.runtime.animation') }}</span>
-              <select v-model.number="environmentDraft.animationPlaybackRate" :aria-label="t('environment.runtime.animation')" @change="environmentState = 'idle'">
-                <option :value="1">{{ t('environment.runtime.normal') }}</option>
-                <option :value="0.25">{{ t('environment.runtime.quarter') }}</option>
-                <option :value="0.1">{{ t('environment.runtime.tenth') }}</option>
-                <option :value="0">{{ t('environment.runtime.paused') }}</option>
-              </select>
-              <small>{{ t('environment.runtime.animationHelp') }}</small>
-            </label>
-          </div>
-          <label class="environment-toggle">
-            <input v-model="environmentDraft.javaScriptDisabled" type="checkbox" @change="environmentState = 'idle'" />
-            <span><strong>{{ t('environment.runtime.disableJs') }}</strong><small>{{ t('environment.runtime.disableJsHelp') }}</small></span>
-          </label>
-          <p v-if="environmentDraft.javaScriptDisabled" class="environment-warning"><IconWarning aria-hidden="true" /> {{ t('environment.runtime.disableJsWarning') }}</p>
-        </section>
-        <section aria-labelledby="environment-rendering-title">
-          <div class="environment-section-heading">
-            <div><h3 id="environment-rendering-title">{{ t('environment.rendering.heading') }}</h3><p>{{ t('environment.rendering.description') }}</p></div>
-          </div>
-          <div class="environment-field-grid">
-            <label>
-              <span>{{ t('environment.rendering.media') }}</span>
-              <select v-model="environmentDraft.mediaType" :aria-label="t('environment.rendering.media')" @change="environmentState = 'idle'">
-                <option value="auto">{{ t('environment.rendering.noOverride') }}</option>
-                <option value="screen">{{ t('environment.rendering.screen') }}</option>
-                <option value="print">{{ t('environment.rendering.print') }}</option>
-              </select>
-              <small>{{ t('environment.rendering.printHelp') }}</small>
-            </label>
-            <label>
-              <span>{{ t('environment.rendering.colorScheme') }}</span>
-              <select v-model="environmentDraft.colorScheme" :aria-label="t('environment.rendering.colorScheme')" @change="environmentState = 'idle'">
-                <option value="auto">{{ t('environment.rendering.noOverride') }}</option>
-                <option value="light">{{ t('environment.rendering.light') }}</option>
-                <option value="dark">{{ t('environment.rendering.dark') }}</option>
-              </select>
-              <small>{{ t('environment.rendering.colorHelp') }}</small>
-            </label>
-            <label>
-              <span>{{ t('environment.rendering.forcedColors') }}</span>
-              <select v-model="environmentDraft.forcedColors" :aria-label="t('environment.rendering.forcedColors')" @change="environmentState = 'idle'">
-                <option value="auto">{{ t('environment.rendering.noOverride') }}</option>
-                <option value="active">{{ t('environment.rendering.active') }}</option>
-                <option value="none">{{ t('environment.rendering.inactive') }}</option>
-              </select>
-              <small>{{ t('environment.rendering.forcedHelp') }}</small>
-            </label>
-            <label>
-              <span>{{ t('environment.rendering.contrast') }}</span>
-              <select v-model="environmentDraft.contrast" :aria-label="t('environment.rendering.contrast')" @change="environmentState = 'idle'">
-                <option value="auto">{{ t('environment.rendering.noOverride') }}</option>
-                <option value="more">{{ t('environment.rendering.more') }}</option>
-                <option value="less">{{ t('environment.rendering.less') }}</option>
-                <option value="custom">{{ t('environment.rendering.custom') }}</option>
-                <option value="no-preference">{{ t('environment.rendering.noPreference') }}</option>
-              </select>
-              <small>{{ t('environment.rendering.contrastHelp') }}</small>
-            </label>
-            <label>
-              <span>{{ t('environment.rendering.motion') }}</span>
-              <select v-model="environmentDraft.reducedMotion" :aria-label="t('environment.rendering.motion')" @change="environmentState = 'idle'">
-                <option value="auto">{{ t('environment.rendering.noOverride') }}</option>
-                <option value="reduce">{{ t('environment.rendering.reduceMotion') }}</option>
-                <option value="no-preference">{{ t('environment.rendering.noPreference') }}</option>
-              </select>
-              <small>{{ t('environment.rendering.motionHelp') }}</small>
-            </label>
-            <label>
-              <span>{{ t('environment.rendering.transparency') }}</span>
-              <select v-model="environmentDraft.reducedTransparency" :aria-label="t('environment.rendering.transparency')" @change="environmentState = 'idle'">
-                <option value="auto">{{ t('environment.rendering.noOverride') }}</option>
-                <option value="reduce">{{ t('environment.rendering.reduceTransparency') }}</option>
-                <option value="no-preference">{{ t('environment.rendering.noPreference') }}</option>
-              </select>
-              <small>{{ t('environment.rendering.transparencyHelp') }}</small>
-            </label>
-            <label class="environment-field-wide">
-              <span>{{ t('environment.rendering.vision') }}</span>
-              <select v-model="environmentDraft.visionDeficiency" :aria-label="t('environment.rendering.vision')" @change="environmentState = 'idle'">
-                <option value="none">{{ t('environment.rendering.noSimulation') }}</option>
-                <option value="blurredVision">{{ t('environment.rendering.blurred') }}</option>
-                <option value="reducedContrast">{{ t('environment.rendering.reducedContrast') }}</option>
-                <option value="protanopia">{{ t('environment.rendering.protanopia') }}</option>
-                <option value="deuteranopia">{{ t('environment.rendering.deuteranopia') }}</option>
-                <option value="tritanopia">{{ t('environment.rendering.tritanopia') }}</option>
-                <option value="achromatopsia">{{ t('environment.rendering.achromatopsia') }}</option>
-              </select>
-              <small>{{ t('environment.rendering.visionHelp') }}</small>
-            </label>
-          </div>
-        </section>
-        <section aria-labelledby="environment-debug-overlays-title">
-          <div class="environment-section-heading">
-            <div><h3 id="environment-debug-overlays-title">{{ t('environment.diagnostics.heading') }}</h3><p>{{ t('environment.diagnostics.description') }}</p></div>
-          </div>
-          <label class="environment-toggle">
-            <input v-model="environmentDraft.renderingDebug.paintFlashing" type="checkbox" @change="environmentState = 'idle'" />
-            <span><strong>{{ t('environment.diagnostics.paint') }}</strong><small>{{ t('environment.diagnostics.paintHelp') }}</small></span>
-          </label>
-          <label class="environment-toggle">
-            <input v-model="environmentDraft.renderingDebug.layoutShiftRegions" type="checkbox" @change="environmentState = 'idle'" />
-            <span><strong>{{ t('environment.diagnostics.shifts') }}</strong><small>{{ t('environment.diagnostics.shiftsHelp') }}</small></span>
-          </label>
-          <label class="environment-toggle">
-            <input v-model="environmentDraft.renderingDebug.layerBorders" type="checkbox" @change="environmentState = 'idle'" />
-            <span><strong>{{ t('environment.diagnostics.layers') }}</strong><small>{{ t('environment.diagnostics.layersHelp') }}</small></span>
-          </label>
-          <label class="environment-toggle">
-            <input v-model="environmentDraft.renderingDebug.fpsCounter" type="checkbox" @change="environmentState = 'idle'" />
-            <span><strong>{{ t('environment.diagnostics.frames') }}</strong><small>{{ t('environment.diagnostics.framesHelp') }}</small></span>
-          </label>
-          <label class="environment-toggle">
-            <input v-model="environmentDraft.renderingDebug.scrollBottlenecks" type="checkbox" @change="environmentState = 'idle'" />
-            <span><strong>{{ t('environment.diagnostics.scrolling') }}</strong><small>{{ t('environment.diagnostics.scrollingHelp') }}</small></span>
-          </label>
-          <p v-if="environmentDraft.renderingDebug.paintFlashing || environmentDraft.renderingDebug.layoutShiftRegions" class="environment-warning"><IconWarning aria-hidden="true" /> {{ t('environment.diagnostics.warning') }}</p>
-        </section>
-        <section aria-labelledby="environment-identity-title">
-          <div class="environment-section-heading">
-            <div><h3 id="environment-identity-title">{{ t('environment.identity.heading') }}</h3><p>{{ t('environment.identity.description') }}</p></div>
-          </div>
-          <div class="environment-field-grid environment-region-grid">
-            <label>
-              <span>{{ t('environment.identity.locale') }} <small>{{ t('environment.identity.optional') }}</small></span>
-              <input v-model.trim="environmentDraft.locale" :aria-label="t('environment.identity.locale')" type="text" maxlength="64" :placeholder="t('environment.identity.localePlaceholder')" spellcheck="false" @input="environmentState = 'idle'" />
-              <small>{{ t('environment.identity.localeHelp') }}</small>
-            </label>
-            <label>
-              <span>{{ t('environment.identity.timezone') }} <small>{{ t('environment.identity.optional') }}</small></span>
-              <input v-model.trim="environmentDraft.timezoneId" :aria-label="t('environment.identity.timezone')" type="text" maxlength="100" :placeholder="t('environment.identity.timezonePlaceholder')" spellcheck="false" @input="environmentState = 'idle'" />
-              <small>{{ t('environment.identity.timezoneHelp') }}</small>
-            </label>
-          </div>
-          <label class="environment-user-agent">
-            <span>{{ t('environment.identity.userAgent') }} <small>{{ t('environment.identity.optional') }}</small></span>
-            <input v-model="environmentDraft.userAgent" type="text" maxlength="512" :placeholder="t('environment.identity.userAgentPlaceholder')" spellcheck="false" @input="environmentState = 'idle'" />
-            <small>{{ t('environment.identity.userAgentHelp') }}</small>
-          </label>
-          <label class="environment-location-toggle">
-            <input v-model="environmentLocationEnabled" type="checkbox" @change="environmentState = 'idle'" />
-            <span><strong>{{ t('environment.identity.geolocation') }}</strong><small>{{ t('environment.identity.geolocationHelp') }}</small></span>
-          </label>
-          <div v-if="environmentLocationEnabled" class="environment-location-fields">
-            <label>{{ t('environment.identity.latitude') }}<input v-model.number="environmentLatitude" type="number" min="-90" max="90" step="0.000001" required @input="environmentState = 'idle'" /></label>
-            <label>{{ t('environment.identity.longitude') }}<input v-model.number="environmentLongitude" type="number" min="-180" max="180" step="0.000001" required @input="environmentState = 'idle'" /></label>
-            <label>{{ t('environment.identity.accuracy') }}<input v-model.number="environmentAccuracy" type="number" min="0" max="100000" step="1" required @input="environmentState = 'idle'" /></label>
-          </div>
-        </section>
-        <section v-if="activeEmulation?.viewport || activeEmulation?.extraHttpHeaderNames?.length" class="environment-managed" aria-labelledby="environment-managed-title">
-          <div class="environment-section-heading">
-            <div><h3 id="environment-managed-title">{{ t('environment.other.heading') }}</h3><p>{{ t('environment.other.description') }}</p></div>
-          </div>
-          <button v-if="activeEmulation?.viewport" type="button" @click="toggleResponsivePreview">
-            <IconDevices aria-hidden="true" />
-            <span><strong>{{ activeEmulation.viewport.width }}×{{ activeEmulation.viewport.height }} {{ t('environment.other.viewport') }}</strong><small>{{ t('environment.other.openResponsive') }}</small></span>
-          </button>
-          <div v-if="activeEmulation?.extraHttpHeaderNames?.length" class="environment-header-names">
-            <IconRoute aria-hidden="true" />
-            <span><strong>{{ activeEmulation.extraHttpHeaderNames.length }} {{ t('environment.other.agentRequest') }} {{ activeEmulation.extraHttpHeaderNames.length === 1 ? t('environment.other.header') : t('environment.other.headers') }}</strong><small>{{ activeEmulation.extraHttpHeaderNames.join(', ') }} {{ t('environment.other.hidden') }}</small></span>
-          </div>
-        </section>
-        <output class="environment-status" :class="{ error: environmentState === 'error' || !environmentSettingsDraft, applied: environmentState === 'applied' }" aria-live="polite">
-          <IconError v-if="environmentState === 'error' || !environmentSettingsDraft" aria-hidden="true" />
-          <IconCheck v-else-if="environmentState === 'applied'" aria-hidden="true" />
-          <IconSpeed v-else aria-hidden="true" />
-          <span><strong>{{ environmentState === 'applying' ? t('environment.applyingConditions') : environmentState === 'applied' ? t('environment.applied') : !environmentSettingsDraft ? t('environment.checkValues') : t(activeEnvironmentOverrideCount === 1 ? 'environment.activeCondition' : 'environment.activeConditions', { count: localNumber(activeEnvironmentOverrideCount) }) }}</strong><small>{{ environmentError || t('environment.applyHelp') }}</small></span>
-        </output>
-        <p class="responsive-preview-caveat"><IconInfo aria-hidden="true" /> {{ t('environment.limitation') }}</p>
-        <footer>
-          <button type="button" :disabled="environmentState === 'applying'" @click="resetEnvironment">{{ t('environment.reset') }}</button>
-          <div>
-            <button type="submit" :disabled="!environmentSettingsDraft || environmentState === 'applying'">{{ t('environment.apply') }}</button>
-            <button class="primary" type="button" :disabled="!environmentSettingsDraft || environmentState === 'applying'" @click="applyEnvironment(true)">
-              <IconProgress v-if="environmentState === 'applying'" class="state-spinner" aria-hidden="true" />
-              <IconRefresh v-else aria-hidden="true" />
-              {{ environmentState === 'applying' ? t('environment.applying') : t('environment.applyReload') }}
-            </button>
-          </div>
-        </footer>
-      </form>
-    </section>
+    <EnvironmentPanel
+      v-model:open="environmentPanelOpen"
+      v-model:dock="panelDock"
+      :active-tab="activeTab"
+      :locale="resolvedLocale"
+      :controller="environmentController"
+      :open-responsive-preview="toggleResponsivePreview"
+    />
     <DiagnosticsPanels
       v-model:dock="panelDock"
       :active-tab="activeTab"
