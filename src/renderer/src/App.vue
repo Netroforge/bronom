@@ -25,7 +25,6 @@ import IconDownload from '~icons/material-symbols/download-rounded'
 import IconDownloadDone from '~icons/material-symbols/download-done-rounded'
 import IconError from '~icons/material-symbols/error-outline-rounded'
 import IconFavorite from '~icons/material-symbols/favorite-rounded'
-import IconFolderOpen from '~icons/material-symbols/folder-open-rounded'
 import IconInfo from '~icons/material-symbols/info-rounded'
 import IconHistory from '~icons/material-symbols/history-rounded'
 import IconHandyman from '~icons/material-symbols/handyman-rounded'
@@ -101,6 +100,7 @@ import ConsolePanelContainer from './components/ConsolePanelContainer.vue'
 import CredentialPicker from './components/CredentialPicker.vue'
 import CredentialImportCard from './components/CredentialImportCard.vue'
 import DiagnosticsPanels from './components/DiagnosticsPanels.vue'
+import DownloadSettingsPanel from './components/DownloadSettingsPanel.vue'
 import DownloadsPanel from './components/DownloadsPanel.vue'
 import EnvironmentPanel from './components/EnvironmentPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
@@ -117,6 +117,7 @@ import { useBrowserStore } from './stores/browser'
 import { useSettingsStore } from './stores/settings'
 import { useShellWindowLifecycle } from './composables/useShellWindowLifecycle'
 import { useDiagnosticsController } from './composables/useDiagnosticsController'
+import { useDownloadSettingsController } from './composables/useDownloadSettingsController'
 import { useEnvironmentPanelController } from './composables/useEnvironmentPanelController'
 import { usePageExportController } from './composables/usePageExportController'
 import { usePrivacySettingsController } from './composables/usePrivacySettingsController'
@@ -325,8 +326,23 @@ const mcpPortDraft = ref(String(DEFAULT_MCP_PORT))
 const mcpPortState = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
 const mcpPortMessage = ref('')
 const defaultDownloadDirectory = ref('')
-const downloadSettingsState = ref<'idle' | 'working' | 'saved' | 'error'>('idle')
-const downloadSettingsMessage = ref('')
+const downloadSettingsController = useDownloadSettingsController({
+  api: window.bronomSettings,
+  settings,
+  defaultDirectory: defaultDownloadDirectory,
+  applySettings: applyTheme,
+  translate: (key) => t(key)
+})
+const {
+  busy: downloadSettingsBusy,
+  reset: resetDownloadSettings,
+  dispose: disposeDownloadSettingsController
+} = downloadSettingsController
+const settingsResetDisabled = computed(() => (
+  (settingsSection.value === 'downloads' && downloadSettingsBusy.value)
+  || (settingsSection.value === 'privacy' && privacySettingsController.clearing.value)
+  || (settingsSection.value === 'mcp' && mcpPortState.value === 'saving')
+))
 type ElementPickerMode = 'context' | 'screenshot'
 type ScreenshotCaptureMode = 'area' | 'viewport' | 'full-page'
 type AppToastTone = 'error' | 'success' | 'info'
@@ -831,7 +847,6 @@ const activeSitePermissions = computed(() => (
 const activeAddressKind = computed(() => activeWebUrl.value?.startsWith('https:') ? t('runtime.address.https') : t('runtime.address.http'))
 const activeCredentials = computed(() => credentials.value.filter((credential) => credential.origin === activeOrigin.value))
 const activeDownloads = computed(() => downloads.value.filter((download) => download.state === 'progressing'))
-const effectiveDownloadDirectory = computed(() => settings.value.downloadDirectory || defaultDownloadDirectory.value || t('runtime.storage.systemDownloads'))
 const activeWebUrl = computed(() => {
   try {
     const url = new URL(activeTab.value?.url ?? '')
@@ -2300,69 +2315,6 @@ async function selectSearchEngine(searchEngine: SearchEngineName): Promise<boole
   return applySettingsChange(window.bronomSettings.setSearchEngine(searchEngine))
 }
 
-function downloadSettingsFailure(error: unknown): void {
-  downloadSettingsState.value = 'error'
-  downloadSettingsMessage.value = error instanceof Error ? error.message : String(error)
-}
-
-async function chooseDownloadDirectory(): Promise<void> {
-  downloadSettingsState.value = 'working'
-  downloadSettingsMessage.value = t('runtime.downloadSettings.openingPicker')
-  try {
-    const result = await window.bronomSettings.chooseDownloadDirectory()
-    if (result.canceled) {
-      downloadSettingsState.value = 'idle'
-      downloadSettingsMessage.value = ''
-      return
-    }
-    applyTheme(result.settings)
-    downloadSettingsState.value = 'saved'
-    downloadSettingsMessage.value = t('runtime.downloadSettings.folderSelected')
-  } catch (error) {
-    downloadSettingsFailure(error)
-  }
-}
-
-async function setAskWhereToSaveDownloads(event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement
-  downloadSettingsState.value = 'working'
-  downloadSettingsMessage.value = t('runtime.downloadSettings.saving')
-  try {
-    applyTheme(await window.bronomSettings.setAskWhereToSaveDownloads(input.checked))
-    downloadSettingsState.value = 'saved'
-    downloadSettingsMessage.value = input.checked
-      ? t('runtime.downloadSettings.ask')
-      : t('runtime.downloadSettings.automatic')
-  } catch (error) {
-    input.checked = settings.value.askWhereToSaveDownloads
-    downloadSettingsFailure(error)
-  }
-}
-
-async function openDownloadDirectory(): Promise<void> {
-  downloadSettingsState.value = 'working'
-  downloadSettingsMessage.value = t('runtime.downloadSettings.openingFolder')
-  try {
-    await window.bronomSettings.openDownloadDirectory()
-    downloadSettingsState.value = 'idle'
-    downloadSettingsMessage.value = ''
-  } catch (error) {
-    downloadSettingsFailure(error)
-  }
-}
-
-async function resetDownloadSettings(): Promise<void> {
-  downloadSettingsState.value = 'working'
-  downloadSettingsMessage.value = t('runtime.downloadSettings.restoring')
-  try {
-    applyTheme(await window.bronomSettings.resetDownloads())
-    downloadSettingsState.value = 'saved'
-    downloadSettingsMessage.value = t('runtime.downloadSettings.restored')
-  } catch (error) {
-    downloadSettingsFailure(error)
-  }
-}
-
 async function setMemorySaverEnabled(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement
   if (!(await applySettingsChange(window.bronomSettings.setMemorySaverEnabled(input.checked)))) {
@@ -2786,7 +2738,10 @@ async function resetCurrentSection(): Promise<void> {
     await selectSearchEngine('google')
     return
   }
-  if (settingsSection.value === 'downloads') return resetDownloadSettings()
+  if (settingsSection.value === 'downloads') {
+    await resetDownloadSettings()
+    return
+  }
   if (settingsSection.value === 'performance') {
     if (!(await applySettingsChange(window.bronomSettings.setMemorySaverEnabled(true)))) return
     await applySettingsChange(window.bronomSettings.setMemorySaverTimeoutMinutes(DEFAULT_MEMORY_SAVER_TIMEOUT_MINUTES))
@@ -3132,6 +3087,7 @@ onBeforeUnmount(() => {
   if (elementPickerResetTimer !== undefined) window.clearTimeout(elementPickerResetTimer)
   if (areaCaptureResetTimer !== undefined) window.clearTimeout(areaCaptureResetTimer)
   disposePageExportController()
+  disposeDownloadSettingsController()
   disposePrivacySettingsController()
   disposeDiagnosticsController()
   for (const timer of mcpActivityTimers.values()) window.clearTimeout(timer)
@@ -4099,47 +4055,10 @@ onBeforeUnmount(() => {
               <p>{{ t('settings.search.privacy') }}</p>
             </div>
           </main>
-          <main v-else-if="settingsSection === 'downloads'" class="settings-content downloads-settings">
-            <div class="setting-copy">
-              <h3>{{ t('settings.downloads.heading') }}</h3>
-              <p>{{ t('settings.downloads.description') }}</p>
-            </div>
-            <div class="settings-rows">
-              <div class="settings-row download-location-row">
-                <span class="download-location-copy">
-                  <strong>{{ t('settings.downloads.location') }}</strong>
-                  <code :title="effectiveDownloadDirectory">{{ effectiveDownloadDirectory }}</code>
-                </span>
-                <div class="download-location-actions">
-                  <button class="secondary-button" type="button" :disabled="downloadSettingsState === 'working'" @click="chooseDownloadDirectory">
-                    {{ t('settings.downloads.change') }}
-                  </button>
-                  <button class="secondary-button" type="button" :disabled="downloadSettingsState === 'working'" @click="openDownloadDirectory">
-                    <IconFolderOpen aria-hidden="true" />
-                    {{ t('settings.downloads.open') }}
-                  </button>
-                </div>
-              </div>
-              <label class="settings-row" for="setting-ask-download-location">
-                <span>
-                  <strong>{{ t('settings.downloads.ask') }}</strong>
-                  <small>{{ t('settings.downloads.askDescription') }}</small>
-                </span>
-                <input
-                  id="setting-ask-download-location"
-                  type="checkbox"
-                  :checked="settings.askWhereToSaveDownloads"
-                  :disabled="downloadSettingsState === 'working'"
-                  @change="setAskWhereToSaveDownloads"
-                />
-              </label>
-            </div>
-            <output class="download-settings-status" :class="downloadSettingsState" aria-live="polite">{{ downloadSettingsMessage }}</output>
-            <div class="settings-info">
-              <span class="info-dot" aria-hidden="true"><IconInfo /></span>
-              <p>{{ t('settings.downloads.help') }}</p>
-            </div>
-          </main>
+          <DownloadSettingsPanel
+            v-else-if="settingsSection === 'downloads'"
+            :controller="downloadSettingsController"
+          />
           <main v-else-if="settingsSection === 'performance'" class="settings-content performance-settings">
             <div class="setting-copy">
               <h3>{{ t('settings.memory.heading') }}</h3>
@@ -4444,7 +4363,13 @@ onBeforeUnmount(() => {
         </div>
 
         <footer class="settings-footer">
-          <button v-if="settingsSection !== 'support' && settingsSection !== 'credentials'" class="secondary-button" type="button" @click="resetCurrentSection">{{ t('settings.reset') }}</button>
+          <button
+            v-if="settingsSection !== 'support' && settingsSection !== 'credentials'"
+            class="secondary-button"
+            type="button"
+            :disabled="settingsResetDisabled"
+            @click="resetCurrentSection"
+          >{{ t('settings.reset') }}</button>
           <button class="primary-button" type="button" @click="settingsOpen = false">{{ t('common.close') }}</button>
         </footer>
       </section>
