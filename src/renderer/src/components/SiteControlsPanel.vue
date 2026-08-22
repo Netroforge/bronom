@@ -8,6 +8,7 @@ import { formatNumber } from '../../../shared/format'
 import type {
   BrowsingDataSiteSummary,
   PanelDock,
+  SitePermissionDecision,
   SitePermissionEntry,
   SupportedLocale
 } from '../../../shared/types'
@@ -24,8 +25,9 @@ const props = defineProps<{
   usesDefaultProfile: boolean
   locale: SupportedLocale
   permissionLabel: (permission: string) => string
-  setPermission: (entry: SitePermissionEntry, event: Event) => void | Promise<void>
-  resetPermission: (entry: SitePermissionEntry) => void | Promise<void>
+  permissionPending: (entry: SitePermissionEntry) => boolean
+  setPermission: (entry: SitePermissionEntry, decision: SitePermissionDecision) => boolean | Promise<boolean>
+  resetPermission: (entry: SitePermissionEntry) => boolean | Promise<boolean>
   openPermissionSettings: () => void
   openPrivacySettings: () => void | Promise<void>
 }>()
@@ -34,6 +36,12 @@ const open = defineModel<boolean>('open', { required: true })
 const dock = defineModel<PanelDock>('dock', { required: true })
 const { t } = useI18n({ useScope: 'global' })
 const localNumber = (value: number): string => formatNumber(props.locale, value)
+
+async function changePermission(entry: SitePermissionEntry, event: Event): Promise<void> {
+  const input = event.target as HTMLSelectElement
+  const decision = input.value as SitePermissionDecision
+  if (!(await props.setPermission(entry, decision))) input.value = entry.decision
+}
 </script>
 
 <template>
@@ -79,13 +87,14 @@ const localNumber = (value: number): string => formatNumber(props.locale, value)
           <select
             :id="`site-control-${permission.permission}`"
             :value="permission.decision"
+            :disabled="permissionPending(permission)"
             :aria-label="t('runtimeActions.permission.aria', { permission: permissionLabel(permission.permission), origin: permission.origin })"
-            @change="setPermission(permission, $event)"
+            @change="changePermission(permission, $event)"
           >
             <option value="allow">{{ t('shell.siteControls.allow') }}</option>
             <option value="deny">{{ t('shell.siteControls.block') }}</option>
           </select>
-          <button type="button" :aria-label="t('runtimeActions.permission.resetAria', { permission: permissionLabel(permission.permission), origin: permission.origin })" :title="t('shell.siteControls.reset')" @click="resetPermission(permission)"><IconClose aria-hidden="true" /></button>
+          <button type="button" :aria-label="t('runtimeActions.permission.resetAria', { permission: permissionLabel(permission.permission), origin: permission.origin })" :title="t('shell.siteControls.reset')" :disabled="permissionPending(permission)" @click="resetPermission(permission)"><IconClose aria-hidden="true" /></button>
         </div>
       </div>
       <p v-else>{{ t('shell.siteControls.empty') }}</p>

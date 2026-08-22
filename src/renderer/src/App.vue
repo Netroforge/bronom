@@ -110,6 +110,7 @@ import PanelDockPicker from './components/PanelDockPicker.vue'
 import PrivacySettingsPanel from './components/PrivacySettingsPanel.vue'
 import ResponsivePreviewPanel from './components/ResponsivePreviewPanel.vue'
 import SiteControlsPanel from './components/SiteControlsPanel.vue'
+import SitePermissionsSettingsPanel from './components/SitePermissionsSettingsPanel.vue'
 import SiteStoragePanel from './components/SiteStoragePanel.vue'
 import TabSearchPanel from './components/TabSearchPanel.vue'
 import WorkspaceEditor from './components/WorkspaceEditor.vue'
@@ -122,6 +123,7 @@ import { useEnvironmentPanelController } from './composables/useEnvironmentPanel
 import { usePageExportController } from './composables/usePageExportController'
 import { usePrivacySettingsController } from './composables/usePrivacySettingsController'
 import { useSiteDataSummaryController } from './composables/useSiteDataSummaryController'
+import { useSitePermissionsController } from './composables/useSitePermissionsController'
 import {
   shellHeightForBrowserContent,
   shouldShowUpdateStatusPill,
@@ -218,7 +220,27 @@ function keepsSeparatePanelOpen(): boolean {
 }
 const collapsedTabGroupIds = ref(new Set<string>(loadCollapsedTabGroupIds()))
 const shellContentTop = ref(105)
-const sitePermissions = ref<SitePermissionEntry[]>([])
+const sitePermissionsController = useSitePermissionsController({
+  api: window.bronomPermissions,
+  translate: (key) => t(key),
+  onError: (error) => showAppToast(
+    'error',
+    t('runtime.toast.settingNotSaved'),
+    friendlyUiError(error, t('runtime.toast.settingKept'))
+  )
+})
+const {
+  entries: sitePermissions,
+  busy: sitePermissionsBusy,
+  permissionLabel,
+  initialize: initializeSitePermissions,
+  replace: replaceSitePermissions,
+  isPending: isSitePermissionPending,
+  setDecision: setSitePermissionDecision,
+  remove: removeSitePermission,
+  clear: clearSitePermissions,
+  dispose: disposeSitePermissionsController
+} = sitePermissionsController
 const credentials = ref<CredentialSummary[]>([])
 const credentialStorage = ref<CredentialStorageStatus>({ available: false, reason: t('runtime.initializingStorage') })
 const credentialPickerOpen = ref(false)
@@ -341,6 +363,7 @@ const {
 const settingsResetDisabled = computed(() => (
   (settingsSection.value === 'downloads' && downloadSettingsBusy.value)
   || (settingsSection.value === 'privacy' && privacySettingsController.clearing.value)
+  || (settingsSection.value === 'permissions' && sitePermissionsBusy.value)
   || (settingsSection.value === 'mcp' && mcpPortState.value === 'saving')
 ))
 type ElementPickerMode = 'context' | 'screenshot'
@@ -815,15 +838,6 @@ const showUpdateStatusPill = computed(() => (
   && !settingsOpen.value
   && shouldShowUpdateStatusPill(updateState.value.status)
 ))
-const permissionsByOrigin = computed(() => {
-  const groups = new Map<string, SitePermissionEntry[]>()
-  for (const entry of sitePermissions.value) {
-    const permissions = groups.get(entry.origin) ?? []
-    permissions.push(entry)
-    groups.set(entry.origin, permissions)
-  }
-  return [...groups].map(([origin, permissions]) => ({ origin, permissions }))
-})
 const activeOrigin = computed(() => {
   try {
     const url = new URL(activeTab.value?.url ?? '')
@@ -2390,21 +2404,17 @@ async function setCheckForUpdatesOnStartup(event: Event): Promise<void> {
   }
 }
 
-async function setSitePermission(entry: SitePermissionEntry, event: Event): Promise<void> {
-  const decision = (event.target as HTMLSelectElement).value as SitePermissionDecision
-  await window.bronomPermissions.set(entry.origin, entry.permission, decision)
+async function setSitePermission(entry: SitePermissionEntry, decision: SitePermissionDecision): Promise<boolean> {
+  return setSitePermissionDecision(entry, decision)
 }
 
-async function removeSitePermission(entry: SitePermissionEntry): Promise<void> {
-  await window.bronomPermissions.remove(entry.origin, entry.permission)
-}
-
-async function resetSitePermissionFromControls(entry: SitePermissionEntry): Promise<void> {
-  await removeSitePermission(entry)
+async function resetSitePermissionFromControls(entry: SitePermissionEntry): Promise<boolean> {
+  const removed = await removeSitePermission(entry)
   await nextTick()
   siteControlsOpen.value = true
   await nextTick()
   siteControlsButton.value?.focus()
+  return removed
 }
 
 async function fillSavedPassword(): Promise<void> {
@@ -2440,24 +2450,6 @@ async function removeSavedCredential(id: string): Promise<void> {
   } catch (error) {
     showAppToast('error', t('runtime.toast.passwordRemoveFailed'), friendlyUiError(error, t('runtime.toast.passwordRemoveDescription')))
   }
-}
-
-function permissionLabel(permission: string): string {
-  const labels: Record<string, string> = {
-    'clipboard-read': t('runtime.permissions.clipboardRead'),
-    'clipboard-sanitized-write': t('runtime.permissions.clipboardWrite'),
-    'display-capture': t('runtime.permissions.display'),
-    fileSystem: t('runtime.permissions.files'),
-    fullscreen: t('runtime.permissions.fullscreen'),
-    geolocation: t('runtime.permissions.location'),
-    'idle-detection': t('runtime.permissions.activity'),
-    media: t('runtime.permissions.media'),
-    notifications: t('runtime.permissions.notifications'),
-    'storage-access': t('runtime.permissions.storage'),
-    'top-level-storage-access': t('runtime.permissions.relatedStorage'),
-    'window-management': t('runtime.permissions.windows')
-  }
-  return labels[permission] ?? permission.replaceAll('-', ' ')
 }
 
 function handleUpdateState(next: AppUpdateState): void {
@@ -2748,7 +2740,7 @@ async function resetCurrentSection(): Promise<void> {
     return
   }
   if (settingsSection.value === 'permissions') {
-    await window.bronomPermissions.clear()
+    await clearSitePermissions()
     return
   }
   if (settingsSection.value === 'privacy') {
@@ -2994,7 +2986,7 @@ onMounted(async () => {
       window.bronomAddressOverlay.hide()
     })
   }
-  unsubscribePermissions = window.bronomPermissions.onChanged((next) => (sitePermissions.value = next))
+  unsubscribePermissions = window.bronomPermissions.onChanged(replaceSitePermissions)
   unsubscribeCredentials = window.bronomCredentials.onChanged((next) => (credentials.value = next))
   unsubscribeLicense = window.bronomLicense.onChanged((next) => (commercialLicense.value = next))
   unsubscribeUpdates = window.bronomUpdates.onChanged(handleUpdateState)
@@ -3030,9 +3022,9 @@ onMounted(async () => {
   unsubscribePanelClosed = window.bronomPanelWindow.onClosed(() => {
     if (!isDetachedPanelWindow) closeDockedPanels()
   })
-  const [systemDownloadDirectory, permissions, appUpdateState, mcpControlState, credentialStatus, savedCredentials, savedDownloads, savedBookmarks, savedVisitHistory, savedCommercialLicense] = await Promise.all([
+  const [systemDownloadDirectory, , appUpdateState, mcpControlState, credentialStatus, savedCredentials, savedDownloads, savedBookmarks, savedVisitHistory, savedCommercialLicense] = await Promise.all([
     window.bronomSettings.getDefaultDownloadDirectory(),
-    window.bronomPermissions.list(),
+    initializeSitePermissions(window.bronomPermissions.list()),
     window.bronomUpdates.getState(),
     window.bronomMcp.getState(),
     window.bronomCredentials.status(),
@@ -3043,7 +3035,6 @@ onMounted(async () => {
     window.bronomLicense.getState()
   ])
   defaultDownloadDirectory.value = systemDownloadDirectory
-  sitePermissions.value = permissions
   updateState.value = appUpdateState
   mcpControl.value = mcpControlState
   credentialStorage.value = credentialStatus
@@ -3089,6 +3080,7 @@ onBeforeUnmount(() => {
   disposePageExportController()
   disposeDownloadSettingsController()
   disposePrivacySettingsController()
+  disposeSitePermissionsController()
   disposeDiagnosticsController()
   for (const timer of mcpActivityTimers.values()) window.clearTimeout(timer)
   mcpActivityTimers.clear()
@@ -3433,6 +3425,7 @@ onBeforeUnmount(() => {
           :uses-default-profile="activeTabUsesDefaultProfile"
           :locale="resolvedLocale"
           :permission-label="permissionLabel"
+          :permission-pending="isSitePermissionPending"
           :set-permission="setSitePermission"
           :reset-permission="resetSitePermissionFromControls"
           :open-permission-settings="openSitePermissionSettings"
@@ -4177,53 +4170,10 @@ onBeforeUnmount(() => {
             :format-bytes="formatBytes"
             :format-number="localNumber"
           />
-          <main v-else-if="settingsSection === 'permissions'" class="settings-content permissions-settings">
-            <div class="setting-copy">
-              <h3>{{ t('settings.permissions.heading') }}</h3>
-              <p>{{ t('settings.permissions.description') }}</p>
-            </div>
-            <div v-if="!permissionsByOrigin.length" class="site-permissions-empty">
-              <span class="empty-permission-icon" aria-hidden="true"><IconPrivacy /></span>
-              <strong>{{ t('settings.permissions.emptyHeading') }}</strong>
-              <p>{{ t('settings.permissions.emptyDescription') }}</p>
-            </div>
-            <div v-else class="permission-sites">
-              <section v-for="group in permissionsByOrigin" :key="group.origin" class="permission-site">
-                <h4>{{ group.origin }}</h4>
-                <div
-                  v-for="permission in group.permissions"
-                  :key="permission.permission"
-                  class="permission-row"
-                >
-                  <span class="permission-name">
-                    <strong>{{ permissionLabel(permission.permission) }}</strong>
-                    <small>{{ permission.permission }}</small>
-                  </span>
-                  <select
-                    :value="permission.decision"
-                    :aria-label="t('runtimeActions.permission.aria', { permission: permissionLabel(permission.permission), origin: group.origin })"
-                    @change="setSitePermission(permission, $event)"
-                  >
-                    <option value="allow">{{ t('settings.permissions.allow') }}</option>
-                    <option value="deny">{{ t('settings.permissions.block') }}</option>
-                  </select>
-                  <button
-                    class="permission-remove"
-                    type="button"
-                    :aria-label="t('runtimeActions.permission.forgetAria', { permission: permissionLabel(permission.permission), origin: group.origin })"
-                    :title="t('settings.permissions.forget')"
-                    @click="removeSitePermission(permission)"
-                  >
-                    <IconDelete aria-hidden="true" />
-                  </button>
-                </div>
-              </section>
-            </div>
-            <div class="settings-info">
-              <span class="info-dot" aria-hidden="true"><IconInfo /></span>
-              <p>{{ t('settings.permissions.help') }}</p>
-            </div>
-          </main>
+          <SitePermissionsSettingsPanel
+            v-else-if="settingsSection === 'permissions'"
+            :controller="sitePermissionsController"
+          />
           <main v-else-if="settingsSection === 'credentials'" class="settings-content credentials-settings">
             <div class="setting-copy">
               <h3>{{ t('settings.passwords.heading') }}</h3>

@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { closeBronom, expect, launchBronom, test } from './fixtures.js'
 
@@ -19,9 +19,25 @@ test('manages and persists per-website permission decisions', async ({
     name: 'Location permission for https://example.com'
   })
   await expect(locationPermission).toHaveValue('allow')
-  await locationPermission.selectOption('deny')
 
   const permissionsPath = join(profileDirectory, 'site-permissions.json')
+  const blockedTemporaryPath = `${permissionsPath}.tmp`
+  await rm(blockedTemporaryPath, { recursive: true, force: true })
+  await mkdir(blockedTemporaryPath)
+  try {
+    await locationPermission.selectOption('deny')
+    await expect(appWindow.getByRole('alert', { name: 'Setting not saved' })).toBeVisible()
+    await expect(locationPermission).toHaveValue('allow')
+    await expect.poll(() => appWindow.evaluate('window.bronomPermissions.list()')).toEqual([{
+      origin: 'https://example.com',
+      permission: 'geolocation',
+      decision: 'allow'
+    }])
+  } finally {
+    await rm(blockedTemporaryPath, { recursive: true, force: true })
+  }
+
+  await locationPermission.selectOption('deny')
   await expect
     .poll(async () => JSON.parse(await readFile(permissionsPath, 'utf8')).permissions[0]?.decision)
     .toBe('deny')
