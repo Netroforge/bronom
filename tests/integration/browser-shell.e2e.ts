@@ -26,6 +26,13 @@ test('launches a visible browser shell with a loopback MCP endpoint', async ({
   await expect(appWindow.getByRole('button', { name: 'Settings' })).toBeVisible()
   await expect(appWindow.getByRole('button', { name: /MCP ready/ })).toBeVisible()
   await expect.poll(() => appWindow.evaluate('window.bronomMcp.getState()')).toMatchObject({ status: 'ready', paused: false })
+  const pauseAgents = appWindow.getByRole('button', { name: 'Pause agents' })
+  await pauseAgents.click()
+  await expect(appWindow.getByRole('button', { name: 'Resume agents' })).toHaveAttribute('aria-pressed', 'true')
+  await expect.poll(() => appWindow.evaluate('window.bronomMcp.getState()')).toMatchObject({ status: 'paused', paused: true })
+  await appWindow.getByRole('button', { name: 'Resume agents' }).click()
+  await expect(appWindow.getByRole('button', { name: 'Pause agents' })).toHaveAttribute('aria-pressed', 'false')
+  await expect.poll(() => appWindow.evaluate('window.bronomMcp.getState()')).toMatchObject({ status: 'ready', paused: false })
 
   const windowState = await electronApp.evaluate(({ BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows()[0]

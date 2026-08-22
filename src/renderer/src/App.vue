@@ -39,8 +39,6 @@ import IconKey from '~icons/material-symbols/key-rounded'
 import IconLock from '~icons/material-symbols/lock-rounded'
 import IconLockOpen from '~icons/material-symbols/lock-open-rounded'
 import IconRemove from '~icons/material-symbols/remove-rounded'
-import IconPause from '~icons/material-symbols/pause-rounded'
-import IconPlay from '~icons/material-symbols/play-arrow-rounded'
 import IconProgress from '~icons/material-symbols/progress-activity-rounded'
 import IconPrivacy from '~icons/material-symbols/privacy-tip-rounded'
 import IconRefresh from '~icons/material-symbols/refresh-rounded'
@@ -75,7 +73,6 @@ import {
   BrowserHistoryEntry,
   HelpMenuAction,
   McpTabActivity,
-  McpControlState,
   CredentialSummary,
   DetachablePanelId,
   PanelDock,
@@ -101,6 +98,7 @@ import DownloadsPanel from './components/DownloadsPanel.vue'
 import EnvironmentPanel from './components/EnvironmentPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
 import McpSettingsPanel from './components/McpSettingsPanel.vue'
+import McpStatusControls from './components/McpStatusControls.vue'
 import NetworkPanel from './components/NetworkPanel.vue'
 import PageToolsPanel from './components/PageToolsPanel.vue'
 import PanelDockPicker from './components/PanelDockPicker.vue'
@@ -122,6 +120,7 @@ import { useCredentialsController } from './composables/useCredentialsController
 import { useDownloadSettingsController } from './composables/useDownloadSettingsController'
 import { useEnvironmentPanelController } from './composables/useEnvironmentPanelController'
 import { useMcpSettingsController } from './composables/useMcpSettingsController'
+import { useMcpStatusController } from './composables/useMcpStatusController'
 import { usePageExportController } from './composables/usePageExportController'
 import { usePerformanceSettingsController } from './composables/usePerformanceSettingsController'
 import { usePrivacySettingsController } from './composables/usePrivacySettingsController'
@@ -265,7 +264,6 @@ const {
 const credentialPickerOpen = ref(false)
 const credentialPicker = ref<InstanceType<typeof CredentialPicker> | null>(null)
 const credentialFillState = ref<'idle' | 'filling'>('idle')
-const mcpControl = ref<McpControlState>({ status: 'starting', paused: false })
 const address = ref('')
 const addressInput = ref<HTMLInputElement | null>(null)
 const addressForm = ref<HTMLFormElement | null>(null)
@@ -353,7 +351,6 @@ const fullModalOpen = computed(() => settingsOpen.value
   || workspaceEditorOpen.value
   || credentialPickerOpen.value)
 const updateNoticeOpen = ref(false)
-const mcpCopied = ref(false)
 const updateSettingsController = useUpdateSettingsController({
   api: window.bronomUpdates,
   settings,
@@ -397,6 +394,22 @@ const {
   initialize: initializeCommercialLicense,
   dispose: disposeCommercialLicenseController
 } = commercialLicenseController
+const mcpStatusController = useMcpStatusController({
+  api: window.bronomMcp,
+  endpoint: computed(() => state.value.mcpUrl),
+  copyText: copyAppText,
+  onPauseError: (error) => showAppToast(
+    'error',
+    t('runtime.toast.actionFailed'),
+    friendlyUiError(error, t('runtime.toast.actionFailed'))
+  )
+})
+const {
+  state: mcpControl,
+  initialize: initializeMcpStatus,
+  togglePaused: toggleMcpPaused,
+  dispose: disposeMcpStatusController
+} = mcpStatusController
 const defaultDownloadDirectory = ref('')
 const downloadSettingsController = useDownloadSettingsController({
   api: window.bronomSettings,
@@ -609,7 +622,6 @@ let unsubscribeMcpActivity: (() => void) | undefined
 let unsubscribeDownloads: (() => void) | undefined
 let unsubscribeBookmarks: (() => void) | undefined
 let unsubscribeHistory: (() => void) | undefined
-let unsubscribeMcpControl: (() => void) | undefined
 let unsubscribeUserAttention: (() => void) | undefined
 let unsubscribeShortcutRequested: (() => void) | undefined
 let unsubscribePermissions: (() => void) | undefined
@@ -986,19 +998,6 @@ const downloadButtonLabel = computed(() => {
   if (downloads.value.length) return t('runtime.downloads.recent')
   return t('runtime.downloads.heading')
 })
-const mcpStatusLabel = computed(() => {
-  if (mcpCopied.value) return t('runtime.mcp.copied')
-  if (mcpControl.value.status === 'starting') return t('runtime.mcp.starting')
-  if (mcpControl.value.status === 'paused') return t('runtime.mcp.paused')
-  if (mcpControl.value.status === 'error') return t('runtime.mcp.error')
-  return t('runtime.mcp.ready')
-})
-const mcpStatusTitle = computed(() => {
-  if (mcpControl.value.status === 'error') return t('runtime.mcp.failed', { error: mcpControl.value.error ?? t('runtime.mcp.unknown') })
-  if (mcpControl.value.status === 'starting') return t('runtime.mcp.startingAt', { url: state.value.mcpUrl })
-  return t('runtime.mcp.title', { url: state.value.mcpUrl })
-})
-const canToggleMcpPaused = computed(() => mcpControl.value.status === 'ready' || mcpControl.value.status === 'paused')
 const elementPickerLabel = computed(() => {
   if (elementPickerState.value === 'picking') return elementPickerMode.value === 'screenshot'
     ? t('runtime.capture.cancelElementScreenshot')
@@ -1269,7 +1268,7 @@ async function runCommandPaletteCommand(commandId: CommandPaletteCommandId): Pro
     case 'mcp-security': return openSettingsSection('mcp')
     case 'updates': return openUpdateSettings()
     case 'keyboard-shortcuts': return openHelpDialog('shortcuts')
-    case 'toggle-mcp-pause': return toggleMcpPaused()
+    case 'toggle-mcp-pause': await toggleMcpPaused(); return
   }
 }
 
@@ -2124,17 +2123,6 @@ async function toggleAllHumanInteraction(): Promise<void> {
   await syncState(browser.setAllHumanInteractionLocked(!state.value.allHumanInteractionLocked))
 }
 
-async function copyMcpUrl(): Promise<void> {
-  if (!await copyAppText(state.value.mcpUrl)) return
-  mcpCopied.value = true
-  window.setTimeout(() => (mcpCopied.value = false), 1_500)
-}
-
-async function toggleMcpPaused(): Promise<void> {
-  if (!canToggleMcpPaused.value) return
-  mcpControl.value = await window.bronomMcp.setPaused(!mcpControl.value.paused)
-}
-
 function resetConsoleView(closePanel = false): void {
   consolePanel.value?.reset(closePanel)
   if (closePanel && !keepsSeparatePanelOpen()) consolePanelOpen.value = false
@@ -2900,13 +2888,13 @@ onMounted(async () => {
   await Promise.all([
     browserStore.initialize(),
     initializeUpdateSettings(),
-    initializeCommercialLicense()
+    initializeCommercialLicense(),
+    initializeMcpStatus()
   ])
   unsubscribeMcpActivity = browser.onMcpTabActivity(handleMcpTabActivity)
   unsubscribeDownloads = window.bronomDownloads.onChanged(applyDownloads)
   unsubscribeBookmarks = window.bronomBookmarks.onChanged((next) => (bookmarks.value = next))
   unsubscribeHistory = window.bronomHistory.onChanged((next) => (visitHistory.value = next))
-  unsubscribeMcpControl = window.bronomMcp.onChanged((next) => (mcpControl.value = next))
   unsubscribeUserAttention = browser.onUserAttentionRequested(() => {
     playFoley(settings.value.attentionSoundCue, { volume: 0.65 })
   })
@@ -2958,17 +2946,15 @@ onMounted(async () => {
   unsubscribePanelClosed = window.bronomPanelWindow.onClosed(() => {
     if (!isDetachedPanelWindow) closeDockedPanels()
   })
-  const [systemDownloadDirectory, , mcpControlState, , savedDownloads, savedBookmarks, savedVisitHistory] = await Promise.all([
+  const [systemDownloadDirectory, , , savedDownloads, savedBookmarks, savedVisitHistory] = await Promise.all([
     window.bronomSettings.getDefaultDownloadDirectory(),
     initializeSitePermissions(window.bronomPermissions.list()),
-    window.bronomMcp.getState(),
     initializeCredentials(window.bronomCredentials.status(), window.bronomCredentials.list()),
     window.bronomDownloads.list(),
     window.bronomBookmarks.list(),
     window.bronomHistory.list()
   ])
   defaultDownloadDirectory.value = systemDownloadDirectory
-  mcpControl.value = mcpControlState
   downloads.value = savedDownloads
   for (const download of savedDownloads) knownDownloadIds.add(download.id)
   bookmarks.value = savedBookmarks
@@ -2984,7 +2970,6 @@ onBeforeUnmount(() => {
   unsubscribeDownloads?.()
   unsubscribeBookmarks?.()
   unsubscribeHistory?.()
-  unsubscribeMcpControl?.()
   unsubscribeUserAttention?.()
   unsubscribeShortcutRequested?.()
   unsubscribePermissions?.()
@@ -3010,6 +2995,7 @@ onBeforeUnmount(() => {
   disposeMcpSettingsController()
   disposeUpdateSettingsController()
   disposeCommercialLicenseController()
+  disposeMcpStatusController()
   disposePrivacySettingsController()
   disposeSitePermissionsController()
   disposeCredentialsController()
@@ -3248,24 +3234,7 @@ onBeforeUnmount(() => {
           :state="updateState"
           @open="openUpdateSettings"
         />
-        <div class="mcp-controls" :class="mcpControl.status">
-          <button class="mcp-pill" type="button" :title="mcpStatusTitle" @click="copyMcpUrl">
-            <span class="status-dot" />
-            {{ mcpStatusLabel }}
-          </button>
-          <button
-            class="mcp-pause-button"
-            type="button"
-            :title="canToggleMcpPaused ? t(mcpControl.paused ? 'runtime.mcp.resumeCommands' : 'runtime.mcp.pauseCommands') : t('runtime.mcp.unavailable')"
-            :aria-label="t(mcpControl.paused ? 'runtime.mcp.resumeAgents' : 'runtime.mcp.pauseAgents')"
-            :aria-pressed="mcpControl.paused"
-            :disabled="!canToggleMcpPaused"
-            @click="toggleMcpPaused"
-          >
-            <IconPlay v-if="mcpControl.paused" aria-hidden="true" />
-            <IconPause v-else aria-hidden="true" />
-          </button>
-        </div>
+        <McpStatusControls :controller="mcpStatusController" />
         <button
           class="topbar-icon-button settings-button"
           type="button"
