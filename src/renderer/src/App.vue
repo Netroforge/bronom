@@ -58,7 +58,6 @@ import IconSystemUpdate from '~icons/material-symbols/system-update-alt-rounded'
 import IconTabSearch from '~icons/material-symbols/tab-search-rounded'
 import IconSwapHoriz from '~icons/material-symbols/swap-horiz-rounded'
 import IconVerticalSplit from '~icons/material-symbols/vertical-split-rounded'
-import IconWarning from '~icons/material-symbols/warning-rounded'
 import IconVolumeOff from '~icons/material-symbols/volume-off-rounded'
 import IconVolumeUp from '~icons/material-symbols/volume-up-rounded'
 import IconZoomIn from '~icons/material-symbols/zoom-in-rounded'
@@ -103,6 +102,7 @@ import DownloadSettingsPanel from './components/DownloadSettingsPanel.vue'
 import DownloadsPanel from './components/DownloadsPanel.vue'
 import EnvironmentPanel from './components/EnvironmentPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
+import McpSettingsPanel from './components/McpSettingsPanel.vue'
 import NetworkPanel from './components/NetworkPanel.vue'
 import PageToolsPanel from './components/PageToolsPanel.vue'
 import PanelDockPicker from './components/PanelDockPicker.vue'
@@ -121,6 +121,7 @@ import { useDiagnosticsController } from './composables/useDiagnosticsController
 import { useCredentialsController } from './composables/useCredentialsController'
 import { useDownloadSettingsController } from './composables/useDownloadSettingsController'
 import { useEnvironmentPanelController } from './composables/useEnvironmentPanelController'
+import { useMcpSettingsController } from './composables/useMcpSettingsController'
 import { usePageExportController } from './composables/usePageExportController'
 import { usePerformanceSettingsController } from './composables/usePerformanceSettingsController'
 import { usePrivacySettingsController } from './composables/usePrivacySettingsController'
@@ -140,7 +141,6 @@ import {
   type AddressSuggestionOverlayRequest,
   type AddressSuggestionOverlayTheme
 } from '../../shared/address-suggestions'
-import { DEFAULT_MCP_PORT, MAX_MCP_PORT, MIN_MCP_PORT, isValidMcpPort } from '../../shared/mcp-port'
 import { SEARCH_ENGINE_OPTIONS } from '../../shared/search-engine'
 import { DEFAULT_INTERFACE_SCALE } from '../../shared/interface-scale'
 import type { BrowserSplitOrientation } from '../../shared/split-view'
@@ -361,9 +361,6 @@ const fullModalOpen = computed(() => settingsOpen.value
   || credentialPickerOpen.value)
 const updateNoticeOpen = ref(false)
 const mcpCopied = ref(false)
-const mcpPortDraft = ref(String(DEFAULT_MCP_PORT))
-const mcpPortState = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
-const mcpPortMessage = ref('')
 const defaultDownloadDirectory = ref('')
 const downloadSettingsController = useDownloadSettingsController({
   api: window.bronomSettings,
@@ -399,12 +396,32 @@ const {
   reset: resetPerformanceSettings,
   dispose: disposePerformanceSettingsController
 } = performanceSettingsController
+const mcpSettingsController = useMcpSettingsController({
+  settings,
+  endpoint: computed(() => state.value.mcpUrl),
+  listenerFailed: computed(() => mcpControl.value.status === 'error'),
+  setAuthentication: (enabled) => settingsStore.setMcpAuthentication(enabled),
+  setPort: (port) => settingsStore.setMcpPort(port),
+  confirmDisableAuthentication: () => window.confirm(t('runtimeActions.mcp.disableConfirm')),
+  translate: (key, parameters) => t(key, parameters ?? {}),
+  formatPortError: (error) => error instanceof Error ? error.message : String(error),
+  onAuthenticationError: (error) => showAppToast(
+    'error',
+    t('runtime.toast.settingNotSaved'),
+    friendlyUiError(error, t('runtime.toast.settingKept'))
+  )
+})
+const {
+  busy: mcpSettingsBusy,
+  reset: resetMcpSettings,
+  dispose: disposeMcpSettingsController
+} = mcpSettingsController
 const settingsResetDisabled = computed(() => (
   (settingsSection.value === 'downloads' && downloadSettingsBusy.value)
   || (settingsSection.value === 'performance' && performanceSettingsBusy.value)
   || (settingsSection.value === 'privacy' && privacySettingsController.clearing.value)
   || (settingsSection.value === 'permissions' && sitePermissionsBusy.value)
-  || (settingsSection.value === 'mcp' && mcpPortState.value === 'saving')
+  || (settingsSection.value === 'mcp' && mcpSettingsBusy.value)
 ))
 type ElementPickerMode = 'context' | 'screenshot'
 type ScreenshotCaptureMode = 'area' | 'viewport' | 'full-page'
@@ -947,10 +964,6 @@ const mcpStatusTitle = computed(() => {
   return t('runtime.mcp.title', { url: state.value.mcpUrl })
 })
 const canToggleMcpPaused = computed(() => mcpControl.value.status === 'ready' || mcpControl.value.status === 'paused')
-const parsedMcpPort = computed(() => Number(mcpPortDraft.value))
-const mcpPortValid = computed(() => isValidMcpPort(parsedMcpPort.value))
-const mcpPortChanged = computed(() => mcpPortValid.value && parsedMcpPort.value !== settings.value.mcpPort)
-const canApplyMcpPort = computed(() => mcpPortValid.value && (mcpPortChanged.value || mcpControl.value.status === 'error'))
 const elementPickerLabel = computed(() => {
   if (elementPickerState.value === 'picking') return elementPickerMode.value === 'screenshot'
     ? t('runtime.capture.cancelElementScreenshot')
@@ -2336,7 +2349,6 @@ async function capturePageScreenshot(mode: 'viewport' | 'full-page'): Promise<vo
 
 function applyTheme(next: AppSettings): void {
   settings.value = next
-  if (mcpPortState.value !== 'saving') mcpPortDraft.value = String(next.mcpPort)
   setFoley({ muted: !next.attentionSound })
   const effectiveTheme = next.theme === 'system' ? systemTheme.value : next.theme
   document.documentElement.dataset.themePreference = next.theme
@@ -2370,45 +2382,6 @@ async function selectSearchEngine(searchEngine: SearchEngineName): Promise<boole
 
 function testAttentionSound(): void {
   playFoley(settings.value.attentionSoundCue, { volume: 0.65 })
-}
-
-async function setMcpAuthentication(event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement
-  if (!input.checked) {
-    const confirmed = window.confirm(
-      t('runtimeActions.mcp.disableConfirm')
-    )
-    if (!confirmed) {
-      input.checked = true
-      return
-    }
-  }
-  if (!(await applySettingsChange(window.bronomSettings.setMcpAuthentication(input.checked)))) {
-    input.checked = settings.value.mcpAuthentication
-  }
-}
-
-async function applyMcpPort(): Promise<void> {
-  if (!mcpPortValid.value) {
-    mcpPortState.value = 'error'
-    mcpPortMessage.value = t('runtimeActions.mcp.invalidPort', { min: MIN_MCP_PORT, max: MAX_MCP_PORT })
-    return
-  }
-  mcpPortState.value = 'saving'
-  mcpPortMessage.value = t('runtimeActions.mcp.moving', { port: parsedMcpPort.value })
-  try {
-    applyTheme(await window.bronomSettings.setMcpPort(parsedMcpPort.value))
-    mcpPortState.value = 'saved'
-    mcpPortMessage.value = t('runtimeActions.mcp.active', { port: parsedMcpPort.value })
-  } catch (error) {
-    mcpPortState.value = 'error'
-    mcpPortMessage.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-function editMcpPort(): void {
-  mcpPortState.value = 'idle'
-  mcpPortMessage.value = ''
 }
 
 async function setCheckForUpdatesOnStartup(event: Event): Promise<void> {
@@ -2751,9 +2724,7 @@ async function resetCurrentSection(): Promise<void> {
     return
   }
   if (settingsSection.value === 'mcp') {
-    if (!(await applySettingsChange(window.bronomSettings.setMcpAuthentication(false)))) return
-    mcpPortDraft.value = String(DEFAULT_MCP_PORT)
-    await applyMcpPort()
+    await resetMcpSettings()
     return
   }
   await applySettingsChange(window.bronomSettings.setCheckForUpdatesOnStartup(true))
@@ -3080,6 +3051,7 @@ onBeforeUnmount(() => {
   disposePageExportController()
   disposeDownloadSettingsController()
   disposePerformanceSettingsController()
+  disposeMcpSettingsController()
   disposePrivacySettingsController()
   disposeSitePermissionsController()
   disposeCredentialsController()
@@ -4059,69 +4031,10 @@ onBeforeUnmount(() => {
             :controller="performanceSettingsController"
             :format-number="localNumber"
           />
-          <main v-else-if="settingsSection === 'mcp'" class="settings-content">
-            <div class="setting-copy">
-              <h3>{{ t('settings.mcp.heading') }}</h3>
-              <p>{{ t('settings.mcp.description') }}</p>
-            </div>
-            <div class="settings-rows">
-              <label class="settings-row" for="setting-mcp-authentication">
-                <span>
-                  <strong>{{ t('settings.mcp.require') }}</strong>
-                  <small>{{ t('settings.mcp.requireDescription') }}</small>
-                </span>
-                <input
-                  id="setting-mcp-authentication"
-                  type="checkbox"
-                  :checked="settings.mcpAuthentication"
-                  @change="setMcpAuthentication"
-                />
-              </label>
-              <div class="settings-row mcp-port-row">
-                <label for="setting-mcp-port">
-                  <strong>{{ t('settings.mcp.port') }}</strong>
-                  <small>{{ t('settings.mcp.portDescription') }}</small>
-                </label>
-                <div class="mcp-port-control">
-                  <div>
-                    <input
-                      id="setting-mcp-port"
-                      v-model="mcpPortDraft"
-                      type="number"
-                      inputmode="numeric"
-                      :min="MIN_MCP_PORT"
-                      :max="MAX_MCP_PORT"
-                      step="1"
-                      :aria-label="t('settings.mcp.port')"
-                      @input="editMcpPort"
-                      @keydown.enter.prevent="applyMcpPort"
-                    />
-                    <button
-                      class="secondary-button"
-                      type="button"
-                      :disabled="!canApplyMcpPort || mcpPortState === 'saving'"
-                      @click="applyMcpPort"
-                    >
-                      {{ mcpPortState === 'saving' ? t('settings.mcp.moving') : t('settings.mcp.applyPort') }}
-                    </button>
-                  </div>
-                  <output
-                    class="mcp-port-status"
-                    :class="mcpPortState"
-                    aria-live="polite"
-                  >{{ mcpPortMessage || t('runtimeActions.mcp.endpoint', { url: state.mcpUrl }) }}</output>
-                </div>
-              </div>
-            </div>
-            <div class="settings-info" :class="{ 'security-warning': !settings.mcpAuthentication }">
-              <span class="info-dot" aria-hidden="true">
-                <IconInfo v-if="settings.mcpAuthentication" />
-                <IconWarning v-else />
-              </span>
-              <p v-if="settings.mcpAuthentication">{{ t('settings.mcp.tokenHelp') }}</p>
-              <p v-else>{{ t('settings.mcp.warning') }}</p>
-            </div>
-          </main>
+          <McpSettingsPanel
+            v-else-if="settingsSection === 'mcp'"
+            :controller="mcpSettingsController"
+          />
           <PrivacySettingsPanel
             v-else-if="settingsSection === 'privacy'"
             :controller="privacySettingsController"
