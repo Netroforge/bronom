@@ -13,25 +13,18 @@ import {
 import IconAdd from '~icons/material-symbols/add-rounded'
 import IconAddBox from '~icons/material-symbols/add-box-rounded'
 import IconAdsClick from '~icons/material-symbols/ads-click-rounded'
-import IconAccountTree from '~icons/material-symbols/account-tree-rounded'
-import IconAccessibility from '~icons/material-symbols/accessibility-new-rounded'
 import IconArrowBack from '~icons/material-symbols/arrow-back-rounded'
 import IconArrowForward from '~icons/material-symbols/arrow-forward-rounded'
-import IconBugReport from '~icons/material-symbols/bug-report-rounded'
 import IconBedtime from '~icons/material-symbols/bedtime-rounded'
 import IconCheck from '~icons/material-symbols/check-rounded'
 import IconClose from '~icons/material-symbols/close-rounded'
 import IconContrast from '~icons/material-symbols/contrast-rounded'
-import IconDatabase from '~icons/material-symbols/database-rounded'
 import IconDelete from '~icons/material-symbols/delete-outline-rounded'
 import IconDashboard from '~icons/material-symbols/space-dashboard-rounded'
-import IconDevices from '~icons/material-symbols/devices-rounded'
-import IconDifference from '~icons/material-symbols/difference-rounded'
 import IconDownload from '~icons/material-symbols/download-rounded'
 import IconDownloadDone from '~icons/material-symbols/download-done-rounded'
 import IconError from '~icons/material-symbols/error-outline-rounded'
 import IconFavorite from '~icons/material-symbols/favorite-rounded'
-import IconFactCheck from '~icons/material-symbols/fact-check-rounded'
 import IconFolderOpen from '~icons/material-symbols/folder-open-rounded'
 import IconInfo from '~icons/material-symbols/info-rounded'
 import IconHistory from '~icons/material-symbols/history-rounded'
@@ -42,25 +35,17 @@ import IconKeyboardArrowRight from '~icons/material-symbols/keyboard-arrow-right
 import IconKeyboardArrowUp from '~icons/material-symbols/keyboard-arrow-up-rounded'
 import IconKeyboardCommandKey from '~icons/material-symbols/keyboard-command-key-rounded'
 import IconCleaning from '~icons/material-symbols/cleaning-services-rounded'
-import IconCode from '~icons/material-symbols/code-rounded'
 import IconKeep from '~icons/material-symbols/keep-rounded'
 import IconLanguage from '~icons/material-symbols/language-rounded'
-import IconMonitoring from '~icons/material-symbols/monitoring-rounded'
-import IconMemory from '~icons/material-symbols/memory-rounded'
-import IconNetworkCheck from '~icons/material-symbols/network-check-rounded'
 import IconKey from '~icons/material-symbols/key-rounded'
 import IconLock from '~icons/material-symbols/lock-rounded'
 import IconLockOpen from '~icons/material-symbols/lock-open-rounded'
 import IconRemove from '~icons/material-symbols/remove-rounded'
-import IconPassword from '~icons/material-symbols/password-rounded'
-import IconPalette from '~icons/material-symbols/palette-rounded'
 import IconPause from '~icons/material-symbols/pause-rounded'
-import IconPdf from '~icons/material-symbols/picture-as-pdf-rounded'
 import IconPlay from '~icons/material-symbols/play-arrow-rounded'
 import IconProgress from '~icons/material-symbols/progress-activity-rounded'
 import IconPrivacy from '~icons/material-symbols/privacy-tip-rounded'
 import IconRefresh from '~icons/material-symbols/refresh-rounded'
-import IconRecord from '~icons/material-symbols/fiber-manual-record-rounded'
 import IconRoute from '~icons/material-symbols/route-rounded'
 import IconSearch from '~icons/material-symbols/search-rounded'
 import IconScreenshotRegion from '~icons/material-symbols/screenshot-region-rounded'
@@ -73,7 +58,6 @@ import IconTune from '~icons/material-symbols/tune-rounded'
 import IconStop from '~icons/material-symbols/stop-rounded'
 import IconSystemUpdate from '~icons/material-symbols/system-update-alt-rounded'
 import IconTabSearch from '~icons/material-symbols/tab-search-rounded'
-import IconTerminal from '~icons/material-symbols/terminal-rounded'
 import IconSwapHoriz from '~icons/material-symbols/swap-horiz-rounded'
 import IconVerticalSplit from '~icons/material-symbols/vertical-split-rounded'
 import IconWarning from '~icons/material-symbols/warning-rounded'
@@ -90,7 +74,6 @@ import {
   BrowserTabState,
   BrowserTabGroupColor,
   BrowserFindResult,
-  BrowserPdfExport,
   BrowserDownloadState,
   BrowserBookmark,
   BrowserHistoryEntry,
@@ -126,6 +109,7 @@ import DownloadsPanel from './components/DownloadsPanel.vue'
 import EnvironmentPanel from './components/EnvironmentPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
 import NetworkPanel from './components/NetworkPanel.vue'
+import PageToolsPanel from './components/PageToolsPanel.vue'
 import PanelDockPicker from './components/PanelDockPicker.vue'
 import ResponsivePreviewPanel from './components/ResponsivePreviewPanel.vue'
 import SiteControlsPanel from './components/SiteControlsPanel.vue'
@@ -137,6 +121,7 @@ import { useSettingsStore } from './stores/settings'
 import { useShellWindowLifecycle } from './composables/useShellWindowLifecycle'
 import { useDiagnosticsController } from './composables/useDiagnosticsController'
 import { useEnvironmentPanelController } from './composables/useEnvironmentPanelController'
+import { usePageExportController } from './composables/usePageExportController'
 import { useSiteDataSummaryController } from './composables/useSiteDataSummaryController'
 import {
   shellHeightForBrowserContent,
@@ -265,8 +250,6 @@ const zoomOpen = ref(false)
 const splitMenuOpen = ref(false)
 const findQuery = ref('')
 const findResult = ref<BrowserFindResult>({ activeMatchOrdinal: 0, matches: 0 })
-const pdfExportState = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
-const pdfExport = ref<BrowserPdfExport | null>(null)
 const downloads = ref<BrowserDownloadState[]>([])
 const downloadsOpen = ref(false)
 const bookmarks = ref<BrowserBookmark[]>([])
@@ -352,11 +335,35 @@ interface AppToast {
 }
 const elementPickerState = ref<'idle' | 'picking' | 'copied' | 'error'>('idle')
 const elementPickerMode = ref<ElementPickerMode>('context')
-const pageSnapshotState = ref<'idle' | 'copying' | 'copied' | 'error'>('idle')
 const areaCaptureState = ref<'idle' | 'picking' | 'capturing' | 'copied' | 'error'>('idle')
 const screenshotCaptureMode = ref<ScreenshotCaptureMode>('area')
 const areaCaptureError = ref('')
 const appToasts = ref<AppToast[]>([])
+const pageExportController = usePageExportController({
+  activeTab,
+  browser,
+  snapshotCopied: (result) => showAppToast(
+    'success',
+    t('runtimeActions.pageSnapshot.copied'),
+    t('runtimeActions.pageSnapshot.ready', {
+      count: localNumber(result.characters),
+      limit: t(result.truncated ? 'runtimeActions.pageSnapshot.bounded' : 'runtimeActions.pageSnapshot.period')
+    })
+  ),
+  snapshotFailed: (error) => showAppToast(
+    'error',
+    t('runtime.toast.pageSnapshotFailed'),
+    friendlyUiError(error, t('runtime.toast.pageSnapshotDescription'))
+  )
+})
+const {
+  snapshotState: pageSnapshotState,
+  pdfState: pdfExportState,
+  pdfExport,
+  copySnapshot: copyPageSnapshot,
+  savePdf: saveActivePdf,
+  dispose: disposePageExportController
+} = pageExportController
 const diagnosticsController = useDiagnosticsController({
   activeTab,
   browser,
@@ -487,12 +494,9 @@ let unsubscribeAddressOverlay: (() => void) | undefined
 let unsubscribeAddressOverlayDismissed: (() => void) | undefined
 let updateNoticeDismissTimer: number | undefined
 let elementPickerResetTimer: number | undefined
-let pageSnapshotResetTimer: number | undefined
 let areaCaptureResetTimer: number | undefined
 let nextAppToastId = 1
 const appToastTimers = new Map<number, number>()
-let pdfExportResetTimer: number | undefined
-let pdfExportRequestSequence = 0
 let emulationMutationSequence = 0
 let elementPickerTabId: string | undefined
 let areaCaptureTabId: string | undefined
@@ -1613,7 +1617,6 @@ watch(
     const keepPanelOpen = keepsSeparatePanelOpen()
     emulationMutationSequence += 1
     siteDataController.reset()
-    resetPdfExportFeedback()
     addressSuggestionsOpen.value = false
     if (!keepPanelOpen) {
       siteControlsOpen.value = false
@@ -1640,7 +1643,6 @@ watch(
     const keepPanelOpen = keepsSeparatePanelOpen()
     emulationMutationSequence += 1
     siteDataController.reset()
-    resetPdfExportFeedback()
     if (!keepPanelOpen) {
       siteControlsOpen.value = false
       pageToolsOpen.value = false
@@ -2062,40 +2064,6 @@ async function closeFind(): Promise<void> {
   if (tabId) await browser.stopFindInPage(tabId).catch(() => undefined)
 }
 
-function resetPdfExportFeedback(): void {
-  pdfExportRequestSequence += 1
-  if (pdfExportResetTimer !== undefined) {
-    window.clearTimeout(pdfExportResetTimer)
-    pdfExportResetTimer = undefined
-  }
-  pdfExportState.value = 'idle'
-  pdfExport.value = null
-}
-
-async function saveActivePdf(): Promise<void> {
-  const tab = activeTab.value
-  if (!tab || pdfExportState.value === 'saving') return
-  if (pdfExportResetTimer !== undefined) window.clearTimeout(pdfExportResetTimer)
-  const requestSequence = ++pdfExportRequestSequence
-  pdfExportState.value = 'saving'
-  pdfExport.value = null
-  try {
-    const exported = await browser.savePdf({ tabId: tab.id })
-    if (requestSequence !== pdfExportRequestSequence || activeTab.value?.id !== tab.id) return
-    pdfExport.value = exported
-    pdfExportState.value = 'saved'
-  } catch {
-    if (requestSequence !== pdfExportRequestSequence || activeTab.value?.id !== tab.id) return
-    pdfExportState.value = 'error'
-  }
-  pdfExportResetTimer = window.setTimeout(() => {
-    if (requestSequence !== pdfExportRequestSequence) return
-    pdfExportState.value = 'idle'
-    pdfExport.value = null
-    pdfExportResetTimer = undefined
-  }, 2_500)
-}
-
 async function closeTab(event: MouseEvent, tabId: string): Promise<void> {
   event.stopPropagation()
   if (state.value.allHumanInteractionLocked) return
@@ -2256,32 +2224,6 @@ async function copyAppText(text: string): Promise<boolean> {
     showAppToast('error', t('runtime.capture.copyFailed'), friendlyUiError(error, t('runtime.capture.clipboardFailed')))
     return false
   }
-}
-
-async function copyPageSnapshot(): Promise<void> {
-  if (!activeTab.value || activeTab.value.url.startsWith('bronom://home') || pageSnapshotState.value === 'copying') return
-  if (pageSnapshotResetTimer !== undefined) {
-    window.clearTimeout(pageSnapshotResetTimer)
-    pageSnapshotResetTimer = undefined
-  }
-  const tabId = activeTab.value.id
-  pageSnapshotState.value = 'copying'
-  try {
-    const result = await browser.copySnapshot(tabId)
-    pageSnapshotState.value = 'copied'
-    showAppToast(
-      'success',
-      t('runtimeActions.pageSnapshot.copied'),
-      t('runtimeActions.pageSnapshot.ready', { count: localNumber(result.characters), limit: t(result.truncated ? 'runtimeActions.pageSnapshot.bounded' : 'runtimeActions.pageSnapshot.period') })
-    )
-  } catch (error) {
-    pageSnapshotState.value = 'error'
-    showAppToast('error', t('runtime.toast.pageSnapshotFailed'), friendlyUiError(error, t('runtime.toast.pageSnapshotDescription')))
-  }
-  pageSnapshotResetTimer = window.setTimeout(() => {
-    if (pageSnapshotState.value !== 'copying') pageSnapshotState.value = 'idle'
-    pageSnapshotResetTimer = undefined
-  }, 1_800)
 }
 
 function resetElementPickerSoon(): void {
@@ -3291,9 +3233,8 @@ onBeforeUnmount(() => {
   unsubscribePanelClosed?.()
   if (updateNoticeDismissTimer !== undefined) window.clearTimeout(updateNoticeDismissTimer)
   if (elementPickerResetTimer !== undefined) window.clearTimeout(elementPickerResetTimer)
-  if (pageSnapshotResetTimer !== undefined) window.clearTimeout(pageSnapshotResetTimer)
   if (areaCaptureResetTimer !== undefined) window.clearTimeout(areaCaptureResetTimer)
-  if (pdfExportResetTimer !== undefined) window.clearTimeout(pdfExportResetTimer)
+  disposePageExportController()
   disposeDiagnosticsController()
   for (const timer of mcpActivityTimers.values()) window.clearTimeout(timer)
   mcpActivityTimers.clear()
@@ -3832,364 +3773,60 @@ onBeforeUnmount(() => {
       >
         <IconHandyman aria-hidden="true" />
       </button>
-      <section
-        v-if="pageToolsOpen"
-        id="page-tools-panel"
-        class="page-tools-panel"
-        data-shell-docked-panel
-        role="dialog"
-        aria-modal="false"
-        aria-labelledby="page-tools-title"
-      >
-        <header>
-          <div>
-            <span class="eyebrow">{{ t('shell.pageTools.current') }}</span>
-            <h2 id="page-tools-title">{{ t('shell.pageTools.heading') }}</h2>
-          </div>
-          <div class="panel-header-actions">
-            <PanelDockPicker v-model="panelDock" :label="t('runtime.tabs.dockPageTools')" />
-            <button class="panel-close" type="button" :aria-label="t('shell.pageTools.close')" @click="pageToolsOpen = false"><IconClose aria-hidden="true" /></button>
-          </div>
-        </header>
-        <div class="page-tools-content">
-          <section aria-labelledby="page-tools-inspect-title">
-            <h3 id="page-tools-inspect-title">{{ t('shell.pageTools.inspect') }}</h3>
-            <div class="page-tools-grid">
-              <button
-                type="button"
-                :aria-label="activeWebUrl ? t('runtime.tabs.siteStorage', { host: activeHostname }) : t('runtime.tabs.siteStorageUnavailable')"
-                :disabled="!activeWebUrl"
-                @click="toggleSiteStorage"
-              >
-                <IconDatabase aria-hidden="true" />
-                <span><strong>{{ t('panels.siteStorage') }}</strong><small>{{ t('shell.pageTools.storageDescription') }}</small></span>
-              </button>
-              <button
-                :class="{ complete: Boolean(activeEmulation?.viewport) }"
-                type="button"
-                :aria-label="t('runtime.address.responsive', { status: responsivePreviewLabel })"
-                @click="toggleResponsivePreview"
-              >
-                <IconDevices aria-hidden="true" />
-                <span><strong>{{ t('shell.pageTools.responsive') }}</strong><small>{{ responsivePreviewLabel }}</small></span>
-              </button>
-              <button
-                :class="{ complete: activeEnvironmentOverrideCount > 0, error: environmentState === 'error', running: environmentState === 'applying' }"
-                type="button"
-                :aria-label="t('runtime.address.environment', { status: environmentLabel })"
-                :disabled="environmentState === 'applying'"
-                @click="toggleEnvironment"
-              >
-                <IconProgress v-if="environmentState === 'applying'" class="state-spinner" aria-hidden="true" />
-                <IconSpeed v-else aria-hidden="true" />
-                <span><strong>{{ t('shell.pageTools.environment') }}</strong><small>{{ environmentLabel }}</small></span>
-              </button>
-              <button
-                type="button"
-                :aria-label="t('shell.pageTools.openConsole')"
-                @click="toggleConsole"
-              >
-                <IconTerminal aria-hidden="true" />
-                <span><strong>{{ t('panels.console') }}</strong><small>{{ t('shell.pageTools.consoleDescription') }}</small></span>
-              </button>
-              <button
-                type="button"
-                :aria-label="t('shell.pageTools.openNetwork')"
-                @click="toggleNetworkMonitor"
-              >
-                <IconNetworkCheck aria-hidden="true" />
-                <span><strong>{{ t('panels.network') }}</strong><small>{{ t('shell.pageTools.networkDescription') }}</small></span>
-              </button>
-              <button
-                :class="{ warning: activeNetworkRouteCount > 0 }"
-                type="button"
-                :aria-label="t('runtime.address.conditions', { status: activeNetworkRouteCount ? t('network.conditions.active', { count: localNumber(activeNetworkRouteCount) }) : t('runtime.address.noneActive') })"
-                @click="openRequestConditions"
-              >
-                <IconRoute aria-hidden="true" />
-                <span><strong>{{ t('shell.pageTools.conditions') }}</strong><small>{{ activeNetworkRouteCount ? `${activeNetworkRouteCount} temporary active` : t('shell.pageTools.conditionsDescription') }}</small></span>
-              </button>
-            </div>
-          </section>
-          <section aria-labelledby="page-tools-diagnose-title">
-            <h3 id="page-tools-diagnose-title">{{ t('shell.pageTools.diagnose') }}</h3>
-            <div class="page-tools-grid">
-              <button
-                :class="{ warning: activeInspectorIssueCount > 0 }"
-                type="button"
-                :aria-label="t('issues.toolAria', { status: inspectorIssuesLabel })"
-                @click="toggleInspectorIssues"
-              >
-                <IconWarning aria-hidden="true" />
-                <span><strong>{{ t('panels.issues') }}</strong><small>{{ inspectorIssuesLabel }}</small></span>
-              </button>
-              <button
-                :class="{
-                  complete: securityReport?.state === 'secure',
-                  warning: securityReport?.state === 'insecure' || securityReport?.state === 'insecure-broken',
-                  error: securityReportState === 'error',
-                  running: securityReportState === 'loading'
-                }"
-                type="button"
-                :aria-label="t('securityReport.toolAria', { status: securityLabel })"
-                :disabled="securityReportState === 'loading'"
-                @click="toggleSecurityReport"
-              >
-                <IconProgress v-if="securityReportState === 'loading'" class="state-spinner" aria-hidden="true" />
-                <IconShieldLock v-else aria-hidden="true" />
-                <span><strong>{{ t('panels.security') }}</strong><small>{{ securityLabel }}</small></span>
-              </button>
-              <button
-                :class="{
-                  complete: debugReportState === 'complete' && debugReportSignalCount === 0,
-                  warning: debugReportState === 'complete' && debugReportSignalCount > 0,
-                  error: debugReportState === 'error',
-                  running: debugReportState === 'running'
-                }"
-                type="button"
-                :aria-label="debugReportLabel"
-                :disabled="debugReportState === 'running'"
-                @click="toggleDebugReport"
-              >
-                <IconProgress v-if="debugReportState === 'running'" class="state-spinner" aria-hidden="true" />
-                <IconCheck v-else-if="debugReportState === 'complete' && debugReportSignalCount === 0" aria-hidden="true" />
-                <IconError v-else-if="debugReportState === 'error'" aria-hidden="true" />
-                <IconBugReport v-else aria-hidden="true" />
-                <span><strong>{{ t('panels.debugReport') }}</strong><small>{{ debugReportLabel }}</small></span>
-              </button>
-              <button
-                :class="{ running: activeTab?.reproRecording?.active }"
-                type="button"
-                :aria-label="t('repro.toolAria', { status: reproLabel })"
-                @click="toggleReproRecorder"
-              >
-                <IconRecord aria-hidden="true" />
-                <span><strong>{{ t('panels.reproRecorder') }}</strong><small>{{ reproLabel }}</small></span>
-              </button>
-              <button
-                :class="{ running: activeTab?.domChangesRecording?.active }"
-                type="button"
-                :aria-label="t('domChanges.toolAria', { status: domChangesLabel })"
-                @click="toggleDomChanges"
-              >
-                <IconAccountTree aria-hidden="true" />
-                <span><strong>{{ t('panels.domChanges') }}</strong><small>{{ domChangesLabel }}</small></span>
-              </button>
-              <button
-                :class="{
-                  complete: visualCompareReport?.status === 'compared' && visualCompareReport.identical,
-                  warning: visualCompareReport?.status === 'compared' && !visualCompareReport.identical,
-                  error: visualCompareState === 'error',
-                  running: visualCompareState === 'loading'
-                }"
-                type="button"
-                :aria-label="t('visualCompare.toolAria', { status: visualCompareLabel })"
-                :disabled="visualCompareState === 'loading'"
-                @click="toggleVisualCompare"
-              >
-                <IconProgress v-if="visualCompareState === 'loading'" class="state-spinner" aria-hidden="true" />
-                <IconDifference v-else aria-hidden="true" />
-                <span><strong>{{ t('panels.visualCompare') }}</strong><small>{{ visualCompareLabel }}</small></span>
-              </button>
-              <button
-                :class="{
-                  picking: elementPickerMode === 'context' && elementPickerState === 'picking',
-                  copied: elementPickerMode === 'context' && elementPickerState === 'copied',
-                  error: elementPickerMode === 'context' && elementPickerState === 'error'
-                }"
-                type="button"
-                :aria-label="contextPickerLabel"
-                @click="pageToolsOpen = false; toggleElementPicker('context')"
-              >
-                <IconCheck v-if="elementPickerMode === 'context' && elementPickerState === 'copied'" aria-hidden="true" />
-                <IconClose v-else-if="elementPickerMode === 'context' && elementPickerState === 'picking'" aria-hidden="true" />
-                <IconAdsClick v-else aria-hidden="true" />
-                <span><strong>{{ t('shell.pageTools.pickElement') }}</strong><small>{{ t('shell.pageTools.pickDescription') }}</small></span>
-              </button>
-              <button
-                :class="{
-                  picking: elementPickerMode === 'screenshot' && elementPickerState === 'picking',
-                  copied: elementPickerMode === 'screenshot' && elementPickerState === 'copied',
-                  error: elementPickerMode === 'screenshot' && elementPickerState === 'error'
-                }"
-                type="button"
-                :aria-label="elementScreenshotLabel"
-                @click="pageToolsOpen = false; toggleElementPicker('screenshot')"
-              >
-                <IconCheck v-if="elementPickerMode === 'screenshot' && elementPickerState === 'copied'" aria-hidden="true" />
-                <IconClose v-else-if="elementPickerMode === 'screenshot' && elementPickerState === 'picking'" aria-hidden="true" />
-                <IconScreenshotRegion v-else aria-hidden="true" />
-                <span><strong>{{ t('shell.pageTools.elementScreenshot') }}</strong><small>{{ t('shell.pageTools.screenshotDescription') }}</small></span>
-              </button>
-            </div>
-          </section>
-          <section aria-labelledby="page-tools-audit-title">
-            <h3 id="page-tools-audit-title">{{ t('shell.pageTools.audit') }}</h3>
-            <div class="page-tools-grid">
-              <button
-                :class="{
-                  complete: qualityAuditState === 'complete' && qualityAuditReport?.status === 'pass',
-                  warning: qualityAuditState === 'complete' && qualityAuditReport?.status === 'warning',
-                  error: qualityAuditState === 'error' || qualityAuditReport?.status === 'error',
-                  running: qualityAuditState === 'running'
-                }"
-                type="button"
-                :aria-label="t('runtime.address.quality', { status: qualityAuditLabel })"
-                :disabled="qualityAuditState === 'running'"
-                @click="toggleQualityAudit"
-              >
-                <IconProgress v-if="qualityAuditState === 'running'" class="state-spinner" aria-hidden="true" />
-                <IconCheck v-else-if="qualityAuditReport?.status === 'pass'" aria-hidden="true" />
-                <IconError v-else-if="qualityAuditState === 'error' || qualityAuditReport?.status === 'error'" aria-hidden="true" />
-                <IconFactCheck v-else aria-hidden="true" />
-                <span><strong>{{ t('panels.qualityAudit') }}</strong><small>{{ qualityAuditLabel }}</small></span>
-              </button>
-              <button
-                :class="{
-                  complete: accessibilityAuditState === 'complete' && accessibilityAudit?.violationCount === 0,
-                  warning: accessibilityAuditState === 'complete' && Boolean(accessibilityAudit?.violationCount),
-                  error: accessibilityAuditState === 'error',
-                  running: accessibilityAuditState === 'running'
-                }"
-                type="button"
-                :aria-label="accessibilityAuditLabel"
-                :disabled="accessibilityAuditState === 'running'"
-                @click="toggleAccessibilityAudit"
-              >
-                <IconProgress v-if="accessibilityAuditState === 'running'" class="state-spinner" aria-hidden="true" />
-                <IconCheck v-else-if="accessibilityAuditState === 'complete' && accessibilityAudit?.violationCount === 0" aria-hidden="true" />
-                <IconError v-else-if="accessibilityAuditState === 'error'" aria-hidden="true" />
-                <IconAccessibility v-else aria-hidden="true" />
-                <span><strong>{{ t('panels.accessibility') }}</strong><small>{{ accessibilityAuditLabel }}</small></span>
-              </button>
-              <button
-                :class="{ error: performanceState === 'error', running: performanceState === 'running' }"
-                type="button"
-                :aria-label="performanceLabel"
-                :disabled="performanceState === 'running'"
-                @click="togglePerformanceReport"
-              >
-                <IconProgress v-if="performanceState === 'running'" class="state-spinner" aria-hidden="true" />
-                <IconError v-else-if="performanceState === 'error'" aria-hidden="true" />
-                <IconMonitoring v-else aria-hidden="true" />
-                <span><strong>{{ t('panels.performance') }}</strong><small>{{ performanceLabel }}</small></span>
-              </button>
-              <button
-                :class="{
-                  warning: Boolean(designOverviewReport?.summary.contrastIssueCount),
-                  error: designOverviewState === 'error',
-                  running: designOverviewState === 'loading'
-                }"
-                type="button"
-                :aria-label="t('designOverview.toolAria', { status: designOverviewLabel })"
-                :disabled="designOverviewState === 'loading'"
-                @click="toggleDesignOverview"
-              >
-                <IconProgress v-if="designOverviewState === 'loading'" class="state-spinner" aria-hidden="true" />
-                <IconPalette v-else aria-hidden="true" />
-                <span><strong>{{ t('panels.designOverview') }}</strong><small>{{ designOverviewLabel }}</small></span>
-              </button>
-              <button
-                :class="{
-                  warning: Boolean(pageMetadataReport?.issues.some((issue) => issue.severity !== 'info')),
-                  error: pageMetadataState === 'error',
-                  running: pageMetadataState === 'loading'
-                }"
-                type="button"
-                :aria-label="t('pageMetadata.toolAria', { status: pageMetadataLabel })"
-                :disabled="pageMetadataState === 'loading'"
-                @click="togglePageMetadata"
-              >
-                <IconProgress v-if="pageMetadataState === 'loading'" class="state-spinner" aria-hidden="true" />
-                <IconLanguage v-else aria-hidden="true" />
-                <span><strong>{{ t('panels.pageMetadata') }}</strong><small>{{ pageMetadataLabel }}</small></span>
-              </button>
-              <button
-                :class="{
-                  complete: coverageResult?.status === 'complete',
-                  error: coverageState === 'error',
-                  running: Boolean(activeTab?.codeCoverageRecording) || coverageState === 'loading'
-                }"
-                type="button"
-                :aria-label="t('coverage.toolAria', { status: coverageLabel })"
-                :disabled="coverageState === 'loading'"
-                @click="toggleCodeCoverage"
-              >
-                <IconProgress v-if="coverageState === 'loading'" class="state-spinner" aria-hidden="true" />
-                <IconCode v-else aria-hidden="true" />
-                <span><strong>{{ t('panels.coverage') }}</strong><small>{{ coverageLabel }}</small></span>
-              </button>
-              <button
-                :class="{
-                  complete: cpuProfileResult?.status === 'complete',
-                  error: cpuProfileState === 'error',
-                  running: Boolean(activeTab?.cpuProfileRecording) || cpuProfileState === 'loading'
-                }"
-                type="button"
-                :aria-label="t('cpuProfile.toolAria', { status: cpuProfileLabel })"
-                :disabled="cpuProfileState === 'loading'"
-                @click="toggleCpuProfile"
-              >
-                <IconProgress v-if="cpuProfileState === 'loading'" class="state-spinner" aria-hidden="true" />
-                <IconMonitoring v-else aria-hidden="true" />
-                <span><strong>{{ t('shell.pageTools.javascriptCpu') }}</strong><small>{{ cpuProfileLabel }}</small></span>
-              </button>
-              <button
-                :class="{ error: memoryState === 'error', running: memoryState === 'running' }"
-                type="button"
-                :aria-label="t('memory.toolAria', { status: memoryLabel })"
-                :disabled="memoryState === 'running'"
-                @click="toggleMemoryReport"
-              >
-                <IconProgress v-if="memoryState === 'running'" class="state-spinner" aria-hidden="true" />
-                <IconError v-else-if="memoryState === 'error'" aria-hidden="true" />
-                <IconMemory v-else aria-hidden="true" />
-                <span><strong>{{ t('panels.memory') }}</strong><small>{{ memoryLabel }}</small></span>
-              </button>
-            </div>
-          </section>
-          <section aria-labelledby="page-tools-export-title">
-            <h3 id="page-tools-export-title">{{ t('shell.pageTools.exportAccount') }}</h3>
-            <div class="page-tools-grid">
-              <button
-                :class="{ copied: pageSnapshotState === 'copied', error: pageSnapshotState === 'error', running: pageSnapshotState === 'copying' }"
-                type="button"
-                :aria-label="t('shell.pageTools.copySnapshotAria')"
-                :disabled="pageSnapshotState === 'copying'"
-                @click="copyPageSnapshot"
-              >
-                <IconProgress v-if="pageSnapshotState === 'copying'" class="state-spinner" aria-hidden="true" />
-                <IconCheck v-else-if="pageSnapshotState === 'copied'" aria-hidden="true" />
-                <IconError v-else-if="pageSnapshotState === 'error'" aria-hidden="true" />
-                <IconAccountTree v-else aria-hidden="true" />
-                <span><strong>{{ t('shell.pageTools.copySnapshot') }}</strong><small>{{ t('shell.pageTools.copySnapshotDescription') }}</small></span>
-              </button>
-              <button
-                type="button"
-                :aria-label="pdfExportLabel"
-                :disabled="pdfExportState === 'saving'"
-                @click="pageToolsOpen = false; saveActivePdf()"
-              >
-                <IconProgress v-if="pdfExportState === 'saving'" class="state-spinner" aria-hidden="true" />
-                <IconCheck v-else-if="pdfExportState === 'saved'" aria-hidden="true" />
-                <IconError v-else-if="pdfExportState === 'error'" aria-hidden="true" />
-                <IconPdf v-else aria-hidden="true" />
-                <span><strong>{{ t('shell.pageTools.savePdf') }}</strong><small>{{ pdfExportLabel }}</small></span>
-              </button>
-              <button
-                type="button"
-                :aria-label="activeCredentials.length ? t('shell.pageTools.fillPassword') : t('shell.pageTools.noPassword')"
-                :disabled="!credentialStorage.available || !activeCredentials.length"
-                @click="pageToolsOpen = false; fillSavedPassword()"
-              >
-                <IconPassword aria-hidden="true" />
-                <span><strong>{{ t('shell.pageTools.savedPassword') }}</strong><small>{{ activeCredentials.length ? t('shell.pageTools.accountsAvailable', { count: localNumber(activeCredentials.length) }) : t('shell.pageTools.noAccount') }}</small></span>
-              </button>
-            </div>
-          </section>
-        </div>
-        <footer><span>{{ activeHostname }}</span><span>{{ t('shell.pageTools.pageActions') }}</span></footer>
-      </section>
+      <PageToolsPanel
+        v-model:open="pageToolsOpen"
+        v-model:dock="panelDock"
+        :active-tab="activeTab"
+        :active-web-url="activeWebUrl"
+        :hostname="activeHostname"
+        :locale="resolvedLocale"
+        :active-emulation="activeEmulation"
+        :environment-state="environmentState"
+        :environment-override-count="activeEnvironmentOverrideCount"
+        :network-route-count="activeNetworkRouteCount"
+        :inspector-issue-count="activeInspectorIssueCount"
+        :debug-report-signal-count="debugReportSignalCount"
+        :element-picker-state="elementPickerState"
+        :element-picker-mode="elementPickerMode"
+        :snapshot-state="pageSnapshotState"
+        :pdf-state="pdfExportState"
+        :credential-storage-available="credentialStorage.available"
+        :credential-count="activeCredentials.length"
+        :diagnostics="diagnosticsController"
+        :labels="{
+          responsive: responsivePreviewLabel,
+          environment: environmentLabel,
+          inspectorIssues: inspectorIssuesLabel,
+          security: securityLabel,
+          debugReport: debugReportLabel,
+          repro: reproLabel,
+          domChanges: domChangesLabel,
+          visualCompare: visualCompareLabel,
+          contextPicker: contextPickerLabel,
+          elementScreenshot: elementScreenshotLabel,
+          qualityAudit: qualityAuditLabel,
+          accessibilityAudit: accessibilityAuditLabel,
+          performance: performanceLabel,
+          designOverview: designOverviewLabel,
+          pageMetadata: pageMetadataLabel,
+          coverage: coverageLabel,
+          cpuProfile: cpuProfileLabel,
+          memory: memoryLabel,
+          pdfExport: pdfExportLabel
+        }"
+        :actions="{
+          toggleSiteStorage,
+          toggleResponsivePreview,
+          toggleEnvironment,
+          toggleConsole,
+          toggleNetwork: toggleNetworkMonitor,
+          openRequestConditions,
+          toggleElementPicker,
+          copyPageSnapshot,
+          savePdf: saveActivePdf,
+          fillSavedPassword
+        }"
+      />
     </div>
     <div v-if="!activeIsHome && activeTab?.pageProblem" class="page-problem-bar" role="alert" aria-live="assertive">
       <span class="page-problem-mark" aria-hidden="true"><IconError /></span>
