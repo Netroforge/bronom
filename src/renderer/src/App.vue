@@ -77,7 +77,6 @@ import {
   McpTabActivity,
   McpControlState,
   CredentialSummary,
-  CommercialLicenseState,
   DetachablePanelId,
   PanelDock,
   SitePermissionDecision,
@@ -111,6 +110,7 @@ import ResponsivePreviewPanel from './components/ResponsivePreviewPanel.vue'
 import SiteControlsPanel from './components/SiteControlsPanel.vue'
 import SitePermissionsSettingsPanel from './components/SitePermissionsSettingsPanel.vue'
 import SiteStoragePanel from './components/SiteStoragePanel.vue'
+import SupportSettingsPanel from './components/SupportSettingsPanel.vue'
 import TabSearchPanel from './components/TabSearchPanel.vue'
 import UpdateSettingsPanel from './components/UpdateSettingsPanel.vue'
 import WorkspaceEditor from './components/WorkspaceEditor.vue'
@@ -127,6 +127,7 @@ import { usePerformanceSettingsController } from './composables/usePerformanceSe
 import { usePrivacySettingsController } from './composables/usePrivacySettingsController'
 import { useSiteDataSummaryController } from './composables/useSiteDataSummaryController'
 import { useSitePermissionsController } from './composables/useSitePermissionsController'
+import { useCommercialLicenseController } from './composables/useCommercialLicenseController'
 import { useUpdateSettingsController } from './composables/useUpdateSettingsController'
 import {
   shellHeightForBrowserContent,
@@ -264,14 +265,6 @@ const {
 const credentialPickerOpen = ref(false)
 const credentialPicker = ref<InstanceType<typeof CredentialPicker> | null>(null)
 const credentialFillState = ref<'idle' | 'filling'>('idle')
-const commercialLicense = ref<CommercialLicenseState>({
-  status: 'not-activated',
-  active: false,
-  secureStorageAvailable: false
-})
-const commercialLicenseKey = ref('')
-const commercialLicenseAction = ref<'idle' | 'activating' | 'refreshing' | 'deactivating'>('idle')
-const commercialLicenseError = ref('')
 const mcpControl = ref<McpControlState>({ status: 'starting', paused: false })
 const address = ref('')
 const addressInput = ref<HTMLInputElement | null>(null)
@@ -394,6 +387,16 @@ const {
   reset: resetUpdateSettings,
   dispose: disposeUpdateSettingsController
 } = updateSettingsController
+const commercialLicenseController = useCommercialLicenseController({
+  api: window.bronomLicense,
+  confirmDeactivate: () => window.confirm(t('runtimeDetails.deactivate')),
+  emptyKeyMessage: () => t('runtime.license.enterKey'),
+  formatError: (error) => error instanceof Error ? error.message : String(error)
+})
+const {
+  initialize: initializeCommercialLicense,
+  dispose: disposeCommercialLicenseController
+} = commercialLicenseController
 const defaultDownloadDirectory = ref('')
 const downloadSettingsController = useDownloadSettingsController({
   api: window.bronomSettings,
@@ -611,7 +614,6 @@ let unsubscribeUserAttention: (() => void) | undefined
 let unsubscribeShortcutRequested: (() => void) | undefined
 let unsubscribePermissions: (() => void) | undefined
 let unsubscribeCredentials: (() => void) | undefined
-let unsubscribeLicense: (() => void) | undefined
 let unsubscribePanelRequested: (() => void) | undefined
 let unsubscribePanelActive: (() => void) | undefined
 let unsubscribePanelRedock: (() => void) | undefined
@@ -2643,54 +2645,6 @@ function openSupportSettings(): void {
   closeTransientPanels()
   settingsSection.value = 'support'
   settingsOpen.value = true
-  void loadCommercialLicenseState()
-}
-
-async function loadCommercialLicenseState(): Promise<void> {
-  commercialLicense.value = await window.bronomLicense.getState()
-}
-
-async function activateCommercialLicense(): Promise<void> {
-  const key = commercialLicenseKey.value.trim()
-  if (!key) {
-    commercialLicenseError.value = t('runtime.license.enterKey')
-    return
-  }
-  commercialLicenseAction.value = 'activating'
-  commercialLicenseError.value = ''
-  try {
-    commercialLicense.value = await window.bronomLicense.activate(key)
-    commercialLicenseKey.value = ''
-  } catch (error) {
-    commercialLicenseError.value = error instanceof Error ? error.message : String(error)
-  } finally {
-    commercialLicenseAction.value = 'idle'
-  }
-}
-
-async function refreshCommercialLicense(): Promise<void> {
-  commercialLicenseAction.value = 'refreshing'
-  commercialLicenseError.value = ''
-  try {
-    commercialLicense.value = await window.bronomLicense.refresh()
-  } catch (error) {
-    commercialLicenseError.value = error instanceof Error ? error.message : String(error)
-  } finally {
-    commercialLicenseAction.value = 'idle'
-  }
-}
-
-async function deactivateCommercialLicense(): Promise<void> {
-  if (!window.confirm(t('runtimeDetails.deactivate'))) return
-  commercialLicenseAction.value = 'deactivating'
-  commercialLicenseError.value = ''
-  try {
-    commercialLicense.value = await window.bronomLicense.deactivate()
-  } catch (error) {
-    commercialLicenseError.value = error instanceof Error ? error.message : String(error)
-  } finally {
-    commercialLicenseAction.value = 'idle'
-  }
 }
 
 function toggleSettings(): void {
@@ -2945,7 +2899,8 @@ onMounted(async () => {
   bindFoley()
   await Promise.all([
     browserStore.initialize(),
-    initializeUpdateSettings()
+    initializeUpdateSettings(),
+    initializeCommercialLicense()
   ])
   unsubscribeMcpActivity = browser.onMcpTabActivity(handleMcpTabActivity)
   unsubscribeDownloads = window.bronomDownloads.onChanged(applyDownloads)
@@ -2971,7 +2926,6 @@ onMounted(async () => {
   }
   unsubscribePermissions = window.bronomPermissions.onChanged(replaceSitePermissions)
   unsubscribeCredentials = window.bronomCredentials.onChanged(replaceCredentials)
-  unsubscribeLicense = window.bronomLicense.onChanged((next) => (commercialLicense.value = next))
   unsubscribeUpdateOpen = window.bronomUpdates.onOpenRequested(() => {
     openUpdateSettings()
   })
@@ -3004,19 +2958,17 @@ onMounted(async () => {
   unsubscribePanelClosed = window.bronomPanelWindow.onClosed(() => {
     if (!isDetachedPanelWindow) closeDockedPanels()
   })
-  const [systemDownloadDirectory, , mcpControlState, , savedDownloads, savedBookmarks, savedVisitHistory, savedCommercialLicense] = await Promise.all([
+  const [systemDownloadDirectory, , mcpControlState, , savedDownloads, savedBookmarks, savedVisitHistory] = await Promise.all([
     window.bronomSettings.getDefaultDownloadDirectory(),
     initializeSitePermissions(window.bronomPermissions.list()),
     window.bronomMcp.getState(),
     initializeCredentials(window.bronomCredentials.status(), window.bronomCredentials.list()),
     window.bronomDownloads.list(),
     window.bronomBookmarks.list(),
-    window.bronomHistory.list(),
-    window.bronomLicense.getState()
+    window.bronomHistory.list()
   ])
   defaultDownloadDirectory.value = systemDownloadDirectory
   mcpControl.value = mcpControlState
-  commercialLicense.value = savedCommercialLicense
   downloads.value = savedDownloads
   for (const download of savedDownloads) knownDownloadIds.add(download.id)
   bookmarks.value = savedBookmarks
@@ -3037,7 +2989,6 @@ onBeforeUnmount(() => {
   unsubscribeShortcutRequested?.()
   unsubscribePermissions?.()
   unsubscribeCredentials?.()
-  unsubscribeLicense?.()
   unsubscribeUpdateOpen?.()
   unsubscribeHelp?.()
   unsubscribeClipboardFailed?.()
@@ -3058,6 +3009,7 @@ onBeforeUnmount(() => {
   disposePerformanceSettingsController()
   disposeMcpSettingsController()
   disposeUpdateSettingsController()
+  disposeCommercialLicenseController()
   disposePrivacySettingsController()
   disposeSitePermissionsController()
   disposeCredentialsController()
@@ -4059,62 +4011,13 @@ onBeforeUnmount(() => {
             v-else-if="settingsSection === 'updates'"
             :controller="updateSettingsController"
           />
-          <main v-else class="settings-content support-settings">
-            <div class="setting-copy">
-              <span class="support-kicker">{{ t('settings.support.kicker') }}</span>
-              <h3>{{ commercialLicense.active ? t('settings.support.thanks') : t('settings.support.heading') }}</h3>
-              <p>{{ t('settings.support.description') }}</p>
-            </div>
-            <div v-if="commercialLicense.active" class="support-card commercial-license-card active">
-              <span class="support-heart" aria-hidden="true"><IconCheck /></span>
-              <strong>{{ t('settings.support.active', { key: commercialLicense.maskedKey }) }}</strong>
-              <small>
-                {{ t('settings.support.activations', { used: commercialLicense.activations == null ? '—' : localNumber(commercialLicense.activations), limit: commercialLicense.activationLimit == null ? t('settings.support.unlimited') : localNumber(commercialLicense.activationLimit) }) }}
-                <template v-if="commercialLicense.lastValidatedAt"> {{ t('settings.support.lastChecked', { time: localDateTime(commercialLicense.lastValidatedAt) }) }}</template>
-              </small>
-              <div class="commercial-license-actions">
-                <button class="secondary-button" type="button" :disabled="commercialLicenseAction !== 'idle'" @click="refreshCommercialLicense">
-                  {{ commercialLicenseAction === 'refreshing' ? t('settings.support.checking') : t('settings.support.check') }}
-                </button>
-                <button class="secondary-button" type="button" :disabled="commercialLicenseAction !== 'idle'" @click="openSupport('https://www.creem.io/my-orders/login')">
-                  {{ t('settings.support.manage') }}
-                </button>
-                <button class="secondary-button danger" type="button" :disabled="commercialLicenseAction !== 'idle'" @click="deactivateCommercialLicense">
-                  {{ commercialLicenseAction === 'deactivating' ? t('settings.support.deactivating') : t('settings.support.deactivate') }}
-                </button>
-              </div>
-            </div>
-            <div v-else class="support-card commercial-license-card">
-              <span class="support-heart" aria-hidden="true"><IconFavorite /></span>
-              <strong>{{ t('settings.support.activateDescription') }}</strong>
-              <small v-if="commercialLicense.secureStorageAvailable">{{ t('settings.support.secure') }}</small>
-              <small v-else>{{ t('settings.support.unavailable') }}</small>
-              <form class="commercial-license-form" @submit.prevent="activateCommercialLicense">
-                <label for="commercial-license-key">{{ t('settings.support.key') }}</label>
-                <input
-                  id="commercial-license-key"
-                  v-model="commercialLicenseKey"
-                  type="password"
-                  autocomplete="off"
-                  spellcheck="false"
-                  :placeholder="t('settings.support.placeholder')"
-                  :disabled="!commercialLicense.secureStorageAvailable || commercialLicenseAction !== 'idle'"
-                />
-                <button class="primary-button support-primary" type="submit" :disabled="!commercialLicense.secureStorageAvailable || commercialLicenseAction !== 'idle'">
-                  {{ commercialLicenseAction === 'activating' ? t('settings.support.activating') : t('settings.support.activate') }}
-                </button>
-              </form>
-              <small v-if="commercialLicense.message">{{ commercialLicense.message }}</small>
-              <small v-if="commercialLicenseError" class="commercial-license-error" role="alert">{{ commercialLicenseError }}</small>
-              <button class="secondary-button" type="button" @click="openSupport('https://bronom.pages.dev')">{{ t('settings.support.support') }}</button>
-            </div>
-            <div class="support-alternatives">
-              <span>{{ t('settings.support.alternatives') }}</span>
-              <button type="button" @click="openSupport('https://github.com/Netroforge/bronom/blob/main/LICENSE')">{{ t('settings.support.license') }}</button>
-              <button type="button" @click="openSupport('https://github.com/Netroforge/bronom/blob/main/CONTRIBUTING.md')">{{ t('settings.support.contributing') }}</button>
-              <button type="button" @click="openSupport('https://github.com/Netroforge/bronom/issues')">{{ t('settings.support.issue') }}</button>
-            </div>
-          </main>
+          <SupportSettingsPanel
+            v-else
+            :controller="commercialLicenseController"
+            :format-number="localNumber"
+            :format-date-time="localDateTime"
+            @open-url="openSupport"
+          />
         </div>
 
         <footer class="settings-footer">

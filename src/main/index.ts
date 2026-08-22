@@ -37,6 +37,7 @@ import { HistoryStore } from './history-store.js'
 import { CredentialStore } from './credential-store.js'
 import { CredentialImportError, parseCredentialImportCsv } from './credential-import.js'
 import { CommercialLicenseClient, CommercialLicenseError } from './commercial-license-client.js'
+import { CommercialLicenseOperationCoordinator } from './commercial-license-operations.js'
 import { CommercialLicenseStore } from './commercial-license-store.js'
 import { buildBrowsingDataWebsiteInventory, cookieAvailableToOrigin } from './browsing-data-websites.js'
 import { renderHomePage } from './home-page.js'
@@ -188,6 +189,7 @@ let credentialStore: CredentialStore | null = null
 let commercialLicenseStore: CommercialLicenseStore | null = null
 let commercialLicenseClient: CommercialLicenseClient | null = null
 let commercialLicenseMessage: string | undefined
+const commercialLicenseOperations = new CommercialLicenseOperationCoordinator()
 let bookmarkStore: BookmarkStore | null = null
 let historyStore: HistoryStore | null = null
 let credentialStorageStatus: CredentialStorageStatus = { available: false, reason: 'Secure storage is initializing.' }
@@ -763,7 +765,7 @@ function commercialLicenseFriendlyMessage(reason: string): string {
   return messages[reason] ?? text('native.errors.invalidLicense')
 }
 
-async function activateCommercialLicense(value: unknown): Promise<CommercialLicenseState> {
+async function activateCommercialLicenseNow(value: unknown): Promise<CommercialLicenseState> {
   if (typeof value !== 'string') throw new TypeError('Supporter key must be a string')
   const licenseKey = value.trim().toUpperCase()
   if (!/^[A-Z0-9][A-Z0-9-]{15,127}$/.test(licenseKey)) throw new TypeError('Enter the complete supporter key from your Creem receipt')
@@ -782,30 +784,40 @@ async function activateCommercialLicense(value: unknown): Promise<CommercialLice
   }
 }
 
-async function refreshCommercialLicense(): Promise<CommercialLicenseState> {
-  if (!commercialLicenseStore || !commercialLicenseClient) return currentCommercialLicenseState()
-  const credentials = await commercialLicenseStore.credentials()
-  if (!credentials) return currentCommercialLicenseState()
-  try {
-    const result = await commercialLicenseClient.validate(credentials.licenseKey, credentials.instanceId)
-    await commercialLicenseStore.saveValidation(result)
-    commercialLicenseMessage = result.valid && result.status === 'active'
-      ? 'Supporter key is active.'
-      : commercialLicenseFriendlyMessage('license_inactive')
-    return publishCommercialLicenseState()
-  } catch (error) {
-    const reason = error instanceof CommercialLicenseError ? error.reason : 'service_unavailable'
-    if (reason === 'commercial_inactive' || reason === 'license_inactive' || reason === 'license_not_found') {
-      await commercialLicenseStore.markInactive()
-    }
-    commercialLicenseMessage = reason === 'service_unavailable' || reason === 'provider_unavailable'
-      ? 'Could not reach the supporter service. The last successful validation remains stored on this device.'
-      : commercialLicenseFriendlyMessage(reason)
-    return publishCommercialLicenseState()
-  }
+function activateCommercialLicense(value: unknown): Promise<CommercialLicenseState> {
+  return commercialLicenseOperations.mutate(() => activateCommercialLicenseNow(value))
 }
 
-async function deactivateCommercialLicense(): Promise<CommercialLicenseState> {
+function refreshCommercialLicense(): Promise<CommercialLicenseState> {
+  return commercialLicenseOperations.refresh(async (isCurrent) => {
+    if (!commercialLicenseStore || !commercialLicenseClient) return currentCommercialLicenseState()
+    const credentials = await commercialLicenseStore.credentials()
+    if (!credentials || !isCurrent()) return currentCommercialLicenseState()
+    try {
+      const result = await commercialLicenseClient.validate(credentials.licenseKey, credentials.instanceId)
+      if (!isCurrent()) return currentCommercialLicenseState()
+      await commercialLicenseStore.saveValidation(result)
+      if (!isCurrent()) return currentCommercialLicenseState()
+      commercialLicenseMessage = result.valid && result.status === 'active'
+        ? 'Supporter key is active.'
+        : commercialLicenseFriendlyMessage('license_inactive')
+      return publishCommercialLicenseState()
+    } catch (error) {
+      if (!isCurrent()) return currentCommercialLicenseState()
+      const reason = error instanceof CommercialLicenseError ? error.reason : 'service_unavailable'
+      if (reason === 'commercial_inactive' || reason === 'license_inactive' || reason === 'license_not_found') {
+        await commercialLicenseStore.markInactive()
+        if (!isCurrent()) return currentCommercialLicenseState()
+      }
+      commercialLicenseMessage = reason === 'service_unavailable' || reason === 'provider_unavailable'
+        ? 'Could not reach the supporter service. The last successful validation remains stored on this device.'
+        : commercialLicenseFriendlyMessage(reason)
+      return publishCommercialLicenseState()
+    }
+  }, () => currentCommercialLicenseState())
+}
+
+async function deactivateCommercialLicenseNow(): Promise<CommercialLicenseState> {
   if (!commercialLicenseStore || !commercialLicenseClient) return currentCommercialLicenseState()
   const credentials = await commercialLicenseStore.credentials()
   if (!credentials) return currentCommercialLicenseState()
@@ -822,6 +834,10 @@ async function deactivateCommercialLicense(): Promise<CommercialLicenseState> {
   await commercialLicenseStore.clear()
   commercialLicenseMessage = 'Supporter key removed from this device.'
   return publishCommercialLicenseState()
+}
+
+function deactivateCommercialLicense(): Promise<CommercialLicenseState> {
+  return commercialLicenseOperations.mutate(() => deactivateCommercialLicenseNow())
 }
 
 function publishSitePermissions(): void {
@@ -3341,7 +3357,11 @@ app.whenReady().then(async () => {
     setTimeout(() => void checkForUpdates(), 5_000)
   }
   if (commercialLicenseStore?.hasActivation()) {
-    setTimeout(() => void refreshCommercialLicense(), 7_500)
+    setTimeout(() => {
+      void refreshCommercialLicense().catch((error: unknown) => {
+        console.error('[license] Background refresh failed:', error)
+      })
+    }, 7_500)
   }
 })
 
