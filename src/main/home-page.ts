@@ -348,7 +348,11 @@ export function renderHomePage(options: HomePageOptions): string {
     }
 
     function interpolate(message, values = {}) {
-      return message.replace(/\{([A-Za-z][\w]*)\}/g, (_, name) => String(values[name] ?? '{' + name + '}'));
+      let result = message;
+      Object.entries(values).forEach(([name, value]) => {
+        result = result.replaceAll('{' + name + '}', String(value));
+      });
+      return result;
     }
 
     function countMessage(one, other, count) {

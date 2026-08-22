@@ -3048,12 +3048,16 @@ test('shows typed agent setup, connection activity, and the live tool catalog on
     return home.executeJavaScript(`({
       heading: document.querySelector('h1')?.textContent,
       agents: [...document.querySelectorAll('[data-guide]')].map((node) => node.textContent),
-      tools: document.querySelectorAll('.tool').length
+      tools: document.querySelectorAll('.tool').length,
+      activeCount: document.getElementById('active-count')?.textContent,
+      requestCount: document.getElementById('request-count')?.textContent
     })`)
-  }) as { heading: string; agents: string[]; tools: number }
+  }) as { heading: string; agents: string[]; tools: number; activeCount: string; requestCount: string }
   expect(homeContent.heading).toBe('Your browser, ready for coding agents.')
   expect(homeContent.agents).toEqual(['Codex', 'Claude Code', 'Cursor', 'VS Code / Copilot', 'Generic MCP client'])
   expect(homeContent.tools).toBe(63)
+  expect(homeContent.activeCount).toBe('0 active')
+  expect(homeContent.requestCount).toBe('Waiting for the first tool call')
 
   const initial = await fetch(`http://127.0.0.1:${mcpPort}/mcp`, {
     method: 'POST',
@@ -3089,6 +3093,15 @@ test('shows typed agent setup, connection activity, and the live tool catalog on
       tools: expect.arrayContaining([expect.objectContaining({ name: 'browser_navigate' })]),
       clients: expect.arrayContaining([expect.objectContaining({ name: 'bronom-integration', version: '1.0.0' })])
     })
+
+  await expect.poll(() => electronApp.evaluate(async ({ webContents }) => {
+    const home = webContents.getAllWebContents().find((contents) => contents.getURL().startsWith('bronom://home'))
+    if (!home) return null
+    return home.executeJavaScript(`({
+      activeCount: document.getElementById('active-count')?.textContent,
+      requestCount: document.getElementById('request-count')?.textContent
+    })`)
+  })).toEqual({ activeCount: '0 active', requestCount: '1 MCP request handled' })
 
   await appWindow.getByRole('button', { name: 'Pause agents' }).click()
   await expect(appWindow.getByRole('button', { name: 'Resume agents' })).toBeVisible()

@@ -127,6 +127,7 @@ import ConsolePanelContainer from './components/ConsolePanelContainer.vue'
 import CredentialPicker from './components/CredentialPicker.vue'
 import DiagnosticsPanels from './components/DiagnosticsPanels.vue'
 import DownloadsPanel from './components/DownloadsPanel.vue'
+import HistoryPanel from './components/HistoryPanel.vue'
 import NetworkPanel from './components/NetworkPanel.vue'
 import PanelDockPicker from './components/PanelDockPicker.vue'
 import SiteStoragePanel from './components/SiteStoragePanel.vue'
@@ -218,6 +219,7 @@ const { state } = storeToRefs(browserStore)
 const { settings, systemTheme, resolvedLocale } = storeToRefs(settingsStore)
 const browser = window.bronom
 const downloadsApi = window.bronomDownloads
+const historyApi = window.bronomHistory
 const activeTab = computed(() => state.value.tabs.find((tab) => tab.id === state.value.activeTabId))
 const detachedPanelParameter = new URLSearchParams(window.location.search).get('bronomPanel')
 const detachedPanelId = isDetachablePanelId(detachedPanelParameter) ? detachedPanelParameter : null
@@ -283,8 +285,7 @@ const editingBookmarkId = ref<string | null>(null)
 const editingBookmarkTitle = ref('')
 const visitHistory = ref<BrowserHistoryEntry[]>([])
 const historyOpen = ref(false)
-const historySearch = ref('')
-const historyError = ref('')
+const historyPanel = ref<InstanceType<typeof HistoryPanel> | null>(null)
 const siteStorageOpen = ref(false)
 const siteStoragePanel = ref<InstanceType<typeof SiteStoragePanel> | null>(null)
 const pageToolsOpen = ref(false)
@@ -919,13 +920,6 @@ const filteredBookmarks = computed(() => {
     bookmark.title.toLocaleLowerCase().includes(query) || bookmark.url.toLocaleLowerCase().includes(query)
   ))
 })
-const filteredVisitHistory = computed(() => {
-  const query = historySearch.value.trim().toLocaleLowerCase()
-  if (!query) return visitHistory.value
-  return visitHistory.value.filter((entry) => (
-    entry.title.toLocaleLowerCase().includes(query) || entry.url.toLocaleLowerCase().includes(query)
-  ))
-})
 const addressSuggestions = computed(() => buildLocalAddressSuggestions({
   query: address.value,
   bookmarks: bookmarks.value,
@@ -1157,9 +1151,7 @@ async function toggleVisitHistory(): Promise<void> {
   downloadsOpen.value = false
   bookmarksOpen.value = false
   tabSearchOpen.value = false
-  historyError.value = ''
-  if (!historyOpen.value) visitHistory.value = await window.bronomHistory.list()
-  historyOpen.value = !historyOpen.value
+  await historyPanel.value?.toggle()
 }
 
 function resetSiteStorageView(closePanel = false): void {
@@ -1208,28 +1200,7 @@ function closeWorkspaceEditor(): void {
 }
 
 async function openHistoryEntry(entry: BrowserHistoryEntry): Promise<void> {
-  historyOpen.value = false
   await syncState(browser.newTab({ url: entry.url, active: true }))
-}
-
-async function removeHistoryEntry(id: string): Promise<void> {
-  historyError.value = ''
-  try {
-    visitHistory.value = await window.bronomHistory.remove(id)
-  } catch (error) {
-    historyError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function clearVisitHistory(): Promise<void> {
-  if (!visitHistory.value.length) return
-  if (!window.confirm(t('privacyActions.clearHistory'))) return
-  historyError.value = ''
-  try {
-    visitHistory.value = await window.bronomHistory.clear()
-  } catch (error) {
-    historyError.value = error instanceof Error ? error.message : String(error)
-  }
 }
 
 async function refreshBrowsingDataSummary(): Promise<void> {
@@ -1313,14 +1284,6 @@ async function clearJanitorWebsite(site: BrowsingDataWebsiteSummary): Promise<vo
   } finally {
     janitorClearingOrigin.value = null
   }
-}
-
-function historyEntryMeta(entry: BrowserHistoryEntry): string {
-  const visited = new Intl.DateTimeFormat(resolvedLocale.value, {
-    dateStyle: 'medium',
-    timeStyle: 'short'
-  }).format(new Date(entry.visitedAt))
-  return entry.visitCount > 1 ? `${visited} · ${t('history.visits', { count: localNumber(entry.visitCount) }, entry.visitCount)}` : visited
 }
 
 async function toggleTabSearch(): Promise<void> {
@@ -5084,47 +5047,17 @@ onBeforeUnmount(() => {
       </div>
       <p v-if="bookmarkError" class="bookmarks-error" role="alert">{{ bookmarkError }}</p>
     </section>
-    <section v-if="historyOpen" class="history-panel" data-shell-side-panel role="dialog" aria-modal="false" aria-labelledby="history-title">
-      <header>
-        <div>
-          <span class="eyebrow">{{ t('history.kicker') }}</span>
-          <h2 id="history-title">{{ t('history.heading') }}</h2>
-        </div>
-        <div class="history-header-actions">
-          <button type="button" :disabled="!visitHistory.length" @click="clearVisitHistory">{{ t('history.clearAll') }}</button>
-          <button class="panel-close" type="button" :aria-label="t('history.close')" @click="historyOpen = false"><IconClose aria-hidden="true" /></button>
-        </div>
-      </header>
-      <div v-if="visitHistory.length" class="history-search-field">
-        <IconSearch aria-hidden="true" />
-        <input v-model="historySearch" type="search" :aria-label="t('history.search')" autocomplete="off" spellcheck="false" :placeholder="t('history.placeholder')" />
-      </div>
-      <div v-if="!visitHistory.length" class="history-empty">
-        <IconHistory aria-hidden="true" />
-        <strong>{{ t('history.empty') }}</strong>
-        <span>{{ t('history.emptyDescription') }}</span>
-      </div>
-      <div v-else-if="!filteredVisitHistory.length" class="history-empty compact">
-        <IconSearch aria-hidden="true" />
-        <strong>{{ t('history.noMatches') }}</strong>
-        <span>{{ t('history.tryAnother') }}</span>
-      </div>
-      <div v-else class="history-list">
-        <article v-for="entry in filteredVisitHistory" :key="entry.id" class="history-item">
-          <button class="history-open" type="button" :title="entry.url" @click="openHistoryEntry(entry)">
-            <span class="history-site-icon" aria-hidden="true"><IconLanguage /></span>
-            <span class="history-copy">
-              <strong>{{ entry.title }}</strong>
-              <span>{{ entry.url }}</span>
-              <small>{{ historyEntryMeta(entry) }}</small>
-            </span>
-          </button>
-          <button class="history-action danger" type="button" :aria-label="t('history.removeAria', { title: entry.title })" :title="t('history.remove')" @click="removeHistoryEntry(entry.id)"><IconDelete aria-hidden="true" /></button>
-        </article>
-      </div>
-      <p class="history-retention"><IconPrivacy aria-hidden="true" /> {{ t('history.retention') }}</p>
-      <p v-if="historyError" class="history-error" role="alert">{{ historyError }}</p>
-    </section>
+    <HistoryPanel
+      ref="historyPanel"
+      v-model:open="historyOpen"
+      v-model:entries="visitHistory"
+      :format-date-time="localDateTime"
+      :format-number="localNumber"
+      :list-history="historyApi.list"
+      :remove-history-entry="historyApi.remove"
+      :clear-history="historyApi.clear"
+      :open-history-entry="openHistoryEntry"
+    />
     <SiteStoragePanel
       ref="siteStoragePanel"
       v-model:open="siteStorageOpen"
