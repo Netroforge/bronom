@@ -4,6 +4,24 @@ All notable changes to Bronom 1.0 and later are documented in this file.
 
 ## [Unreleased]
 
+## [1.7.2] - 2026-08-22
+
+### Added
+
+- Import password CSV exports from Chrome, Edge, Firefox, and compatible password managers through a native, explicitly confirmed flow that parses plaintext only in the main process, bounds files and rows, atomically re-encrypts accepted accounts, and never exposes passwords or the selected path to MCP.
+
+### Changed
+
+- Split tab search, the command palette, saved-account picking, downloads, history, bookmarks, responsive preview, environment controls, site controls, page tools, and eight remaining Settings sections out of the application shell into focused components and lifecycle-aware controllers, reducing `App.vue` from 6,483 to 4,112 lines.
+- Expand controller and Electron coverage for stale-response rejection, profile-aware panels, search and filtering, persistence failures, rapid actions, panel accessibility, and real MCP pause and resume behavior.
+
+### Fixed
+
+- Keep diagnostics scoped to the current page navigation and serialize Memory Saver sweeps and setting changes so delayed work cannot restore stale reports, shell state, or tab sleep eligibility.
+- Serialize supporter-license operations and preserve newer license metadata when activation, refresh, deactivation, or startup responses overlap.
+- Preserve live browser, Settings, updater, license, and MCP status events during startup; reject delayed initialization and pause responses, block duplicate MCP pause actions, and keep repeated copy feedback accurate.
+- Keep Home history counts current and clarify the MCP workspace lifecycle so agents can deliberately start clean, fork Default once, or merge selected site state back without mistaking those copies for synchronization.
+
 ## [1.7.1] - 2026-08-22
 
 ### Changed
