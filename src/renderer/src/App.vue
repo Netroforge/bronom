@@ -64,7 +64,6 @@ import IconRecord from '~icons/material-symbols/fiber-manual-record-rounded'
 import IconRoute from '~icons/material-symbols/route-rounded'
 import IconSearch from '~icons/material-symbols/search-rounded'
 import IconScreenshotRegion from '~icons/material-symbols/screenshot-region-rounded'
-import IconScreenRotation from '~icons/material-symbols/screen-rotation-alt-rounded'
 import IconSettings from '~icons/material-symbols/settings-rounded'
 import IconSpeed from '~icons/material-symbols/speed-rounded'
 import IconStar from '~icons/material-symbols/star-rounded'
@@ -89,9 +88,6 @@ import {
   BrowserEnvironmentSettings,
   BrowserState,
   BrowserEmulationState,
-  BrowserViewportEmulation,
-  BrowserViewportOrientation,
-  BrowserViewportPresetId,
   BrowserTabState,
   BrowserTabGroupColor,
   BrowserFindResult,
@@ -130,6 +126,7 @@ import DownloadsPanel from './components/DownloadsPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
 import NetworkPanel from './components/NetworkPanel.vue'
 import PanelDockPicker from './components/PanelDockPicker.vue'
+import ResponsivePreviewPanel from './components/ResponsivePreviewPanel.vue'
 import SiteStoragePanel from './components/SiteStoragePanel.vue'
 import TabSearchPanel from './components/TabSearchPanel.vue'
 import WorkspaceEditor from './components/WorkspaceEditor.vue'
@@ -161,11 +158,6 @@ import { DEFAULT_MCP_PORT, MAX_MCP_PORT, MIN_MCP_PORT, isValidMcpPort } from '..
 import { SEARCH_ENGINE_OPTIONS } from '../../shared/search-engine'
 import { DEFAULT_INTERFACE_SCALE } from '../../shared/interface-scale'
 import type { BrowserSplitOrientation } from '../../shared/split-view'
-import {
-  BROWSER_VIEWPORT_PRESETS,
-  matchingViewportPreset,
-  resolveViewportPreset
-} from '../../shared/viewport-presets'
 import {
   browserEnvironmentFromEmulation,
   browserEnvironmentOverrideCount,
@@ -288,15 +280,7 @@ const siteStorageOpen = ref(false)
 const siteStoragePanel = ref<InstanceType<typeof SiteStoragePanel> | null>(null)
 const pageToolsOpen = ref(false)
 const responsivePanelOpen = ref(false)
-const responsivePresetId = ref<BrowserViewportPresetId | 'custom'>('phone')
-const responsiveOrientation = ref<BrowserViewportOrientation>('portrait')
-const responsiveWidth = ref(390)
-const responsiveHeight = ref(844)
-const responsiveDeviceScaleFactor = ref(3)
-const responsiveMobile = ref(true)
-const responsiveTouch = ref(true)
-const responsiveState = ref<'idle' | 'applying' | 'applied' | 'error'>('idle')
-const responsiveError = ref('')
+const responsivePanel = ref<InstanceType<typeof ResponsivePreviewPanel> | null>(null)
 const environmentPanelOpen = ref(false)
 const environmentDraft = ref<BrowserEnvironmentSettings>(browserEnvironmentFromEmulation())
 const environmentLocationEnabled = ref(false)
@@ -606,36 +590,9 @@ const activePanelId = computed<DetachablePanelId | null>(() => {
   return null
 })
 const activeEmulation = computed(() => activeTab.value?.emulation)
-const responsiveViewport = computed<BrowserViewportEmulation | null>(() => {
-  if (responsivePresetId.value !== 'custom') {
-    return resolveViewportPreset(responsivePresetId.value, responsiveOrientation.value)
-  }
-  if (!Number.isInteger(responsiveWidth.value)
-    || responsiveWidth.value < 200
-    || responsiveWidth.value > 3840
-    || !Number.isInteger(responsiveHeight.value)
-    || responsiveHeight.value < 200
-    || responsiveHeight.value > 3840
-    || !Number.isFinite(responsiveDeviceScaleFactor.value)
-    || responsiveDeviceScaleFactor.value < 0.5
-    || responsiveDeviceScaleFactor.value > 5) return null
-  return {
-    width: responsiveWidth.value,
-    height: responsiveHeight.value,
-    deviceScaleFactor: responsiveDeviceScaleFactor.value,
-    mobile: responsiveMobile.value,
-    touch: responsiveTouch.value,
-    orientation: responsiveOrientation.value
-  }
-})
 const responsivePreviewLabel = computed(() => {
   const viewport = activeEmulation.value?.viewport
   return viewport ? t('runtime.responsive.at', { size: `${viewport.width}×${viewport.height}`, scale: localNumber(viewport.deviceScaleFactor) }) : t('runtime.responsive.preview')
-})
-const responsiveSummary = computed(() => {
-  const viewport = responsiveViewport.value
-  if (!viewport) return t('runtime.responsive.invalid')
-  return t('runtime.responsive.summary', { size: `${localNumber(viewport.width)}×${localNumber(viewport.height)}`, scale: localNumber(viewport.deviceScaleFactor), rendering: t(viewport.mobile ? 'runtime.responsive.mobile' : 'runtime.responsive.desktop'), input: t(viewport.touch ? 'runtime.responsive.touch' : 'runtime.responsive.pointer') })
 })
 const environmentSettingsDraft = computed<BrowserEnvironmentSettings | null>(() => {
   const candidate: BrowserEnvironmentSettings = {
@@ -1459,108 +1416,35 @@ async function resetActiveTabEmulation(): Promise<void> {
   if (environmentPanelOpen.value) loadEnvironmentDraft(activeTab.value?.emulation)
 }
 
+function beginEmulationMutation(): number {
+  return ++emulationMutationSequence
+}
+
+function isEmulationMutationCurrent(sequence: number, tabId: string): boolean {
+  return sequence === emulationMutationSequence && activeTab.value?.id === tabId
+}
+
+function commitBrowserState(nextState: BrowserState): void {
+  state.value = nextState
+}
+
+function setResponsiveTabViewport(
+  tabId: string,
+  viewport: NonNullable<BrowserEmulationState['viewport']> | null
+): Promise<BrowserState> {
+  return browser.setTabViewport(tabId, viewport)
+}
+
 function loadResponsiveDraft(viewport = activeEmulation.value?.viewport): void {
-  responsiveState.value = 'idle'
-  responsiveError.value = ''
-  if (!viewport) {
-    responsivePresetId.value = 'phone'
-    responsiveOrientation.value = 'portrait'
-    const fallback = resolveViewportPreset('phone')
-    responsiveWidth.value = fallback.width
-    responsiveHeight.value = fallback.height
-    responsiveDeviceScaleFactor.value = fallback.deviceScaleFactor
-    responsiveMobile.value = fallback.mobile
-    responsiveTouch.value = fallback.touch
-    return
-  }
-  const preset = matchingViewportPreset(viewport)
-  responsivePresetId.value = preset?.id ?? 'custom'
-  responsiveOrientation.value = viewport.orientation
-  responsiveWidth.value = viewport.width
-  responsiveHeight.value = viewport.height
-  responsiveDeviceScaleFactor.value = viewport.deviceScaleFactor
-  responsiveMobile.value = viewport.mobile
-  responsiveTouch.value = viewport.touch
+  responsivePanel.value?.loadDraft(viewport)
 }
 
-function selectResponsivePreset(presetId: BrowserViewportPresetId | 'custom'): void {
-  responsivePresetId.value = presetId
-  responsiveState.value = 'idle'
-  responsiveError.value = ''
-  if (presetId === 'custom') return
-  const viewport = resolveViewportPreset(presetId, responsiveOrientation.value)
-  responsiveWidth.value = viewport.width
-  responsiveHeight.value = viewport.height
-  responsiveDeviceScaleFactor.value = viewport.deviceScaleFactor
-  responsiveMobile.value = viewport.mobile
-  responsiveTouch.value = viewport.touch
-}
-
-function setResponsiveOrientation(orientation: BrowserViewportOrientation): void {
-  if (responsiveOrientation.value === orientation) return
-  if (responsivePresetId.value === 'custom') {
-    const width = responsiveWidth.value
-    responsiveWidth.value = responsiveHeight.value
-    responsiveHeight.value = width
-  } else {
-    const viewport = resolveViewportPreset(responsivePresetId.value, orientation)
-    responsiveWidth.value = viewport.width
-    responsiveHeight.value = viewport.height
-  }
-  responsiveOrientation.value = orientation
-  responsiveState.value = 'idle'
-  responsiveError.value = ''
-}
-
-function toggleResponsiveOrientation(): void {
-  setResponsiveOrientation(responsiveOrientation.value === 'portrait' ? 'landscape' : 'portrait')
+function resetResponsiveFeedback(): void {
+  responsivePanel.value?.resetFeedback()
 }
 
 function toggleResponsivePreview(): void {
-  if (responsivePanelOpen.value) {
-    responsivePanelOpen.value = false
-    return
-  }
-  closeTransientPanels()
-  loadResponsiveDraft()
-  responsivePanelOpen.value = true
-}
-
-async function applyResponsivePreview(): Promise<void> {
-  const tab = activeTab.value
-  const viewport = responsiveViewport.value
-  if (!tab || !viewport) return
-  const requestSequence = ++emulationMutationSequence
-  responsiveState.value = 'applying'
-  responsiveError.value = ''
-  try {
-    const nextState = await browser.setTabViewport(tab.id, viewport)
-    if (requestSequence !== emulationMutationSequence || activeTab.value?.id !== tab.id) return
-    state.value = nextState
-    responsiveState.value = 'applied'
-  } catch (error) {
-    if (requestSequence !== emulationMutationSequence || activeTab.value?.id !== tab.id) return
-    responsiveState.value = 'error'
-    responsiveError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function resetResponsivePreview(): Promise<void> {
-  const tab = activeTab.value
-  if (!tab) return
-  const requestSequence = ++emulationMutationSequence
-  responsiveState.value = 'applying'
-  responsiveError.value = ''
-  try {
-    const nextState = await browser.setTabViewport(tab.id, null)
-    if (requestSequence !== emulationMutationSequence || activeTab.value?.id !== tab.id) return
-    state.value = nextState
-    loadResponsiveDraft(undefined)
-  } catch (error) {
-    if (requestSequence !== emulationMutationSequence || activeTab.value?.id !== tab.id) return
-    responsiveState.value = 'error'
-    responsiveError.value = error instanceof Error ? error.message : String(error)
-  }
+  responsivePanel.value?.toggle()
 }
 
 function loadEnvironmentDraft(emulation = activeEmulation.value): void {
@@ -1827,10 +1711,7 @@ watch(
     }
     resetSiteStorageView(true)
     if (responsivePanelOpen.value && keepPanelOpen) loadResponsiveDraft(activeEmulation.value?.viewport)
-    else {
-      responsiveState.value = 'idle'
-      responsiveError.value = ''
-    }
+    else resetResponsiveFeedback()
     if (environmentPanelOpen.value && keepPanelOpen) loadEnvironmentDraft(activeEmulation.value)
     else {
       environmentState.value = 'idle'
@@ -1921,10 +1802,7 @@ watch(
     if (responsivePanelOpen.value) {
       if (!keepPanelOpen) responsivePanelOpen.value = false
       else loadResponsiveDraft(tab?.emulation?.viewport)
-    } else {
-      responsiveState.value = 'idle'
-      responsiveError.value = ''
-    }
+    } else resetResponsiveFeedback()
     if (environmentPanelOpen.value) {
       if (!keepPanelOpen) environmentPanelOpen.value = false
       else loadEnvironmentDraft(tab?.emulation)
@@ -3290,7 +3168,7 @@ function handleKeyDown(event: KeyboardEvent): void {
   else if (visualComparePanelOpen.value) visualComparePanelOpen.value = false
   else if (inspectorIssuesOpen.value) inspectorIssuesOpen.value = false
   else if (networkMonitorOpen.value) networkMonitorOpen.value = false
-  else if (responsivePanelOpen.value) responsivePanelOpen.value = false
+  else if (responsivePanelOpen.value) responsivePanel.value?.handleEscape()
   else if (environmentPanelOpen.value) environmentPanelOpen.value = false
   else if (areaCaptureState.value === 'picking') void toggleAreaCapture()
   else if (elementPickerState.value === 'picking') void cancelActiveElementPicker()
@@ -4502,90 +4380,18 @@ onBeforeUnmount(() => {
         {{ activeTab.pageProblem.kind === 'unresponsive' ? t('pageProblem.reload') : t('pageProblem.tryAgain') }}
       </button>
     </div>
-    <section
-      v-if="responsivePanelOpen"
-      class="accessibility-panel responsive-preview-panel"
-      data-shell-docked-panel
-      role="dialog"
-      aria-modal="false"
-      aria-labelledby="responsive-preview-title"
-      :aria-busy="responsiveState === 'applying'"
-    >
-      <header>
-        <div>
-          <span class="eyebrow">{{ t('responsive.kicker') }}</span>
-          <h2 id="responsive-preview-title">{{ t('responsive.heading') }}</h2>
-        </div>
-        <div class="panel-header-actions">
-          <PanelDockPicker v-model="panelDock" :label="t('panelDocks.responsive')" />
-          <button class="panel-close" type="button" :aria-label="t('responsive.close')" @click="responsivePanelOpen = false"><IconClose aria-hidden="true" /></button>
-        </div>
-      </header>
-      <form class="responsive-preview-content" @submit.prevent="applyResponsivePreview">
-        <section aria-labelledby="responsive-presets-title">
-          <div class="responsive-section-heading">
-            <div><h3 id="responsive-presets-title">{{ t('responsive.preset') }}</h3><p>{{ t('responsive.presetHelp') }}</p></div>
-            <button type="button" :title="t('responsive.rotateTitle')" :aria-label="t('responsive.rotateAria')" @click="toggleResponsiveOrientation"><IconScreenRotation aria-hidden="true" /> {{ t('responsive.rotate') }}</button>
-          </div>
-          <div class="responsive-preset-grid" role="group" :aria-label="t('responsive.presetAria')">
-            <button
-              v-for="preset in BROWSER_VIEWPORT_PRESETS"
-              :key="preset.id"
-              type="button"
-              :class="{ selected: responsivePresetId === preset.id }"
-              :aria-pressed="responsivePresetId === preset.id"
-              @click="selectResponsivePreset(preset.id)"
-            >
-              <strong>{{ preset.label }}</strong>
-              <span>{{ preset.width }}×{{ preset.height }} · {{ preset.deviceScaleFactor }}×</span>
-              <small>{{ preset.description }}</small>
-            </button>
-            <button
-              type="button"
-              :class="{ selected: responsivePresetId === 'custom' }"
-              :aria-pressed="responsivePresetId === 'custom'"
-              @click="selectResponsivePreset('custom')"
-            >
-              <strong>{{ t('responsive.custom') }}</strong>
-              <span>{{ t('responsive.range') }}</span>
-              <small>{{ t('responsive.customDescription') }}</small>
-            </button>
-          </div>
-        </section>
-        <section class="responsive-orientation" aria-labelledby="responsive-orientation-title">
-          <div><h3 id="responsive-orientation-title">{{ t('responsive.orientation') }}</h3><p>{{ t('responsive.orientationHelp') }}</p></div>
-          <div role="group" :aria-label="t('responsive.orientationAria')">
-            <button type="button" :class="{ selected: responsiveOrientation === 'portrait' }" :aria-pressed="responsiveOrientation === 'portrait'" @click="setResponsiveOrientation('portrait')">{{ t('responsive.portrait') }}</button>
-            <button type="button" :class="{ selected: responsiveOrientation === 'landscape' }" :aria-pressed="responsiveOrientation === 'landscape'" @click="setResponsiveOrientation('landscape')">{{ t('responsive.landscape') }}</button>
-          </div>
-        </section>
-        <section v-if="responsivePresetId === 'custom'" class="responsive-custom" aria-labelledby="responsive-custom-title">
-          <div><h3 id="responsive-custom-title">{{ t('responsive.customConditions') }}</h3><p>{{ t('responsive.cssPixels') }}</p></div>
-          <div class="responsive-fields">
-            <label>{{ t('responsive.width') }}<input v-model.number="responsiveWidth" type="number" min="200" max="3840" step="1" required @input="responsiveState = 'idle'" /></label>
-            <label>{{ t('responsive.height') }}<input v-model.number="responsiveHeight" type="number" min="200" max="3840" step="1" required @input="responsiveState = 'idle'" /></label>
-            <label>{{ t('responsive.dpr') }}<input v-model.number="responsiveDeviceScaleFactor" type="number" min="0.5" max="5" step="0.5" required @input="responsiveState = 'idle'" /></label>
-          </div>
-          <div class="responsive-toggles">
-            <label><input v-model="responsiveMobile" type="checkbox" @change="responsiveState = 'idle'" /> {{ t('responsive.mobile') }}</label>
-            <label><input v-model="responsiveTouch" type="checkbox" @change="responsiveState = 'idle'" /> {{ t('responsive.touch') }}</label>
-          </div>
-        </section>
-        <output class="responsive-preview-summary" :class="{ error: responsiveState === 'error' || !responsiveViewport }" aria-live="polite">
-          <IconDevices aria-hidden="true" />
-          <span><strong>{{ responsiveState === 'applied' ? t('responsive.applied') : responsiveState === 'applying' ? t('responsive.applyingViewport') : t('responsive.previewConditions') }}</strong><small>{{ responsiveError || responsiveSummary }}</small></span>
-        </output>
-        <p class="responsive-preview-caveat"><IconInfo aria-hidden="true" /> {{ t('responsive.limitation') }}</p>
-        <footer>
-          <button type="button" :disabled="!activeEmulation?.viewport || responsiveState === 'applying'" @click="resetResponsivePreview">{{ t('responsive.reset') }}</button>
-          <button class="primary" type="submit" :disabled="!responsiveViewport || responsiveState === 'applying'">
-            <IconProgress v-if="responsiveState === 'applying'" class="state-spinner" aria-hidden="true" />
-            <IconDevices v-else aria-hidden="true" />
-            {{ responsiveState === 'applying' ? t('responsive.applying') : t('responsive.apply') }}
-          </button>
-        </footer>
-      </form>
-    </section>
+    <ResponsivePreviewPanel
+      ref="responsivePanel"
+      v-model:open="responsivePanelOpen"
+      v-model:dock="panelDock"
+      :active-tab="activeTab"
+      :locale="resolvedLocale"
+      :set-tab-viewport="setResponsiveTabViewport"
+      :commit-state="commitBrowserState"
+      :begin-mutation="beginEmulationMutation"
+      :is-mutation-current="isEmulationMutationCurrent"
+      :close-transient-panels="closeTransientPanels"
+    />
     <section
       v-if="environmentPanelOpen"
       class="accessibility-panel environment-panel"
