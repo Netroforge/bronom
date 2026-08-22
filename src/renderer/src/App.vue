@@ -65,7 +65,6 @@ import {
   DETACHABLE_PANEL_IDS,
   PANEL_DOCKS,
   AppSettings,
-  AppUpdateState,
   BrowserState,
   BrowserEmulationState,
   BrowserTabState,
@@ -113,6 +112,7 @@ import SiteControlsPanel from './components/SiteControlsPanel.vue'
 import SitePermissionsSettingsPanel from './components/SitePermissionsSettingsPanel.vue'
 import SiteStoragePanel from './components/SiteStoragePanel.vue'
 import TabSearchPanel from './components/TabSearchPanel.vue'
+import UpdateSettingsPanel from './components/UpdateSettingsPanel.vue'
 import WorkspaceEditor from './components/WorkspaceEditor.vue'
 import { useBrowserStore } from './stores/browser'
 import { useSettingsStore } from './stores/settings'
@@ -127,6 +127,7 @@ import { usePerformanceSettingsController } from './composables/usePerformanceSe
 import { usePrivacySettingsController } from './composables/usePrivacySettingsController'
 import { useSiteDataSummaryController } from './composables/useSiteDataSummaryController'
 import { useSitePermissionsController } from './composables/useSitePermissionsController'
+import { useUpdateSettingsController } from './composables/useUpdateSettingsController'
 import {
   shellHeightForBrowserContent,
   shouldShowUpdateStatusPill,
@@ -271,7 +272,6 @@ const commercialLicense = ref<CommercialLicenseState>({
 const commercialLicenseKey = ref('')
 const commercialLicenseAction = ref<'idle' | 'activating' | 'refreshing' | 'deactivating'>('idle')
 const commercialLicenseError = ref('')
-const updateState = ref<AppUpdateState>({ status: 'idle', currentVersion: '' })
 const mcpControl = ref<McpControlState>({ status: 'starting', paused: false })
 const address = ref('')
 const addressInput = ref<HTMLInputElement | null>(null)
@@ -361,6 +361,39 @@ const fullModalOpen = computed(() => settingsOpen.value
   || credentialPickerOpen.value)
 const updateNoticeOpen = ref(false)
 const mcpCopied = ref(false)
+const updateSettingsController = useUpdateSettingsController({
+  api: window.bronomUpdates,
+  settings,
+  setCheckOnStartup: (enabled) => settingsStore.setCheckForUpdatesOnStartup(enabled),
+  onCheckStarted: () => (updateNoticeOpen.value = true),
+  onStateAccepted: (next) => {
+    if (
+      next.status === 'available'
+      || next.status === 'downloading'
+      || next.status === 'downloaded'
+      || next.status === 'up-to-date'
+      || next.status === 'error'
+      || next.status === 'install-error'
+    ) updateNoticeOpen.value = true
+  },
+  onSettingError: (error) => showAppToast(
+    'error',
+    t('runtime.toast.settingNotSaved'),
+    friendlyUiError(error, t('runtime.toast.settingKept'))
+  ),
+  onActionError: (error) => showAppToast(
+    'error',
+    t('runtime.toast.actionFailed'),
+    friendlyUiError(error, t('runtime.toast.actionFailed'))
+  )
+})
+const {
+  state: updateState,
+  busy: updateSettingsBusy,
+  initialize: initializeUpdateSettings,
+  reset: resetUpdateSettings,
+  dispose: disposeUpdateSettingsController
+} = updateSettingsController
 const defaultDownloadDirectory = ref('')
 const downloadSettingsController = useDownloadSettingsController({
   api: window.bronomSettings,
@@ -422,6 +455,7 @@ const settingsResetDisabled = computed(() => (
   || (settingsSection.value === 'privacy' && privacySettingsController.clearing.value)
   || (settingsSection.value === 'permissions' && sitePermissionsBusy.value)
   || (settingsSection.value === 'mcp' && mcpSettingsBusy.value)
+  || (settingsSection.value === 'updates' && updateSettingsBusy.value)
 ))
 type ElementPickerMode = 'context' | 'screenshot'
 type ScreenshotCaptureMode = 'area' | 'viewport' | 'full-page'
@@ -578,7 +612,6 @@ let unsubscribeShortcutRequested: (() => void) | undefined
 let unsubscribePermissions: (() => void) | undefined
 let unsubscribeCredentials: (() => void) | undefined
 let unsubscribeLicense: (() => void) | undefined
-let unsubscribeUpdates: (() => void) | undefined
 let unsubscribePanelRequested: (() => void) | undefined
 let unsubscribePanelActive: (() => void) | undefined
 let unsubscribePanelRedock: (() => void) | undefined
@@ -2384,13 +2417,6 @@ function testAttentionSound(): void {
   playFoley(settings.value.attentionSoundCue, { volume: 0.65 })
 }
 
-async function setCheckForUpdatesOnStartup(event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement
-  if (!(await applySettingsChange(window.bronomSettings.setCheckForUpdatesOnStartup(input.checked)))) {
-    input.checked = settings.value.checkForUpdatesOnStartup
-  }
-}
-
 async function setSitePermission(entry: SitePermissionEntry, decision: SitePermissionDecision): Promise<boolean> {
   return setSitePermissionDecision(entry, decision)
 }
@@ -2429,13 +2455,6 @@ async function fillSelectedCredential(credential: CredentialSummary): Promise<vo
   }
 }
 
-function handleUpdateState(next: AppUpdateState): void {
-  updateState.value = next
-  if (next.status === 'available' || next.status === 'downloading' || next.status === 'downloaded' || next.status === 'up-to-date' || next.status === 'error' || next.status === 'install-error') {
-    updateNoticeOpen.value = true
-  }
-}
-
 function handleMcpTabActivity(activity: McpTabActivity): void {
   const requests = activeMcpRequestsByTab.get(activity.tabId) ?? new Map<string, McpTabActivity>()
   if (activity.phase === 'started') requests.set(activity.activityId, activity)
@@ -2464,19 +2483,6 @@ function handleMcpTabActivity(activity: McpTabActivity): void {
     mcpActivityTimers.delete(activity.tabId)
   }, MCP_TAB_ACTIVITY_LINGER_MS)
   mcpActivityTimers.set(activity.tabId, timer)
-}
-
-async function checkForUpdatesInSettings(): Promise<void> {
-  updateNoticeOpen.value = true
-  handleUpdateState(await window.bronomUpdates.check())
-}
-
-async function downloadUpdate(): Promise<void> {
-  handleUpdateState(await window.bronomUpdates.download())
-}
-
-async function installUpdate(): Promise<void> {
-  await window.bronomUpdates.install()
 }
 
 function openUpdateSettings(): void {
@@ -2727,7 +2733,7 @@ async function resetCurrentSection(): Promise<void> {
     await resetMcpSettings()
     return
   }
-  await applySettingsChange(window.bronomSettings.setCheckForUpdatesOnStartup(true))
+  if (settingsSection.value === 'updates') await resetUpdateSettings()
 }
 
 function guardShellInteraction(event: Event): void {
@@ -2937,7 +2943,10 @@ useShellWindowLifecycle({
 
 onMounted(async () => {
   bindFoley()
-  await browserStore.initialize()
+  await Promise.all([
+    browserStore.initialize(),
+    initializeUpdateSettings()
+  ])
   unsubscribeMcpActivity = browser.onMcpTabActivity(handleMcpTabActivity)
   unsubscribeDownloads = window.bronomDownloads.onChanged(applyDownloads)
   unsubscribeBookmarks = window.bronomBookmarks.onChanged((next) => (bookmarks.value = next))
@@ -2963,7 +2972,6 @@ onMounted(async () => {
   unsubscribePermissions = window.bronomPermissions.onChanged(replaceSitePermissions)
   unsubscribeCredentials = window.bronomCredentials.onChanged(replaceCredentials)
   unsubscribeLicense = window.bronomLicense.onChanged((next) => (commercialLicense.value = next))
-  unsubscribeUpdates = window.bronomUpdates.onChanged(handleUpdateState)
   unsubscribeUpdateOpen = window.bronomUpdates.onOpenRequested(() => {
     openUpdateSettings()
   })
@@ -2996,10 +3004,9 @@ onMounted(async () => {
   unsubscribePanelClosed = window.bronomPanelWindow.onClosed(() => {
     if (!isDetachedPanelWindow) closeDockedPanels()
   })
-  const [systemDownloadDirectory, , appUpdateState, mcpControlState, , savedDownloads, savedBookmarks, savedVisitHistory, savedCommercialLicense] = await Promise.all([
+  const [systemDownloadDirectory, , mcpControlState, , savedDownloads, savedBookmarks, savedVisitHistory, savedCommercialLicense] = await Promise.all([
     window.bronomSettings.getDefaultDownloadDirectory(),
     initializeSitePermissions(window.bronomPermissions.list()),
-    window.bronomUpdates.getState(),
     window.bronomMcp.getState(),
     initializeCredentials(window.bronomCredentials.status(), window.bronomCredentials.list()),
     window.bronomDownloads.list(),
@@ -3008,7 +3015,6 @@ onMounted(async () => {
     window.bronomLicense.getState()
   ])
   defaultDownloadDirectory.value = systemDownloadDirectory
-  updateState.value = appUpdateState
   mcpControl.value = mcpControlState
   commercialLicense.value = savedCommercialLicense
   downloads.value = savedDownloads
@@ -3032,7 +3038,6 @@ onBeforeUnmount(() => {
   unsubscribePermissions?.()
   unsubscribeCredentials?.()
   unsubscribeLicense?.()
-  unsubscribeUpdates?.()
   unsubscribeUpdateOpen?.()
   unsubscribeHelp?.()
   unsubscribeClipboardFailed?.()
@@ -3052,6 +3057,7 @@ onBeforeUnmount(() => {
   disposeDownloadSettingsController()
   disposePerformanceSettingsController()
   disposeMcpSettingsController()
+  disposeUpdateSettingsController()
   disposePrivacySettingsController()
   disposeSitePermissionsController()
   disposeCredentialsController()
@@ -4049,47 +4055,10 @@ onBeforeUnmount(() => {
             v-else-if="settingsSection === 'credentials'"
             :controller="credentialsController"
           />
-          <main v-else-if="settingsSection === 'updates'" class="settings-content updates-settings">
-            <div class="setting-copy">
-              <h3>{{ t('settings.updates.heading') }}</h3>
-              <p>{{ t('settings.updates.description') }}</p>
-            </div>
-            <UpdateNotification
-              v-if="updateState.status !== 'idle'"
-              mode="panel"
-              :state="updateState"
-              @check="checkForUpdatesInSettings"
-              @download="downloadUpdate"
-              @install="installUpdate"
-            />
-            <div class="settings-rows">
-              <label class="settings-row" for="setting-startup-update">
-                <span>
-                  <strong>{{ t('settings.updates.startup') }}</strong>
-                  <small>{{ t('settings.updates.startupDescription') }}</small>
-                </span>
-                <input
-                  id="setting-startup-update"
-                  type="checkbox"
-                  :checked="settings.checkForUpdatesOnStartup"
-                  @change="setCheckForUpdatesOnStartup"
-                />
-              </label>
-              <div class="settings-row version-row">
-                <span>
-                  <strong>{{ t('settings.updates.current') }}</strong>
-                  <small>{{ updateState.currentVersion || t('help.developmentBuild') }}</small>
-                </span>
-                <button class="secondary-button check-update-button" type="button" @click="checkForUpdatesInSettings">
-                  {{ t('settings.updates.check') }}
-                </button>
-              </div>
-            </div>
-            <div class="settings-info">
-              <span class="info-dot" aria-hidden="true"><IconInfo /></span>
-              <p>{{ t('settings.updates.help') }}</p>
-            </div>
-          </main>
+          <UpdateSettingsPanel
+            v-else-if="settingsSection === 'updates'"
+            :controller="updateSettingsController"
+          />
           <main v-else class="settings-content support-settings">
             <div class="setting-copy">
               <span class="support-kicker">{{ t('settings.support.kicker') }}</span>

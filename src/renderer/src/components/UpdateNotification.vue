@@ -10,8 +10,9 @@ import IconRefresh from '~icons/material-symbols/refresh-rounded'
 import type { AppUpdateState } from '../../../shared/types'
 import { formatReleaseNotes } from '../release-notes'
 
-const props = withDefaults(defineProps<{ state: AppUpdateState; mode?: 'pill' | 'panel' }>(), {
-  mode: 'pill'
+const props = withDefaults(defineProps<{ state: AppUpdateState; mode?: 'pill' | 'panel'; disabled?: boolean }>(), {
+  mode: 'pill',
+  disabled: false
 })
 const emit = defineEmits<{
   open: []
@@ -119,17 +120,18 @@ const pillLabel = computed(() => {
         v-if="state.status === 'up-to-date' || state.status === 'disabled' || state.status === 'error'"
         class="secondary-button"
         type="button"
+        :disabled="disabled"
         @click="emit('check')"
       >
         {{ state.status === 'error' ? t('common.tryAgain') : t('common.checkAgain') }}
       </button>
-      <button v-if="state.status === 'available'" class="primary-button" type="button" @click="emit('download')">
+      <button v-if="state.status === 'available'" class="primary-button" type="button" :disabled="disabled" @click="emit('download')">
         {{ t('updates.download') }}
       </button>
-      <button v-if="state.status === 'downloaded'" class="primary-button" type="button" @click="emit('install')">
+      <button v-if="state.status === 'downloaded'" class="primary-button" type="button" :disabled="disabled" @click="emit('install')">
         {{ t('updates.install') }}
       </button>
-      <button v-if="state.status === 'install-error'" class="primary-button" type="button" @click="emit('install')">
+      <button v-if="state.status === 'install-error'" class="primary-button" type="button" :disabled="disabled" @click="emit('install')">
         {{ t('updates.retryInstall') }}
       </button>
     </div>
